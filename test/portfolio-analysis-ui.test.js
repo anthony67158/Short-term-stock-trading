@@ -19,7 +19,8 @@ test('持仓热力图下方接入仓位与仓位类别AI诊断', () => {
   assert.match(account, /import PortfolioAnalysis from '\.\/PortfolioAnalysis'/)
   assert.match(account, /<PortfolioAnalysis/)
   assert.match(component, /仓位诊断/)
-  assert.match(component, /深度分析/)
+  assert.doesNotMatch(component, /深度分析/)
+  assert.match(component, /组合白话解读/)
   assert.match(component, /\/api\/portfolio_analysis/)
 })
 
@@ -74,8 +75,8 @@ test('持仓模型失败或自动切换时展示真实恢复状态', () => {
   assert.match(styles, /\.portfolio-analysis-warning\.recovered\s*{/)
 })
 
-test('LLM配置页为持仓分析提供独立角色端点并保存', () => {
-  assert.match(config, /portfolio:\s*\{[^}]*label:\s*'持仓分布分析'/)
+test('LLM配置页由解释角色承载持仓说明并保存', () => {
+  assert.match(config, /explain:\s*\{[^}]*label:\s*'V3决策与组合解释'/)
   assert.match(config, /roleEndpoints:\s*payload/)
   assert.match(apiConfig, /roleEndpoints:\s*body/)
   assert.doesNotMatch(config, /主端点最大在途/)

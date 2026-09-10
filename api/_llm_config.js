@@ -3,7 +3,7 @@
 // 改完即时对全系统生效，无需重新部署。
 //
 // 存储：OSS 对象 config/llm.json（复用 _blob.js，与账号数据同桶）。
-//   { roleEndpoints:{advisor,review,portfolio,agent,daily,sector,judge}, updatedAt }
+//   { roleEndpoints:{explain,assistant,daily,sector}, updatedAt }
 // 读取优先级：OSS 配置 > 环境变量 > 内置默认。
 //
 // 关键约束：
@@ -17,28 +17,60 @@ import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 const KEY_PATH = 'config/llm.json';
 const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
-// 所有生成式 AI 能力均有独立角色；advisor 固定两个槽位，review 固定四个槽位，
-// 其余角色各一个。review 的额外容量用于盘中到价复核，不能借用 advisor。
-// 环境变量与旧版主端点/资源池仅用于首次迁移，保存后运行时严格按角色隔离。
+// V3负责交易决策，LLM只保留解释、助手、日报和板块研究四个物理角色。
+// 旧角色只用于读取迁移，保存后不再作为配置入口。
 export const ROLES = {
-  advisor: { envs: ['ADVISOR_MODEL'], def: 'DeepSeek-V4-Pro',   label: '军师AI操作建议生成' },
-  review: { envs: ['REVIEW_MODEL'], def: 'DeepSeek-V4-Pro', label: '复核角色' },
-  portfolio: { envs: ['PORTFOLIO_MODEL'], def: 'DeepSeek-V4-Pro', label: '持仓分布分析' },
-  agent:   { envs: ['AGENT_MODEL'],   def: 'Qwen3-Max-A',       label: '智能体助手(需函数调用)' },
+  explain: {
+    envs: [
+      'EXPLAIN_MODEL',
+      'ADVISOR_MODEL',
+      'PORTFOLIO_MODEL',
+      'REVIEW_MODEL',
+    ],
+    def: 'DeepSeek-V4-Pro',
+    label: 'V3决策与组合解释',
+  },
+  assistant: {
+    envs: ['ASSISTANT_MODEL', 'AGENT_MODEL'],
+    def: 'Qwen3-Max-A',
+    label: '智能体助手(需函数调用)',
+  },
   daily:   { envs: ['DAILY_MODEL', 'AGENT_MODEL'], def: 'Qwen3-Max-A', label: '策略日报' },
   sector:  { envs: ['SECTOR_MODEL'],  def: 'gpt-5.6-terra',     label: '板块前瞻' },
-  judge:   { envs: ['JUDGE_MODEL'],   def: 'gemini-2.5-flash',  label: '交易时机判定(确认闸门)' },
 };
 
 export const ROLE_ENDPOINT_SLOTS = Object.freeze({
-  advisor: 2,
-  review: 4,
-  portfolio: 1,
-  agent: 1,
+  explain: 2,
+  assistant: 1,
   daily: 1,
   sector: 1,
-  judge: 1,
 });
+
+export const LEGACY_ROLE_ALIASES = Object.freeze({
+  advisor: 'explain',
+  review: 'explain',
+  portfolio: 'explain',
+  agent: 'assistant',
+  judge: 'explain',
+})
+
+const LEGACY_ROLE_SOURCES = Object.freeze({
+  explain: ['advisor', 'portfolio', 'review', 'judge'],
+  assistant: ['agent'],
+  daily: ['daily', 'agent'],
+  sector: ['sector'],
+})
+
+export function canonicalLlmRole(role) {
+  return LEGACY_ROLE_ALIASES[role] || role
+}
+
+function legacyValue(source = {}, role) {
+  for (const key of [role, ...(LEGACY_ROLE_SOURCES[role] || [])]) {
+    if (source?.[key] != null && source[key] !== '') return source[key]
+  }
+  return undefined
+}
 
 // ---- 从环境变量拼出基线配置（OSS 无配置时的回退）----
 function envConfig() {
@@ -64,7 +96,7 @@ function envConfig() {
     config.judgeEndpoint = {
       baseUrl: String(process.env.JUDGE_BASE_URL).replace(/\/+$/, ''),
       apiKey: process.env.JUDGE_API_KEY,
-      model: process.env.JUDGE_MODEL || ROLES.judge.def,
+      model: process.env.JUDGE_MODEL || ROLES.explain.def,
       reasoning: process.env.JUDGE_REASONING === 'true',
       enabled: true,
       source: 'env',
@@ -120,10 +152,10 @@ function normalizeRoleEndpoint(
     slot: index + 1,
     baseUrl: String(raw.baseUrl || '').replace(/\/+$/, ''),
     apiKey: String(raw.apiKey || ''),
-    model: String(raw.model || raw.models?.[role] || ''),
+    model: String(raw.model || legacyValue(raw.models, role) || ''),
     reasoning: !!(
       raw.reasoning === true
-      || raw.reasoning?.[role] === true
+      || legacyValue(raw.reasoning, role) === true
     ),
     enabled: raw.enabled !== false,
     source: raw.source || source,
@@ -131,26 +163,58 @@ function normalizeRoleEndpoint(
 }
 
 function explicitRoleEndpoints(config, role) {
-  if (
-    !config?.roleEndpoints
-    || !hasOwn(config.roleEndpoints, role)
-  ) return null;
-  const raw = Array.isArray(config.roleEndpoints[role])
-    ? config.roleEndpoints[role]
-    : [config.roleEndpoints[role]];
-  return raw
-    .slice(0, ROLE_ENDPOINT_SLOTS[role] || 1)
-    .map((endpoint, index) =>
-      normalizeRoleEndpoint(endpoint, role, index)
-    )
-    .filter(Boolean);
+  if (!config?.roleEndpoints) return null;
+  const source = config.roleEndpoints;
+  const limit = ROLE_ENDPOINT_SLOTS[role] || 1;
+  if (hasOwn(source, role)) {
+    const raw = Array.isArray(source[role])
+      ? source[role]
+      : [source[role]];
+    return raw
+      .slice(0, limit)
+      .map((endpoint, index) =>
+        normalizeRoleEndpoint(endpoint, role, index)
+      )
+      .filter(Boolean);
+  }
+
+  let foundLegacyRole = false;
+  const migrated = [];
+  const fingerprints = new Set();
+  for (const legacyRole of (LEGACY_ROLE_SOURCES[role] || [])) {
+    if (!hasOwn(source, legacyRole)) continue;
+    foundLegacyRole = true;
+    const raw = Array.isArray(source[legacyRole])
+      ? source[legacyRole]
+      : [source[legacyRole]];
+    for (const endpoint of raw) {
+      const normalized = normalizeRoleEndpoint(
+        endpoint,
+        role,
+        migrated.length,
+        `legacy-${legacyRole}`,
+      );
+      if (
+        !normalized?.baseUrl
+        || !normalized.apiKey
+      ) continue;
+      const fingerprint = [
+        normalized.baseUrl,
+        normalized.apiKey,
+        normalized.model,
+      ].join('|');
+      if (fingerprints.has(fingerprint)) continue;
+      fingerprints.add(fingerprint);
+      migrated.push(normalized);
+      if (migrated.length >= limit) return migrated;
+    }
+  }
+  return foundLegacyRole ? migrated : null;
 }
 
 // 兼容旧配置：优先迁移附加端点里的 models.judge，其次迁移主端点 judge 模型。
 // 一旦显式保存 judgeEndpoint（包括 enabled:false），就绝不再回退通用池。
 export function resolveJudgeEndpoint(config = {}) {
-  const explicit = explicitRoleEndpoints(config, 'judge');
-  if (explicit) return explicit[0] || null;
   if (hasOwn(config, 'judgeEndpoint')) {
     return normalizeJudgeEndpoint(config.judgeEndpoint, config.judgeEndpoint?.source || 'dedicated');
   }
@@ -216,17 +280,10 @@ export function resolveSectorEndpoint(config = {}) {
 }
 
 export function resolveRoleEndpoints(config = {}, role) {
+  role = canonicalLlmRole(role)
   if (!ROLES[role]) return [];
   const explicit = explicitRoleEndpoints(config, role);
   if (explicit) return explicit;
-  // 复核必须物理隔离；旧配置缺少 review 时保持未配置，绝不借用 advisor/主端点。
-  if (role === 'review') return [];
-  if (role === 'judge') {
-    const endpoint = resolveJudgeEndpoint(config);
-    return endpoint
-      ? [normalizeRoleEndpoint(endpoint, role, 0, endpoint.source)]
-      : [];
-  }
   if (role === 'sector') {
     const endpoint = resolveSectorEndpoint(config);
     return endpoint
@@ -234,12 +291,9 @@ export function resolveRoleEndpoints(config = {}, role) {
       : [];
   }
 
-  const modelRole = role === 'daily' ? 'agent' : role;
-  const model = config.models?.[role]
-    || config.models?.[modelRole]
+  const model = legacyValue(config.models, role)
     || ROLES[role].def;
-  const reasoning = config.reasoning?.[role]
-    ?? config.reasoning?.[modelRole]
+  const reasoning = legacyValue(config.reasoning, role)
     ?? false;
   const candidates = [];
   if (config.baseUrl && config.apiKey) {
@@ -256,13 +310,34 @@ export function resolveRoleEndpoints(config = {}, role) {
       endpoint?.enabled === false
       || !endpoint?.baseUrl
       || !endpoint?.apiKey
-      || !endpoint?.models?.[modelRole]
+      || !legacyValue(endpoint?.models, role)
     ) continue;
     candidates.push(normalizeRoleEndpoint({
       ...endpoint,
-      model: endpoint.models[modelRole],
-      reasoning: endpoint.reasoning?.[modelRole] === true,
+      model: legacyValue(endpoint.models, role),
+      reasoning: legacyValue(endpoint.reasoning, role) === true,
     }, role, candidates.length, 'legacy-pool'));
+  }
+  if (role === 'explain') {
+    const judge = resolveJudgeEndpoint(config);
+    if (
+      judge?.enabled !== false
+      && judge?.baseUrl
+      && judge?.apiKey
+      && judge?.model
+      && !candidates.some((endpoint) =>
+        endpoint.baseUrl === judge.baseUrl
+        && endpoint.apiKey === judge.apiKey
+        && endpoint.model === judge.model
+      )
+    ) {
+      candidates.push(normalizeRoleEndpoint(
+        judge,
+        role,
+        candidates.length,
+        judge.source || 'legacy-judge',
+      ));
+    }
   }
   return candidates
     .filter(Boolean)
@@ -275,6 +350,7 @@ export function resolveRoleEndpoints(config = {}, role) {
 }
 
 export function roleEndpointSlots(config = {}, role) {
+  role = canonicalLlmRole(role)
   if (!ROLES[role]) return [];
   const resolved = resolveRoleEndpoints(config, role);
   return Array.from(
@@ -303,11 +379,13 @@ function merge(base, over) {
   if (!over) return base;
   const models = { ...base.models };
   if (over.models) for (const role of Object.keys(ROLES)) {
-    if (over.models[role]) models[role] = over.models[role];
+    const value = legacyValue(over.models, role)
+    if (value) models[role] = value;
   }
   const reasoning = { ...base.reasoning };
   if (over.reasoning) for (const role of Object.keys(ROLES)) {
-    if (over.reasoning[role] != null) reasoning[role] = !!over.reasoning[role];
+    const value = legacyValue(over.reasoning, role)
+    if (value != null) reasoning[role] = !!value;
   }
   // endpoints:多端点资源池。OSS 里存了(即使空数组)则以其为准;未存则保留 base(env 默认空)。
   const endpoints = Array.isArray(over.endpoints) ? over.endpoints : (base.endpoints || []);
@@ -328,15 +406,23 @@ function merge(base, over) {
     merged.roleEndpoints = {};
     for (const role of Object.keys(ROLES)) {
       const previous = roleEndpointSlots(base, role);
-      const incoming = Array.isArray(over.roleEndpoints?.[role])
-        ? over.roleEndpoints[role]
-        : [];
+      const migrated = explicitRoleEndpoints(over, role)
+      const incoming = migrated || [];
+      const explicitlyConfigured = migrated !== null;
       merged.roleEndpoints[role] = Array.from({
         length: ROLE_ENDPOINT_SLOTS[role],
       }, (_, index) => {
         const prior = previous[index] || {};
         const next = incoming[index];
-        if (!next || typeof next !== 'object') return prior;
+        if (!next || typeof next !== 'object') {
+          return explicitlyConfigured
+            ? normalizeRoleEndpoint({
+                model: ROLES[role].def,
+                reasoning: role === 'sector',
+                enabled: false,
+              }, role, index, 'unconfigured')
+            : prior;
+        }
         return normalizeRoleEndpoint({
           ...prior,
           ...next,
@@ -421,6 +507,7 @@ export function currentConfig() {
 
 // ---- 同步取某角色模型 ----
 export function getModel(role) {
+  role = canonicalLlmRole(role)
   const c = currentConfig();
   const dedicated = resolveRoleEndpoints(c, role)
     .find((endpoint) =>
@@ -430,12 +517,6 @@ export function getModel(role) {
       && endpoint.model
     );
   if (dedicated) return dedicated.model;
-  if (role === 'judge') {
-    const endpoint = resolveJudgeEndpoint(c);
-    return endpoint && endpoint.enabled !== false && endpoint.baseUrl && endpoint.apiKey
-      ? endpoint.model
-      : '';
-  }
   if (role === 'sector') {
     const endpoint = resolveSectorEndpoint(c);
     return endpoint && endpoint.enabled !== false && endpoint.baseUrl && endpoint.apiKey
@@ -447,6 +528,7 @@ export function getModel(role) {
 
 // ---- 同步取某角色是否开启深度思考(reasoning) ----
 export function getReasoning(role) {
+  role = canonicalLlmRole(role)
   const c = currentConfig();
   const dedicated = resolveRoleEndpoints(c, role)
     .filter((endpoint) =>
@@ -457,10 +539,6 @@ export function getReasoning(role) {
     );
   if (dedicated.length) {
     return dedicated.some((endpoint) => endpoint.reasoning);
-  }
-  if (role === 'judge') {
-    const endpoint = resolveJudgeEndpoint(c);
-    return !!(endpoint && endpoint.enabled !== false && endpoint.reasoning);
   }
   if (role === 'sector') {
     const endpoint = resolveSectorEndpoint(c);
@@ -475,14 +553,8 @@ export function getReasoning(role) {
 export async function saveConfig(patch = {}) {
   const cur = await ensureConfig({ maxAgeMs: 0 });
   const next = {
-    baseUrl: (patch.baseUrl != null && patch.baseUrl !== '') ? String(patch.baseUrl).replace(/\/+$/, '') : cur.baseUrl,
-    apiKey: (patch.apiKey != null && patch.apiKey !== '') ? String(patch.apiKey) : cur.apiKey,
     models: { ...cur.models },
     reasoning: { ...cur.reasoning },
-    endpoints: Array.isArray(cur.endpoints) ? cur.endpoints.slice() : [],
-    primaryMaxInflight: cur.primaryMaxInflight || 2,
-    judgeEndpoint: resolveJudgeEndpoint(cur),
-    sectorEndpoint: resolveSectorEndpoint(cur),
     roleEndpoints: Object.fromEntries(
       Object.keys(ROLES).map((role) => [
         role,
@@ -496,12 +568,6 @@ export async function saveConfig(patch = {}) {
   }
   if (patch.reasoning) for (const role of Object.keys(ROLES)) {
     if (patch.reasoning[role] != null) next.reasoning[role] = !!patch.reasoning[role];
-  }
-  if (patch.primaryMaxInflight != null) {
-    next.primaryMaxInflight = Math.max(
-      1,
-      Math.min(20, Number(patch.primaryMaxInflight) || 2),
-    );
   }
   if (patch.roleEndpoints && typeof patch.roleEndpoints === 'object') {
     for (const role of Object.keys(ROLES)) {
@@ -538,75 +604,12 @@ export async function saveConfig(patch = {}) {
       next.reasoning[role] = !!primary.reasoning;
     }
   }
-  if (hasOwn(patch, 'judgeEndpoint')) {
-    const previous = resolveJudgeEndpoint(cur) || {};
-    const incoming = patch.judgeEndpoint && typeof patch.judgeEndpoint === 'object' ? patch.judgeEndpoint : {};
-    const apiKey = (incoming.apiKey != null && incoming.apiKey !== '' && !/\*/.test(String(incoming.apiKey)))
-      ? String(incoming.apiKey)
-      : (previous.apiKey || '');
-    next.judgeEndpoint = normalizeJudgeEndpoint({
-      baseUrl: incoming.baseUrl ?? previous.baseUrl,
-      apiKey,
-      model: incoming.model ?? previous.model ?? ROLES.judge.def,
-      reasoning: incoming.reasoning ?? previous.reasoning,
-      enabled: incoming.enabled ?? previous.enabled ?? true,
-    }, 'dedicated');
-  }
-  if (hasOwn(patch, 'sectorEndpoint')) {
-    const previous = resolveSectorEndpoint(cur) || {};
-    const incoming = patch.sectorEndpoint && typeof patch.sectorEndpoint === 'object' ? patch.sectorEndpoint : {};
-    const apiKey = (incoming.apiKey != null && incoming.apiKey !== '' && !/\*/.test(String(incoming.apiKey)))
-      ? String(incoming.apiKey)
-      : (previous.apiKey || '');
-    next.sectorEndpoint = normalizeSectorEndpoint({
-      baseUrl: incoming.baseUrl ?? previous.baseUrl,
-      apiKey,
-      model: incoming.model ?? previous.model ?? ROLES.sector.def,
-      reasoning: incoming.reasoning ?? previous.reasoning,
-      enabled: incoming.enabled ?? previous.enabled ?? true,
-    }, 'dedicated');
-  }
-  // endpoints:整组替换(前端传全量)。每项 apiKey 留空则沿用同 id 旧 key(前端只回传掩码 → 不覆盖)。
-  //   每个端点可携带自己的 models:{chat,advisor,agent}——不同网关上同一角色可能是不同模型名。
-  //   某角色留空 → 运行时回退到全局 models[role] → 再回退到角色默认(见 _llm_pool.modelForEndpoint)。
-  if (Array.isArray(patch.endpoints)) {
-    const prevById = new Map((cur.endpoints || []).map((e) => [e.id, e]));
-    next.endpoints = patch.endpoints.map((e, i) => {
-      const id = e.id || `ep${i}`;
-      const prev = prevById.get(id) || {};
-      const apiKey = (e.apiKey != null && e.apiKey !== '' && !/\*/.test(String(e.apiKey))) ? String(e.apiKey) : (prev.apiKey || '');
-      // 端点级模型:前端传则以其为准(整项替换),未传则沿用旧值;仅保留非空角色。
-      const epModels = {};
-      const src = (e.models && typeof e.models === 'object') ? e.models : (prev.models || {});
-      for (const role of Object.keys(ROLES)) {
-        if (['judge', 'sector'].includes(role)) continue;
-        const v = src[role];
-        if (v != null && String(v).trim()) epModels[role] = String(v).trim();
-      }
-      // 端点级深度思考:前端传则以其为准(整项替换),未传沿用旧值;仅保留 true 的角色(false=默认关,省空间)。
-      const epReason = {};
-      const rsrc = (e.reasoning && typeof e.reasoning === 'object') ? e.reasoning : (prev.reasoning || {});
-      for (const role of Object.keys(ROLES)) {
-        if (['judge', 'sector'].includes(role)) continue;
-        if (rsrc[role]) epReason[role] = true;
-      }
-      return {
-        id,
-        baseUrl: String(e.baseUrl || prev.baseUrl || '').replace(/\/+$/, ''),
-        apiKey,
-        weight: Number(e.weight) > 0 ? Number(e.weight) : 1,
-        enabled: e.enabled !== false,
-        models: epModels,
-        reasoning: epReason,
-      };
-    }).filter((e) => e.baseUrl && e.apiKey);
-  }
   if (!hasStorage()) throw new Error('存储未配置(OSS)，无法保存配置');
   await assertSafeLlmConfig(next);
   // 覆盖写固定对象名（不加随机后缀，保证下次可读到同一路径）
   await put(KEY_PATH, JSON.stringify(next), { contentType: 'application/json', addRandomSuffix: false, cacheControlMaxAge: 0 });
   next.__stored = true;
-  _cache = merge(envConfig(), next);
+  _cache = merge(envConfig(), { ...next, __stored: true });
   _loadedAt = Date.now();
   return _cache;
 }
@@ -623,12 +626,8 @@ export function maskKey(k) {
 export function publicView() {
   const c = currentConfig();
   return {
-    baseUrl: c.baseUrl || '',
-    apiKeyMask: maskKey(c.apiKey),
-    hasKey: !!c.apiKey,
     models: c.models,
     reasoning: c.reasoning || {},
-    primaryMaxInflight: c.primaryMaxInflight || 2,
     roleEndpoints: Object.fromEntries(
       Object.keys(ROLES).map((role) => [
         role,
@@ -646,46 +645,6 @@ export function publicView() {
         })),
       ]),
     ),
-    judgeEndpoint: (() => {
-      const endpoint = resolveJudgeEndpoint(c);
-      if (!endpoint) return null;
-      return {
-        baseUrl: endpoint.baseUrl,
-        apiKeyMask: maskKey(endpoint.apiKey),
-        hasKey: !!endpoint.apiKey,
-        model: endpoint.model,
-        reasoning: !!endpoint.reasoning,
-        enabled: endpoint.enabled !== false,
-        source: endpoint.source,
-      };
-    })(),
-    sectorEndpoint: (() => {
-      const endpoint = resolveSectorEndpoint(c);
-      if (!endpoint) return null;
-      return {
-        baseUrl: endpoint.baseUrl,
-        apiKeyMask: maskKey(endpoint.apiKey),
-        hasKey: !!endpoint.apiKey,
-        model: endpoint.model,
-        reasoning: !!endpoint.reasoning,
-        enabled: endpoint.enabled !== false,
-        source: endpoint.source,
-      };
-    })(),
-    endpoints: (c.endpoints || []).map((e) => ({
-      id: e.id, baseUrl: e.baseUrl || '', weight: e.weight || 1,
-      enabled: e.enabled !== false, apiKeyMask: maskKey(e.apiKey), hasKey: !!e.apiKey,
-      models: e.models && typeof e.models === 'object'
-        ? Object.fromEntries(Object.entries(e.models).filter(([role]) =>
-            !['judge', 'sector'].includes(role)
-          ))
-        : {},
-      reasoning: e.reasoning && typeof e.reasoning === 'object'
-        ? Object.fromEntries(Object.entries(e.reasoning).filter(([role]) =>
-            !['judge', 'sector'].includes(role)
-          ))
-        : {},
-    })),
     source: c.source,
     updatedAt: c.updatedAt || 0,
   };

@@ -404,7 +404,7 @@ export const alertStore = {
   //   · 非智能预警(手动到价/涨跌幅/量比/涨跌停,或无 phase)→ 命中即强提示 + 停用(老逻辑)。
   //   · 智能预警(价位类 + 带 phase + settings.smartConfirm!==false):
   //       armed  命中 → 发【弱提醒】(到点位·观察确认中) → 置 watching,继续监控真正时机。
-  //       watching → 异步 POST /api/confirm_signal(LLM Judge 留后端) 判定:
+  //       watching → 异步 POST /api/confirm_signal，由服务端确定性闸门判定:
   //         confirm → 发【强提示】(✅ 可以买入/卖出) + 置 confirmed 停用;
   //         invalid → 发【失效说明】(⛔ 已失效·暂不操作) + 置 invalid 停用;
   //         wait    → 明确维持观望/持有并置 reviewed 停用，不再复核原价。
@@ -481,7 +481,7 @@ export const alertStore = {
       }
 
       if (a.phase === 'watching') {
-        // 阶段二:异步调用智能确认闸门(LLM Judge 在后端),不阻塞本轮遍历
+        // 阶段二:异步调用服务端确定性确认闸门，不阻塞本轮遍历
         this._confirmWatching(a, q)
       }
     }

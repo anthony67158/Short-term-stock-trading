@@ -2,132 +2,142 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  generateAnalysis,
+  generatePortfolioExplanation,
 } from '../api/portfolio_analysis.js'
 
 const context = {
   distribution: {
     positionPct: 28.5,
-    cashReservePct: 71.5,
-    categories: [],
-    groups: [],
-    stocks: [],
   },
   market: {
-    regime: 'balanced',
+    regimeLabel: '震荡',
     score: 50,
+    note: '市场分歧',
   },
-  activeConcepts: [],
-  quantRows: [],
-  candidateRows: [],
-  evidence: [],
+  evidence: [{
+    id: 'E1',
+    title: 'V3持仓决策',
+    summary: '当前没有新增动作',
+  }],
 }
 
-function response({
-  status = 200,
-  content = '',
-  reasoning = '',
-  finishReason = 'stop',
-} = {}) {
+const analysis = {
+  executionPlan: {
+    targetPositionPct: 28.5,
+    projectedPositionPct: 28.5,
+    projectedCashReservePct: 71.5,
+    orders: [],
+  },
+  stockActions: [{
+    code: '600000',
+    name: '浦发银行',
+    action: 'hold',
+    reason: 'V3继续持有',
+  }],
+  risks: [],
+}
+
+function response(content, status = 200) {
   return {
     ok: status >= 200 && status < 300,
     status,
     async json() {
       return {
         choices: [{
-          finish_reason: finishReason,
-          message: {
-            content,
-            reasoning_content: reasoning,
-          },
+          message: { content },
         }],
       }
     },
   }
 }
 
-function chatSequence(steps) {
+function chatResult(content, status = 200) {
   const calls = []
-  const chat = async (options) => {
-    calls.push(options)
-    const step = steps.shift()
-    return {
-      resp: step instanceof Error
-        ? { __err: step }
-        : response(step),
-      selectedModel: options.model,
-      endpoint: 'portfolio-main',
-      done() {},
-    }
+  let doneCalls = 0
+  return {
+    calls,
+    doneCalls: () => doneCalls,
+    chat: async (options) => {
+      calls.push(options)
+      return {
+        resp: response(content, status),
+        selectedModel: options.model,
+        endpoint: 'explain-1',
+        done() {
+          doneCalls++
+        },
+      }
+    },
   }
-  return { chat, calls }
 }
 
-test('持仓专用模型404时不得跨角色占用军师端点', async () => {
-  const { chat, calls } = chatSequence([
-    { status: 404 },
-  ])
-
-  const result = await generateAnalysis(context, {
-    model: 'missing-portfolio-model',
-    deepMode: false,
-    functionMessages: [],
-    chat,
-  })
-
-  assert.equal(result.raw, null)
-  assert.equal(result.failureCode, 'http_404')
-  assert.equal(calls.length, 1)
-  assert.deepEqual(calls.map((call) => call.role), ['portfolio'])
-})
-
-test('深度模型只有思考没有正文时先关闭思考重试同一模型', async () => {
-  const { chat, calls } = chatSequence([
+test('组合解释只调用一次explain且强制关闭深度思考', async () => {
+  const stub = chatResult(JSON.stringify({
+    summary: '当前维持原仓位。',
+    counterCase: '市场可能继续转弱。',
+    invalidation: 'V3决策或账户事实变化后重评。',
+    evidenceGap: '无',
+  }))
+  const result = await generatePortfolioExplanation(
+    context,
+    structuredClone(analysis),
     {
-      content: '',
-      reasoning: '这里有很长的推理但没有最终JSON',
-      finishReason: 'length',
+      model: 'explain-model',
+      decisionId: 'portfolio.test',
+      chat: stub.chat,
+      now: 1,
     },
-    { content: '{"headline":"无思考重试成功"}' },
-  ])
+  )
 
-  const result = await generateAnalysis(context, {
-    model: 'portfolio-model',
-    deepMode: true,
-    functionMessages: [],
-    chat,
-  })
-
-  assert.equal(result.raw.headline, '无思考重试成功')
-  assert.equal(result.recovered, true)
-  assert.equal(result.failureCode, 'empty_content')
-  assert.deepEqual(calls.map((call) => call.role), [
-    'portfolio',
-    'portfolio',
-  ])
-  assert.equal(calls[0].forceReason, true)
-  assert.equal(calls[0].reasoningEffort, 'medium')
-  assert.equal(calls[1].forceNoReason, true)
-  assert.equal(calls[0].timeoutMs, 75000)
-  assert.equal(calls[1].timeoutMs, 40000)
+  assert.equal(stub.calls.length, 1)
+  assert.equal(stub.calls[0].role, 'explain')
+  assert.equal(stub.calls[0].forceNoReason, true)
+  assert.equal(stub.calls[0].maxTokens, 900)
+  assert.equal(result.explanation.status, 'ready')
+  assert.equal(result.explanation.decisionId, 'portfolio.test')
+  assert.equal(stub.doneCalls(), 1)
 })
 
-test('专用模型失败时保留可定位的安全失败原因', async () => {
-  const timeout = new Error('aborted')
-  timeout.name = 'AbortError'
-  const { chat, calls } = chatSequence([
-    timeout,
-  ])
+test('组合解释越权输出动作字段时拒绝且不修改V3执行单', async () => {
+  const source = structuredClone(analysis)
+  const stub = chatResult(JSON.stringify({
+    summary: '当前维持原仓位。',
+    counterCase: '市场可能继续转弱。',
+    invalidation: 'V3决策或账户事实变化后重评。',
+    evidenceGap: '无',
+    action: 'SELL',
+  }))
+  const result = await generatePortfolioExplanation(
+    context,
+    source,
+    {
+      model: 'explain-model',
+      decisionId: 'portfolio.test',
+      chat: stub.chat,
+    },
+  )
 
-  const result = await generateAnalysis(context, {
-    model: 'portfolio-model',
-    deepMode: false,
-    functionMessages: [],
-    chat,
-  })
+  assert.equal(result.explanation, null)
+  assert.match(result.error, /越权字段/)
+  assert.deepEqual(source, analysis)
+  assert.equal(stub.calls.length, 1)
+})
 
-  assert.equal(result.raw, null)
-  assert.equal(result.failureCode, 'timeout')
-  assert.doesNotMatch(result.error, /备用模型/)
-  assert.equal(calls.length, 1)
+test('解释端点失败不影响既有V3组合结果', async () => {
+  const source = structuredClone(analysis)
+  const stub = chatResult('', 503)
+  const result = await generatePortfolioExplanation(
+    context,
+    source,
+    {
+      model: 'explain-model',
+      decisionId: 'portfolio.test',
+      chat: stub.chat,
+    },
+  )
+
+  assert.equal(result.explanation, null)
+  assert.match(result.error, /暂不可用/)
+  assert.deepEqual(source, analysis)
+  assert.equal(stub.calls.length, 1)
 })

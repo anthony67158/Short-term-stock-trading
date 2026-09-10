@@ -9,14 +9,11 @@
 
 import { applyCors, preflight } from './_lib.js';
 import {
-  ensureConfig, currentConfig, saveConfig, publicView, resolveJudgeEndpoint,
-  resolveRoleEndpoints, resolveSectorEndpoint, ROLE_ENDPOINT_SLOTS, ROLES,
+  ensureConfig, currentConfig, saveConfig, publicView,
+  resolveRoleEndpoints, ROLE_ENDPOINT_SLOTS, ROLES,
 } from './_llm_config.js';
 import {
   poolStatus,
-  endpointCountForRole,
-  judgeEndpointStatus,
-  sectorEndpointStatus,
 } from './_llm_pool.js';
 import {
   authorizePaidRequest,
@@ -25,6 +22,7 @@ import {
 import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 
 export const MODEL_TEST_TIMEOUT_MS = 120000;
+export const V3_DECISION_CONCURRENCY = 2;
 
 const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
 
@@ -69,18 +67,9 @@ export function resolveLlmConfigTarget(config = {}, body = {}) {
         || (canReuseStoredKey ? String(stored?.apiKey || '') : ''),
     };
   }
-  const endpointId = String(
-    body.endpointId
-    || (body.target === 'judge'
-      ? 'judge'
-      : body.target === 'sector' ? 'sector' : 'default'),
-  );
+  const endpointId = String(body.endpointId || 'default');
   let stored = null;
-  if (endpointId === 'judge') {
-    stored = resolveJudgeEndpoint(config);
-  } else if (endpointId === 'sector') {
-    stored = resolveSectorEndpoint(config);
-  } else if (endpointId === 'default') {
+  if (endpointId === 'default') {
     stored = {
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
@@ -189,12 +178,8 @@ export default async function handler(req, res) {
         config: publicView(),
         roles: ROLES,
         roleSlots: ROLE_ENDPOINT_SLOTS,
-        judgeRole: ROLES.judge,
-        sectorRole: ROLES.sector,
         pool: poolStatus(config),
-        judgePool: judgeEndpointStatus(config),
-        sectorPool: sectorEndpointStatus(config),
-        concurrency: endpointCountForRole(config, 'advisor'),
+        concurrency: V3_DECISION_CONCURRENCY,
       }));
     }
     if (!isRuntimeConfigAdmin(accountAuth.account)) {
@@ -206,10 +191,6 @@ export default async function handler(req, res) {
 
     // verify / test / save 都可能带明文 key；留空则用已存 key
     const cur = currentConfig();
-    const judgeTarget = body && body.target === 'judge';
-    const sectorTarget = body && body.target === 'sector';
-    const judgeEndpoint = resolveJudgeEndpoint(cur);
-    const sectorEndpoint = resolveSectorEndpoint(cur);
     const target = resolveLlmConfigTarget(cur, body || {});
     if (target.error) {
       return res.status(200).send(JSON.stringify({
@@ -230,12 +211,9 @@ export default async function handler(req, res) {
 
     if (action === 'test') {
       const safeBaseUrl = await assertSafeRemoteUrl(baseUrl);
-      const models = Array.isArray(body && body.models) ? body.models.filter(Boolean)
-        : (judgeTarget
-          ? [judgeEndpoint?.model].filter(Boolean)
-          : sectorTarget
-            ? [sectorEndpoint?.model].filter(Boolean)
-          : Object.values((body && body.modelMap) || cur.models || {}).filter(Boolean));
+      const models = Array.isArray(body && body.models)
+        ? body.models.filter(Boolean)
+        : Object.values((body && body.modelMap) || cur.models || {}).filter(Boolean);
       const uniq = [...new Set(models)];
       if (!uniq.length) return res.status(200).send(JSON.stringify({ ok: false, error: '没有要测试的模型' }));
       const results = await Promise.all(uniq.map((m) => pingModel(safeBaseUrl, apiKey, m)));
@@ -244,28 +222,16 @@ export default async function handler(req, res) {
 
     if (action === 'save') {
       const patch = {
-        baseUrl: body && body.baseUrl,
-        apiKey: body && body.apiKey,     // 空则 saveConfig 内部保留原 key
         models: body && body.models,
         reasoning: body && body.reasoning,
-        primaryMaxInflight: body && body.primaryMaxInflight,
-        endpoints: body && body.endpoints,   // 多端点资源池(整组替换;掩码 key 不覆盖旧值)
         roleEndpoints: body && body.roleEndpoints,
       };
-      if (body && Object.prototype.hasOwnProperty.call(body, 'judgeEndpoint')) {
-        patch.judgeEndpoint = body.judgeEndpoint;
-      }
-      if (body && Object.prototype.hasOwnProperty.call(body, 'sectorEndpoint')) {
-        patch.sectorEndpoint = body.sectorEndpoint;
-      }
       const saved = await saveConfig(patch);
       return res.status(200).send(JSON.stringify({
         ok: true,
         config: publicView(),
         source: saved.source,
         pool: poolStatus(currentConfig()),
-        judgePool: judgeEndpointStatus(currentConfig()),
-        sectorPool: sectorEndpointStatus(currentConfig()),
       }));
     }
 

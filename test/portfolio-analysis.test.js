@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildV3PortfolioAnalysis,
   buildPortfolioDecisionNodes,
   normalizePortfolioAnalysis,
   sanitizePortfolioAnalysisRequest,
@@ -217,6 +218,72 @@ test('目标现金与仓位类别会收敛到目标总仓位口径', () => {
     standardPct: 20,
     satellitePct: 15,
   })
+})
+
+test('组合执行单只汇总当前V3动作且未复核退出不得提前执行', () => {
+  const validUntil = new Date(Date.now() + 60_000).toISOString()
+  const pending = buildV3PortfolioAnalysis({
+    distribution,
+    evidenceIds: ['E1'],
+    quantEvidenceIds: { '300476': 'E1' },
+    adviceByCode: {
+      '300476': {
+        advice: {
+          actionPlan: '等待退出前复核',
+          decisionSource: {
+            engine: 'V3',
+            state: 'READY',
+            hardProtection: false,
+          },
+          decisionPlan: {
+            decisionId: 'pending-exit',
+            action: 'EXIT',
+            actionability: 'READY',
+            quantity: { lots: 5 },
+            prices: { reference: 90 },
+            validUntil,
+          },
+        },
+      },
+    },
+  })
+  assert.equal(pending.executionPlan.orders.length, 0)
+  assert.equal(pending.stockActions[0].action, 'watch')
+  assert.equal(pending.decisionAuthority.llmMayChangeDecision, false)
+
+  const reviewed = buildV3PortfolioAnalysis({
+    distribution,
+    evidenceIds: ['E1'],
+    quantEvidenceIds: { '300476': 'E1' },
+    adviceByCode: {
+      '300476': {
+        advice: {
+          actionPlan: '复核后减仓2手',
+          decisionSource: {
+            engine: 'V3',
+            state: 'READY',
+            exitReviewRequired: false,
+          },
+          reviewDecision: {
+            terminal: true,
+            outcome: '减仓',
+          },
+          decisionPlan: {
+            decisionId: 'reviewed-reduce',
+            action: 'REDUCE',
+            actionability: 'READY',
+            quantity: { lots: 2 },
+            prices: { reference: 90 },
+            validUntil,
+          },
+        },
+      },
+    },
+  })
+  assert.equal(reviewed.executionPlan.orders.length, 1)
+  assert.equal(reviewed.executionPlan.orders[0].action, 'reduce')
+  assert.equal(reviewed.executionPlan.orders[0].estimatedLots, 2)
+  assert.equal(reviewed.decisionAuthority.engine, 'V3')
 })
 
 test('持仓诊断生成金额手数明确且资金守恒的组合执行单', () => {

@@ -526,12 +526,12 @@
       "module": "M03-执行计划Judge",
       "task_description": "青川装备已有明确买入计划，到价后由Judge确认此刻是否执行。",
       "preconditions": "价格契约已验证，账户现金充足，分时站回VWAP。",
-      "expected_output": "只调用Judge一次并确认买入，不再调用快速复核。",
-      "optimal_tool_sequence": ["advisor", "price-contract", "alert-projector", "deterministic-gate", "judge-llm", "notification"],
+      "expected_output": "确定性闸门确认买入，不调用快速复核或Judge模型。",
+      "optimal_tool_sequence": ["advisor", "price-contract", "alert-projector", "deterministic-gate", "notification"],
       "optimal_steps": 6,
       "max_acceptable_steps": 7,
-      "required_tools": ["advisor", "judge-llm"],
-      "forbidden_tools": ["review-llm"],
+      "required_tools": ["advisor", "deterministic-gate"],
+      "forbidden_tools": ["review-llm", "judge-llm"],
       "baseline_tokens": 2400,
       "difficulty": "L2",
       "eval_type": "performance",
@@ -638,7 +638,7 @@
         "llmCalls": {
           "advisor": 1,
           "review": 0,
-          "judge": 1
+          "judge": 0
         },
         "notificationIncludes": ["青川装备", "立即买入"]
       }
@@ -651,12 +651,12 @@
       "module": "M03-执行计划Judge",
       "task_description": "凌峰制造触达减仓价后冲高回落，Judge确认减仓。",
       "preconditions": "持仓5手、今日可卖3手，减仓价已到达。",
-      "expected_output": "只调用Judge一次，输出减仓3手并保留原后续计划。",
-      "optimal_tool_sequence": ["advisor", "price-contract", "alert-projector", "deterministic-gate", "judge-llm", "notification"],
+      "expected_output": "确定性闸门输出减仓3手并保留原后续计划，不调用Judge模型。",
+      "optimal_tool_sequence": ["advisor", "price-contract", "alert-projector", "deterministic-gate", "notification"],
       "optimal_steps": 6,
       "max_acceptable_steps": 7,
-      "required_tools": ["advisor", "judge-llm"],
-      "forbidden_tools": ["review-llm"],
+      "required_tools": ["advisor", "deterministic-gate"],
+      "forbidden_tools": ["review-llm", "judge-llm"],
       "baseline_tokens": 2300,
       "difficulty": "L3",
       "eval_type": "functional",
@@ -758,7 +758,7 @@
         "llmCalls": {
           "advisor": 1,
           "review": 0,
-          "judge": 1
+          "judge": 0
         },
         "notificationIncludes": ["凌峰制造", "立即减仓"]
       }
@@ -771,12 +771,12 @@
       "module": "M03-执行计划Judge",
       "task_description": "青川装备到达买入价但承接不清晰，Judge把握不足。",
       "preconditions": "已有买入计划，当前没有硬失效但模型置信度低于买入门槛。",
-      "expected_output": "Judge输出wait，本次触发结束，不调用快速复核。",
-      "optimal_tool_sequence": ["advisor", "alert-projector", "deterministic-gate", "judge-llm", "notification"],
+      "expected_output": "确定性闸门输出wait，本次触发结束，不调用快速复核或Judge模型。",
+      "optimal_tool_sequence": ["advisor", "alert-projector", "deterministic-gate", "notification"],
       "optimal_steps": 5,
       "max_acceptable_steps": 6,
-      "required_tools": ["advisor", "judge-llm"],
-      "forbidden_tools": ["review-llm"],
+      "required_tools": ["advisor", "deterministic-gate"],
+      "forbidden_tools": ["review-llm", "judge-llm"],
       "baseline_tokens": 2400,
       "difficulty": "L2",
       "eval_type": "functional",
@@ -879,7 +879,7 @@
         "llmCalls": {
           "advisor": 1,
           "review": 0,
-          "judge": 1
+          "judge": 0
         },
         "notificationIncludes": ["青川装备", "本次不买入"]
       }

@@ -224,14 +224,14 @@ test('复核运行期间的新事件只续跑复核任务一次', () => {
   })
 })
 
-test('复核请求使用独立review角色且首次建议仍使用advisor', () => {
-  assert.equal(llmRoleForAdviceMode('review'), 'review')
-  assert.equal(llmRoleForAdviceMode('hold_advice', 'auto'), 'review')
-  assert.equal(llmRoleForAdviceMode('buy_advice', 'judge'), 'review')
-  assert.equal(llmRoleForAdviceMode('hold_advice', 'cron'), 'review')
-  assert.equal(llmRoleForAdviceMode('hold_advice', 'ondemand'), 'advisor')
-  assert.equal(llmRoleForAdviceMode('buy_advice', ''), 'advisor')
-  assert.equal(llmRoleForAdviceMode('market'), 'agent')
+test('旧建议模式只映射到解释或助手物理角色', () => {
+  assert.equal(llmRoleForAdviceMode('review'), 'explain')
+  assert.equal(llmRoleForAdviceMode('hold_advice', 'auto'), 'explain')
+  assert.equal(llmRoleForAdviceMode('buy_advice', 'judge'), 'explain')
+  assert.equal(llmRoleForAdviceMode('hold_advice', 'cron'), 'explain')
+  assert.equal(llmRoleForAdviceMode('hold_advice', 'ondemand'), 'explain')
+  assert.equal(llmRoleForAdviceMode('buy_advice', ''), 'explain')
+  assert.equal(llmRoleForAdviceMode('market'), 'assistant')
 })
 
 test('快速和深度军师都不得等待或自动生成策略日报', () => {
@@ -298,7 +298,7 @@ test('普通与深度军师都使用有界预算且深度不整轮重跑', () =>
   }).timeoutMs, 510000)
   assert.match(
     aiSource,
-    /headerTimeoutMs:\s*useRole === 'review'[\s\S]*?\?\s*12000[\s\S]*?:\s*useReasoning[\s\S]*?\?\s*Math\.min\(llmTimeout,\s*180000\)[\s\S]*?:\s*22000/,
+    /headerTimeoutMs:\s*mode === 'review'[\s\S]*?\?\s*12000[\s\S]*?:\s*useReasoning[\s\S]*?\?\s*Math\.min\(llmTimeout,\s*180000\)[\s\S]*?:\s*22000/,
   )
   assert.doesNotMatch(aiSource, /runStreamFailover/)
   assert.doesNotMatch(aiSource, /最终JSON整理器/)

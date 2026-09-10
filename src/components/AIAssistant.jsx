@@ -9,14 +9,11 @@ import {
   sanitizeAccountContext,
 } from '../../shared/assistantContext.js'
 import { humanizeAdviceTextFields } from '../../shared/userFacingLanguage.js'
-import { sanitizeTradeProposal } from '../../shared/tradeProposal.js'
 import { useAiSearchConfig } from '../aiSearchConfigStore'
 import Icon from './Icon'
 import Md from './Md'
 import Reasoning from './Reasoning'
-import ConfirmDialog from './ConfirmDialog'
 import StockName from './StockName'
-import StockTags from './StockTags'
 
 // ============ 统一 AI 助手：一个入口，对话为核心 ============
 // 能力：个股多轮问答(RAG+新闻) + 快捷指令(全盘扫描/盘面复盘/板块选股/个股诊断)
@@ -69,27 +66,17 @@ function buildAccountContext(book, snapshot) {
   })
 }
 
-function sanitizeProposals(items, evidence) {
-  const allowed = (evidence || []).map((item) => item.id)
-  return (Array.isArray(items) ? items : [])
-    .map((item) => sanitizeTradeProposal(item, allowed))
-    .filter((item) => item && item.evidenceIds.length > 0)
-    .slice(0, 5)
-}
-
 export default function AIAssistant({ snapshot }) {
-  const { open, stock, sector, intent, seq, prefill, prefillSeq } = useAIStore()
+  const { open, stock, intent, seq, prefill, prefillSeq } = useAIStore()
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
-  const [confirmProposal, setConfirmProposal] = useState(null)
-  const [proposalNotice, setProposalNotice] = useState('')
   const book = usePlanStore()
   const searchConfig = useAiSearchConfig()
   const today = chatStore.today()
   const [day, setDay] = useState(today) // 当前查看的日期
   const [msgs, setMsgs] = useState(() => chatStore.load(today)) // 从今天的持久化对话恢复
   const [histOpen, setHistOpen] = useState(false) // 历史面板
-  const [histTick, setHistTick] = useState(0) // 历史列表刷新
+  const [, setHistTick] = useState(0) // 历史列表刷新
   const scrollRef = useRef(null)
   const inputRef = useRef(null) // 输入框，用于预填后聚焦
   const abortRef = useRef(null) // 当前分析的中止控制器
@@ -132,7 +119,9 @@ export default function AIAssistant({ snapshot }) {
   // 响应外部意图（从页面点"问AI"→直接以自然语言提问该股）
   useEffect(() => {
     if (!intent) return
-    if (intent === 'diagnose' && stock) ask(`分析一下${stock.name}(${stock.code})，资金面、量价、消息面都看看，短线怎么操作`)
+    if (intent === 'diagnose' && stock) {
+      ask(`分析一下${stock.name}(${stock.code})的资金、量价和消息证据，并说明哪些变化会影响当前V3判断`)
+    }
     aiStore.consumeIntent()
     // eslint-disable-next-line
   }, [seq])
@@ -152,7 +141,6 @@ export default function AIAssistant({ snapshot }) {
   }, [prefillSeq])
 
   const pushUser = (content) => setMsgs((m) => [...m, { role: 'user', kind: 'text', content }])
-  const pushAI = (msg) => setMsgs((m) => [...m, { role: 'assistant', ...msg }])
 
   // ===== 核心：Agent 对话（SSE 流式：工具进度实时可见 + 答案逐字流出） =====
   const ask = async (question) => {
@@ -177,8 +165,7 @@ export default function AIAssistant({ snapshot }) {
     abortRef.current = ctrl
 
     // 先插入一个"流式中"的助手占位消息，后续所有事件都就地更新它
-    let aiIndex = -1
-    setMsgs((m) => { aiIndex = m.length; return [...m, { role: 'assistant', kind: 'text', content: '', steps: [], theoryRefs: [], evidence: [], actionProposals: [], streaming: true, status: '正在规划分析路径…' }] })
+    setMsgs((m) => [...m, { role: 'assistant', kind: 'text', content: '', steps: [], theoryRefs: [], evidence: [], streaming: true, status: '正在规划分析路径…' }])
     // 就地更新占位消息的辅助函数
     const patchAI = (patch) => setMsgs((m) => {
       const idx = m.findIndex((x, i) => i >= 0 && x.role === 'assistant' && x.streaming)
@@ -206,7 +193,7 @@ export default function AIAssistant({ snapshot }) {
         let j = null; try { j = JSON.parse(raw) } catch { /* 非 JSON */ }
         if (j && j.ok) {
           const evidence = j.evidence || []
-          patchAI({ content: j.answer || '', toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [], evidence, searchReference: j.searchReference || null, actionProposals: sanitizeProposals(j.actionProposals, evidence), streaming: false, status: null })
+          patchAI({ content: j.answer || '', toolTrace: j.toolTrace || [], theoryRefs: j.theoryRefs || [], evidence, searchReference: j.searchReference || null, streaming: false, status: null })
         }
         else patchAI({ content: '抱歉，' + ((j && j.error) || '分析超时，请换个更聚焦的问法重试。'), streaming: false, status: null })
       } else {
@@ -242,7 +229,7 @@ export default function AIAssistant({ snapshot }) {
           } else if (event === 'done') {
             patchAI((prev) => {
               const evidence = data.evidence || prev.evidence || []
-              return { ...prev, content: data.answer || prev.content, toolTrace: data.toolTrace || [], theoryRefs: data.theoryRefs || prev.theoryRefs, evidence, searchReference: data.searchReference || null, actionProposals: sanitizeProposals(data.actionProposals, evidence), streaming: false, status: null }
+              return { ...prev, content: data.answer || prev.content, toolTrace: data.toolTrace || [], theoryRefs: data.theoryRefs || prev.theoryRefs, evidence, searchReference: data.searchReference || null, streaming: false, status: null }
             })
           } else if (event === 'error') {
             patchAI((prev) => ({ ...prev, content: prev.content || ('抱歉，' + (data.error || '分析失败')), streaming: false, status: null }))
@@ -279,30 +266,13 @@ export default function AIAssistant({ snapshot }) {
 
   // 停止正在进行的分析
   const stop = () => { if (abortRef.current) abortRef.current.abort() }
-  const appliedProposalIds = new Set((book.decisionLog || [])
-    .filter((event) => event && event.kind === 'plan' && event.proposalId)
-    .map((event) => event.proposalId))
-  const requestApplyProposal = (proposal, evidence) => {
-    const clean = sanitizeProposals([proposal], evidence)[0]
-    if (!clean) { setProposalNotice('提案字段或证据校验失败，未打开确认'); return }
-    setConfirmProposal(clean)
-  }
-  const confirmApplyProposal = () => {
-    if (!confirmProposal) return
-    const result = planStore.applyAssistantProposal(confirmProposal)
-    setConfirmProposal(null)
-    setProposalNotice(result && result.ok
-      ? (result.alreadyApplied ? '该提案已写入计划，无需重复操作' : '已写入交易计划与预警，未记录成交')
-      : ((result && result.error) || '提案写入失败'))
-    setTimeout(() => setProposalNotice(''), 3200)
-  }
 
   return (
     <>
       {/* 悬浮球 */}
-      <button type="button" className={'ai-fab' + (open ? ' hidden' : '')} onClick={() => aiStore.open()} title="问军师" aria-label="问军师">
+      <button type="button" className={'ai-fab' + (open ? ' hidden' : '')} onClick={() => aiStore.open()} title="研究助手" aria-label="打开研究助手">
         <span className="ai-fab-spark"><Icon name="spark" size={18} /></span>
-        <span className="ai-fab-text">军师</span>
+        <span className="ai-fab-text">助手</span>
       </button>
 
       {/* 抽屉 */}
@@ -310,13 +280,13 @@ export default function AIAssistant({ snapshot }) {
         <div className="ai-drawer">
           <div className="ai-drawer-head">
             <div className="ai-drawer-title">
-              <span className="ai-drawer-heading"><Icon name="spark" size={16} /> 军师 · 操盘问答</span>
+              <span className="ai-drawer-heading"><Icon name="spark" size={16} /> 研究助手</span>
               <span className="ai-focus muted">{isToday ? '直接提问，我会自己查数据' : `查看 ${day} 的对话（只读）`}</span>
             </div>
             <div className="ai-head-actions">
               <button className="icon-btn" title="历史对话" onClick={() => setHistOpen((v) => !v)}><Icon name="history" size={14} /></button>
               {msgs.length > 0 && isToday && <button className="icon-btn" title="清空今天对话" onClick={() => { if (confirm('清空今天的对话？')) { setMsgs([]); chatStore.removeDay(today) } }}><Icon name="trash" size={14} /></button>}
-              <button type="button" className="modal-close" aria-label="关闭军师" onClick={() => aiStore.close()}><Icon name="close" size={16} /></button>
+              <button type="button" className="modal-close" aria-label="关闭研究助手" onClick={() => aiStore.close()}><Icon name="close" size={16} /></button>
             </div>
           </div>
 
@@ -348,22 +318,22 @@ export default function AIAssistant({ snapshot }) {
 
           {/* 快捷能力：都是自然语言问题，点了直接问 */}
           <div className="ai-quick">
-            <button className="ai-chip" onClick={() => ask('复盘今日盘面：总结市场情绪冷热、最强主线板块、明日需注意的风险，并给一句操作建议')} disabled={loading}><Icon name="brain" size={13} /> 盘面复盘</button>
-            <button className="ai-chip" onClick={() => ask('现在能不能做短线？帮我看下今日大盘情绪和主攻方向')} disabled={loading}><Icon name="gauge" size={13} /> 今日能做吗</button>
-            <button className="ai-chip" onClick={() => ask('综合资金、涨停、异动，给我今日 TOP3 方向和代表股')} disabled={loading}><Icon name="target" size={13} /> 全盘扫描</button>
-            <button className="ai-chip" onClick={() => ask('现在主力在抢筹哪些方向？帮我推荐3只短线标的，说明买点和风险')} disabled={loading}><Icon name="fire" size={13} /> 推荐短线</button>
-            <button className="ai-chip" onClick={() => ask('今天哪个板块最强？龙头是谁？从里面挑2-3只票')} disabled={loading}><Icon name="layers" size={13} /> 最强板块</button>
+            <button className="ai-chip" onClick={() => ask('复盘今日盘面：总结市场情绪、主线板块、证据分歧和明日风险')} disabled={loading}><Icon name="brain" size={13} /> 盘面复盘</button>
+            <button className="ai-chip" onClick={() => ask('解释今日大盘情绪、量能和资金环境，以及它们对当前V3决策的影响')} disabled={loading}><Icon name="gauge" size={13} /> 市场环境</button>
+            <button className="ai-chip" onClick={() => ask('综合资金、涨停和异动，列出今日主要方向、代表股与证据缺口，不生成交易指令')} disabled={loading}><Icon name="target" size={13} /> 市场研究</button>
+            <button className="ai-chip" onClick={() => ask('现在主力资金主要流向哪些方向？说明持续性证据和最强反方')} disabled={loading}><Icon name="fire" size={13} /> 资金方向</button>
+            <button className="ai-chip" onClick={() => ask('今天哪些板块最强？说明龙头、扩散程度和退潮风险')} disabled={loading}><Icon name="layers" size={13} /> 板块研究</button>
           </div>
 
           {/* 对话流 */}
           <div className="ai-chat" ref={scrollRef}>
             {msgs.length === 0 && !loading && (
               <div className="ai-welcome">
-                <div className="ai-welcome-title">我是你的短线操盘军师</div>
-                <div className="ai-welcome-sub">直接跟我说话就行——想分析哪只票就说名字（如"分析寒武纪"），想选股、看板块、问大盘都可以，我会自己查数据回答。</div>
+                <div className="ai-welcome-title">研究助手</div>
+                <div className="ai-welcome-sub">我会查询行情、资金、板块和新闻来解释证据；实际动作、价格和手数以页面当前V3决策为准。</div>
                 <div className="qa-presets qa-presets-welcome">
                   <button type="button" className="qa-preset" onClick={() => ask('分析一下寒武纪，资金面、基本面、消息面都看看')}>分析寒武纪</button>
-                  <button type="button" className="qa-preset" onClick={() => ask('帮我筛选涨幅5%以内、量比大于2、主力净流入靠前的票')}>按条件选股</button>
+                  <button type="button" className="qa-preset" onClick={() => ask('研究涨幅5%以内、量比大于2、主力净流入靠前的股票，并说明证据局限')}>条件研究</button>
                   <button type="button" className="qa-preset" onClick={() => ask('半导体板块现在资金和情绪怎么样？值得关注吗')}>问某个板块</button>
                   <button type="button" className="qa-preset" onClick={() => ask('今天有哪些连板龙头？梯队健康吗')}>看连板梯队</button>
                 </div>
@@ -373,15 +343,11 @@ export default function AIAssistant({ snapshot }) {
               <Message
                 key={i}
                 m={m}
-                canApply={isToday}
-                appliedProposalIds={appliedProposalIds}
-                onApplyProposal={requestApplyProposal}
               />
             ))}
           </div>
 
           {/* 提问输入 */}
-          {proposalNotice && <div className="proposal-notice" role="status">{proposalNotice}</div>}
           <div className="ai-input-row">
             <textarea
               ref={inputRef}
@@ -401,17 +367,6 @@ export default function AIAssistant({ snapshot }) {
           <div className="ai-disclaimer ai-drawer-disclaimer">内容基于实时行情、知识库与联网新闻生成，仅供研究参考，非投资建议</div>
         </div>
       )}
-      {confirmProposal && (
-        <ConfirmDialog
-          title="确认写入交易计划与预警？"
-          body={<ProposalConfirmBody proposal={confirmProposal} />}
-          confirmText="确认写入"
-          confirmIcon="target"
-          danger={false}
-          onConfirm={confirmApplyProposal}
-          onCancel={() => setConfirmProposal(null)}
-        />
-      )}
     </>
   )
 }
@@ -421,14 +376,10 @@ const TOOL_LABEL = {
   search_stock: '搜索股票', get_quote: '查行情', get_stock_detail: '查主营',
   get_quant_score: '量化打分', screen_stocks: '选股筛选', get_sector_rank: '板块排行',
   get_limit_pool: '涨停池', get_movers: '盘中异动', get_market: '大盘情绪', web_news: '联网新闻',
-  propose_trade_plan: '生成交易提案',
 }
-function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
+function Message({ m }) {
   const searchConfig = useAiSearchConfig()
   const displayData = humanizeAdviceTextFields(m.data || {})
-  const displayProposals = humanizeAdviceTextFields(
-    m.actionProposals || [],
-  )
   if (m.role === 'user') {
     return <div className="qa-msg user"><div className="qa-bubble"><div className="qa-bubble-text">{m.content}</div></div></div>
   }
@@ -467,15 +418,6 @@ function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
             </div>
           )}
           {m.content && <div className="qa-bubble-text"><Md text={m.content} />{m.streaming && <span className="stream-caret" />}</div>}
-          {displayProposals.length > 0 && (
-            <ProposalList
-              proposals={displayProposals}
-              evidence={visibleEvidence}
-              canApply={canApply}
-              appliedProposalIds={appliedProposalIds}
-              onApply={onApplyProposal}
-            />
-          )}
           {visibleEvidence.length > 0 && <EvidenceList evidence={visibleEvidence} />}
           {Array.isArray(m.theoryRefs) && m.theoryRefs.length > 0 && (
             <div className="theory-refs">
@@ -500,77 +442,6 @@ function Message({ m, canApply, appliedProposalIds, onApplyProposal }) {
       {m.kind === 'market' && <MarketReview r={displayData} />}
       {m.kind === 'sector' && <SectorPick r={displayData} />}
     </div></div>
-  )
-}
-
-const PROPOSAL_ACTION = {
-  buy: { label: '买入计划', cls: 'buy' },
-  add: { label: '加仓计划', cls: 'buy' },
-  reduce: { label: '减仓计划', cls: 'sell' },
-  sell: { label: '卖出计划', cls: 'sell' },
-}
-
-function ProposalList({ proposals, evidence, canApply, appliedProposalIds, onApply }) {
-  return (
-    <div className="proposal-list">
-      <div className="proposal-head">
-        <Icon name="target" size={12} /> 交易提案（需你确认）
-      </div>
-      {proposals.map((proposal) => {
-        const action = PROPOSAL_ACTION[proposal.action] || { label: proposal.action, cls: '' }
-        const applied = appliedProposalIds.has(proposal.id)
-        return (
-          <div className="proposal-card" key={proposal.id}>
-            <div className="proposal-card-head">
-              <StockName code={proposal.code} name={proposal.name}>
-                <span><b>{proposal.name}</b></span>
-              </StockName>
-              <span className={'proposal-action ' + action.cls}>{action.label}</span>
-            </div>
-            <div className="proposal-prices">
-              <span>触发 <b>{proposal.triggerOp === 'lte' ? '≤' : '≥'} {proposal.entryPrice}</b></span>
-              {proposal.targetPrice != null && <span>目标 <b>{proposal.targetPrice}</b></span>}
-              {proposal.stopPrice != null && <span>止损 <b>{proposal.stopPrice}</b></span>}
-              {proposal.qty != null && <span>计划 <b>{proposal.qty} 手</b></span>}
-            </div>
-            {proposal.reason && <div className="proposal-reason">{proposal.reason}</div>}
-            {proposal.confirmSignal && <div className="proposal-confirm">到价后确认：{proposal.confirmSignal}</div>}
-            {proposal.evidenceIds?.length > 0 && <div className="proposal-evidence">{proposal.evidenceIds.map((id) => `[${id}]`).join(' ')}</div>}
-            <button
-              type="button"
-              className="chip-btn proposal-apply"
-              disabled={!canApply || applied}
-              onClick={() => onApply(proposal, evidence)}
-            >
-              <Icon name={applied ? 'check' : 'target'} size={12} />
-              {applied ? '已写入计划' : canApply ? '转为计划与预警' : '历史提案只读'}
-            </button>
-          </div>
-        )
-      })}
-      <div className="proposal-foot">写入后仅开始盯盘，不会记录为已成交。</div>
-    </div>
-  )
-}
-
-function ProposalConfirmBody({ proposal }) {
-  const action = PROPOSAL_ACTION[proposal.action] || { label: proposal.action }
-  return (
-    <div className="proposal-dialog-body">
-      <p>
-        将 <b>{proposal.name}（{proposal.code}）</b>
-        <StockTags code={proposal.code} variant="inline" />
-        的“{action.label}”写入账号：
-      </p>
-      <div className="proposal-dialog-grid">
-        <span>触发价</span><b>{proposal.triggerOp === 'lte' ? '≤' : '≥'} {proposal.entryPrice}</b>
-        <span>计划手数</span><b>{proposal.qty != null ? `${proposal.qty} 手` : '未指定'}</b>
-        <span>目标价</span><b>{proposal.targetPrice ?? '未指定'}</b>
-        <span>止损价</span><b>{proposal.stopPrice ?? '未指定'}</b>
-      </div>
-      {proposal.confirmSignal && <p className="muted">到价后仍需确认：{proposal.confirmSignal}</p>}
-      <p><b>不会执行真实下单，也不会记为已成交。</b></p>
-    </div>
   )
 }
 

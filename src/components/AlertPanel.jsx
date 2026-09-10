@@ -33,7 +33,7 @@ export default function AlertPanel({ interval }) {
   const triggeredAlerts = visibleAlerts.filter((a) => a.triggeredAt)
   const aiAutoOn = (book.settings || {}).aiAutoAlert !== false
   const smartConfirmOn = (book.settings || {}).smartConfirm !== false
-  const judgeStats = judgeEffectStats([...alerts, ...(book.decisionLog || [])])
+  const reviewStats = judgeEffectStats([...alerts, ...(book.decisionLog || [])])
   const knowledgeActionStats = useMemo(() => {
     const scores = [
       ...alerts.map((item) => item?.lastKnowledgeAction?.total),
@@ -84,17 +84,17 @@ export default function AlertPanel({ interval }) {
 
       <div className="judge-effect">
         <div>
-          <span className="judge-effect-k">LLM Judge 实测</span>
-          <b>{judgeStats.evaluated ? `${judgeStats.winRate}%` : '样本积累中'}</b>
+          <span className="judge-effect-k">触发复核实测</span>
+          <b>{reviewStats.evaluated ? `${reviewStats.winRate}%` : '样本积累中'}</b>
         </div>
         <div>
           <span className="judge-effect-k">知行合一</span>
           <b>{knowledgeActionStats.average != null ? `${knowledgeActionStats.average}分` : '待评估'}</b>
         </div>
         <span>
-          已强提示 {judgeStats.confirmed} 次 · 已评估 {judgeStats.evaluated} 次
-          {judgeStats.avgDirectionalPct != null
-            ? ` · 平均方向收益 ${judgeStats.avgDirectionalPct >= 0 ? '+' : ''}${judgeStats.avgDirectionalPct}%`
+          已强提示 {reviewStats.confirmed} 次 · 已评估 {reviewStats.evaluated} 次
+          {reviewStats.avgDirectionalPct != null
+            ? ` · 平均方向收益 ${reviewStats.avgDirectionalPct >= 0 ? '+' : ''}${reviewStats.avgDirectionalPct}%`
             : ' · 强提示后自动跟踪5/15/30分钟'}
         </span>
       </div>
@@ -141,7 +141,7 @@ export default function AlertPanel({ interval }) {
               {autoAlerts.length > 0 && (
                 <div className="alert-group">
                   <div className="alert-group-head">
-                    <span className="sub-name">自动预警 · {autoAlerts.length} 条（随军师建议维护）</span>
+                    <span className="sub-name">自动预警 · {autoAlerts.length} 条（随V3决策维护）</span>
                     <button className="btn tiny" onClick={() => setDelBatch({ ids: autoAlerts.map((a) => a.id), label: `全部 ${autoAlerts.length} 条自动预警` })}>
                       <Icon name="trash" size={11} /> 全部删除
                     </button>

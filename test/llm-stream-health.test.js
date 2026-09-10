@@ -16,44 +16,44 @@ import { pumpChatStream } from '../api/_llm.js'
 test('空流端点立即冷却，下一次请求切换到备用端点', () => {
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
-        apiKey: 'advisor-1-key',
-        model: 'advisor-1-model',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
+        apiKey: 'explain-1-key',
+        model: 'explain-1-model',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
-        apiKey: 'advisor-2-key',
-        model: 'advisor-2-model',
+        baseUrl: 'https://explain-2.example/v1',
+        apiKey: 'explain-2-key',
+        model: 'explain-2-model',
         enabled: true,
       }],
     },
   }
-  const first = pickEndpoint(config, 1000, 'advisor')
-  assert.equal(first.id, 'advisor-1')
+  const first = pickEndpoint(config, 1000, 'explain')
+  assert.equal(first.id, 'explain-1')
 
   markEndpointUnusable(first.id, 1000)
-  const second = pickEndpoint(config, 1001, 'advisor')
+  const second = pickEndpoint(config, 1001, 'explain')
 
-  assert.equal(second.id, 'advisor-2')
+  assert.equal(second.id, 'explain-2')
 })
 
 test('全部端点冷却时半开探测最早恢复的一路', () => {
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        id: 'advisor-1', role: 'advisor', baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        id: 'explain-1', role: 'explain', baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key-1', model: 'model-1', enabled: true,
       }, {
-        id: 'advisor-2', role: 'advisor', baseUrl: 'https://advisor-2.example/v1',
+        id: 'explain-2', role: 'explain', baseUrl: 'https://explain-2.example/v1',
         apiKey: 'key-2', model: 'model-2', enabled: true,
       }],
     },
   }
-  markEndpointUnusable('advisor-1', 1000)
-  markEndpointUnusable('advisor-2', 2000)
-  assert.equal(pickEndpoint(config, 3000, 'advisor').id, 'advisor-1')
+  markEndpointUnusable('explain-1', 1000)
+  markEndpointUnusable('explain-2', 2000)
+  assert.equal(pickEndpoint(config, 3000, 'explain').id, 'explain-1')
   resetPoolHealthForTests()
 })
 
@@ -61,88 +61,88 @@ test('同角色空闲端点轮询使用而不是每次固定命中第一路', ()
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
-        apiKey: 'advisor-1-key',
-        model: 'advisor-1-model',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
+        apiKey: 'explain-1-key',
+        model: 'explain-1-model',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
-        apiKey: 'advisor-2-key',
-        model: 'advisor-2-model',
+        baseUrl: 'https://explain-2.example/v1',
+        apiKey: 'explain-2-key',
+        model: 'explain-2-model',
         enabled: true,
       }],
     },
   }
 
-  const first = pickEndpoint(config, 1000, 'advisor')
+  const first = pickEndpoint(config, 1000, 'explain')
   markSuccess(first.id)
-  const second = pickEndpoint(config, 1001, 'advisor')
+  const second = pickEndpoint(config, 1001, 'explain')
 
-  assert.equal(first.id, 'advisor-1')
-  assert.equal(second.id, 'advisor-2')
+  assert.equal(first.id, 'explain-1')
+  assert.equal(second.id, 'explain-2')
 })
 
 test('同角色端点采样后优先选择历史响应更快的一路', () => {
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
-        apiKey: 'advisor-1-key',
-        model: 'advisor-1-model',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
+        apiKey: 'explain-1-key',
+        model: 'explain-1-model',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
-        apiKey: 'advisor-2-key',
-        model: 'advisor-2-model',
+        baseUrl: 'https://explain-2.example/v1',
+        apiKey: 'explain-2-key',
+        model: 'explain-2-model',
         enabled: true,
       }],
     },
   }
 
-  const first = pickEndpoint(config, 1000, 'advisor')
+  const first = pickEndpoint(config, 1000, 'explain')
   markStart(first.id)
   markSuccess(first.id, 50000)
   markStart(first.id)
-  const second = pickEndpoint(config, 1001, 'advisor')
+  const second = pickEndpoint(config, 1001, 'explain')
   markStart(second.id)
   markSuccess(second.id, 15000)
   markSuccess(first.id, 50000)
-  const third = pickEndpoint(config, 1002, 'advisor')
+  const third = pickEndpoint(config, 1002, 'explain')
 
-  assert.equal(first.id, 'advisor-1')
-  assert.equal(second.id, 'advisor-2')
-  assert.equal(third.id, 'advisor-2')
+  assert.equal(first.id, 'explain-1')
+  assert.equal(second.id, 'explain-2')
+  assert.equal(third.id, 'explain-2')
 })
 
 test('已有成功测速时不为探索空闲慢端点牺牲单任务延迟', () => {
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
-        apiKey: 'advisor-1-key',
-        model: 'advisor-1-model',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
+        apiKey: 'explain-1-key',
+        model: 'explain-1-model',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
-        apiKey: 'advisor-2-key',
-        model: 'advisor-2-model',
+        baseUrl: 'https://explain-2.example/v1',
+        apiKey: 'explain-2-key',
+        model: 'explain-2-model',
         enabled: true,
       }],
     },
   }
 
-  const first = pickEndpoint(config, 1000, 'advisor')
+  const first = pickEndpoint(config, 1000, 'explain')
   markSuccess(first.id, 20000)
-  const nextIdle = pickEndpoint(config, 1001, 'advisor')
+  const nextIdle = pickEndpoint(config, 1001, 'explain')
   markStart(nextIdle.id)
-  const nextBusy = pickEndpoint(config, 1002, 'advisor')
+  const nextBusy = pickEndpoint(config, 1002, 'explain')
 
-  assert.equal(first.id, 'advisor-1')
-  assert.equal(nextIdle.id, 'advisor-1')
-  assert.equal(nextBusy.id, 'advisor-2')
+  assert.equal(first.id, 'explain-1')
+  assert.equal(nextIdle.id, 'explain-1')
+  assert.equal(nextBusy.id, 'explain-2')
   markSuccess(nextIdle.id, 20000)
   resetPoolHealthForTests()
 })
@@ -150,7 +150,7 @@ test('已有成功测速时不为探索空闲慢端点牺牲单任务延迟', ()
 test('流式请求在响应体消费完成前持续占用端点', async () => {
   const config = {
     roleEndpoints: {
-      advisor: [{
+      explain: [{
         baseUrl: 'https://stream.example/v1',
         apiKey: 'key',
         model: 'model',
@@ -163,7 +163,7 @@ test('流式请求在响应体消费完成前持续占用端点', async () => {
   try {
     const routed = await poolFetch(config, '/chat/completions', {
       body: { model: 'model' },
-      role: 'advisor',
+      role: 'explain',
       deferSuccess: true,
     }, 1)
 
@@ -181,10 +181,10 @@ test('流式终态失败按连续失败阈值计数，不单次熔断端点', ()
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        id: 'advisor-1',
-        role: 'advisor',
-        baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        id: 'explain-1',
+        role: 'explain',
+        baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key',
         model: 'model',
         enabled: true,
@@ -192,13 +192,13 @@ test('流式终态失败按连续失败阈值计数，不单次熔断端点', ()
     },
   }
 
-  markFailure('advisor-1')
+  markFailure('explain-1')
   const afterOne = poolStatus(config)[0]
   assert.equal(afterOne.fails, 1)
   assert.equal(afterOne.cooling, false)
 
-  markFailure('advisor-1')
-  markFailure('advisor-1')
+  markFailure('explain-1')
+  markFailure('explain-1')
   const afterThree = poolStatus(config)[0]
   assert.equal(afterThree.fails, 3)
   assert.equal(afterThree.cooling, true)
@@ -209,8 +209,8 @@ test('深度批量可覆盖端点默认关闭并下发有界推理参数', async
   const config = {
     baseUrl: 'https://main.example/v1',
     apiKey: 'key',
-    models: { advisor: 'model' },
-    reasoning: { advisor: false },
+    models: { explain: 'model' },
+    reasoning: { explain: false },
   }
   const originalFetch = globalThis.fetch
   let sentBody = null
@@ -221,7 +221,7 @@ test('深度批量可覆盖端点默认关闭并下发有界推理参数', async
   try {
     await poolFetch(config, '/chat/completions', {
       body: { model: 'model', stream: true },
-      role: 'advisor',
+      role: 'explain',
       reasonFallback: true,
       forceReason: true,
     }, 1)
@@ -268,13 +268,13 @@ test('流式请求在成功响应头前可快速切换备用端点', async () =>
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key-1',
         model: 'model-1',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
+        baseUrl: 'https://explain-2.example/v1',
         apiKey: 'key-2',
         model: 'model-2',
         enabled: true,
@@ -290,7 +290,7 @@ test('流式请求在成功响应头前可快速切换备用端点', async () =>
   try {
     const routed = await poolFetch(config, '/chat/completions', {
       body: { model: 'model', stream: true },
-      role: 'advisor',
+      role: 'explain',
       deferSuccess: true,
     }, 2)
 
@@ -308,13 +308,13 @@ test('外层请求仍有效时单端点响应头超时会切换备用端点', as
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key-1',
         model: 'model-1',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
+        baseUrl: 'https://explain-2.example/v1',
         apiKey: 'key-2',
         model: 'model-2',
         enabled: true,
@@ -338,7 +338,7 @@ test('外层请求仍有效时单端点响应头超时会切换备用端点', as
   try {
     const routed = await poolFetch(config, '/chat/completions', {
       body: { model: 'model', stream: true },
-      role: 'advisor',
+      role: 'explain',
       signal: new AbortController().signal,
       timeoutMs: 1000,
       headerTimeoutMs: 250,
@@ -346,7 +346,7 @@ test('外层请求仍有效时单端点响应头超时会切换备用端点', as
     }, 2)
 
     assert.equal(routed.resp.ok, true)
-    assert.equal(routed.endpoint.id, 'advisor-2')
+    assert.equal(routed.endpoint.id, 'explain-2')
     assert.equal(urls.length, 2)
     routed.releaseRole()
   } finally {
@@ -359,20 +359,20 @@ test('备用端点忙碌时保留当前请求而不是切换后重复排队', as
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key-1',
         model: 'model-1',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
+        baseUrl: 'https://explain-2.example/v1',
         apiKey: 'key-2',
         model: 'model-2',
         enabled: true,
       }],
     },
   }
-  markStart('advisor-2')
+  markStart('explain-2')
   const originalFetch = globalThis.fetch
   const urls = []
   globalThis.fetch = async (url) => {
@@ -383,7 +383,7 @@ test('备用端点忙碌时保留当前请求而不是切换后重复排队', as
   try {
     const routed = await poolFetch(config, '/chat/completions', {
       body: { model: 'model', stream: true },
-      role: 'advisor',
+      role: 'explain',
       signal: new AbortController().signal,
       timeoutMs: 1000,
       headerTimeoutMs: 250,
@@ -391,11 +391,11 @@ test('备用端点忙碌时保留当前请求而不是切换后重复排队', as
     }, 2)
 
     assert.equal(routed.resp.ok, true)
-    assert.equal(routed.endpoint.id, 'advisor-1')
+    assert.equal(routed.endpoint.id, 'explain-1')
     assert.equal(urls.length, 1)
     routed.releaseRole()
   } finally {
-    markSuccess('advisor-2')
+    markSuccess('explain-2')
     globalThis.fetch = originalFetch
     resetPoolHealthForTests()
   }
@@ -405,20 +405,20 @@ test('等待响应头期间备用端点释放后在总预算内切换', async ()
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key-1',
         model: 'model-1',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
+        baseUrl: 'https://explain-2.example/v1',
         apiKey: 'key-2',
         model: 'model-2',
         enabled: true,
       }],
     },
   }
-  markStart('advisor-2')
+  markStart('explain-2')
   const originalFetch = globalThis.fetch
   const urls = []
   globalThis.fetch = async (url, options) => {
@@ -434,13 +434,13 @@ test('等待响应头期间备用端点释放后在总预算内切换', async ()
     return new Response('{}', { status: 200 })
   }
   const releaseAlternative = setTimeout(
-    () => markSuccess('advisor-2'),
+    () => markSuccess('explain-2'),
     320,
   )
   try {
     const routed = await poolFetch(config, '/chat/completions', {
       body: { model: 'model', stream: true },
-      role: 'advisor',
+      role: 'explain',
       signal: new AbortController().signal,
       timeoutMs: 1000,
       headerTimeoutMs: 100,
@@ -448,7 +448,7 @@ test('等待响应头期间备用端点释放后在总预算内切换', async ()
     }, 2)
 
     assert.equal(routed.resp.ok, true)
-    assert.equal(routed.endpoint.id, 'advisor-2')
+    assert.equal(routed.endpoint.id, 'explain-2')
     assert.equal(urls.length, 2)
     routed.releaseRole()
   } finally {
@@ -462,13 +462,13 @@ test('外层请求取消时不得把同一题切换到备用端点', async () =>
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key-1',
         model: 'model-1',
         enabled: true,
       }, {
-        baseUrl: 'https://advisor-2.example/v1',
+        baseUrl: 'https://explain-2.example/v1',
         apiKey: 'key-2',
         model: 'model-2',
         enabled: true,
@@ -492,7 +492,7 @@ test('外层请求取消时不得把同一题切换到备用端点', async () =>
   try {
     const routed = await poolFetch(config, '/chat/completions', {
       body: { model: 'model', stream: true },
-      role: 'advisor',
+      role: 'explain',
       signal: controller.signal,
       timeoutMs: 1000,
       headerTimeoutMs: 250,
@@ -511,10 +511,10 @@ test('外层取消只释放在途，不把端点误记为故障', async () => {
   resetPoolHealthForTests()
   const config = {
     roleEndpoints: {
-      advisor: [{
-        id: 'advisor-1',
-        role: 'advisor',
-        baseUrl: 'https://advisor-1.example/v1',
+      explain: [{
+        id: 'explain-1',
+        role: 'explain',
+        baseUrl: 'https://explain-1.example/v1',
         apiKey: 'key-1',
         model: 'model-1',
         enabled: true,
@@ -538,7 +538,7 @@ test('外层取消只释放在途，不把端点误记为故障', async () => {
   const controller = new AbortController()
   const pending = poolFetch(config, '/chat/completions', {
     body: { model: 'model-1', stream: true },
-    role: 'advisor',
+    role: 'explain',
     signal: controller.signal,
     timeoutMs: 1000,
     deferSuccess: true,

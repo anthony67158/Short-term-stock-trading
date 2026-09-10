@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import {
   proposalAlertSpec,
@@ -72,4 +73,21 @@ test('提案转换为人工确认后的价格预警', () => {
   assert.equal(proposalAlertSpec(sell).note, '助手提案·卖出')
   assert.equal(proposalAlertSpec(sell).op, 'gte')
   assert.equal(proposalAlertSpec({ ...sell, id: 'stop', triggerOp: 'lte' }).note, '助手提案·止损卖出')
+})
+
+test('开放助手不再生成新的交易提案', () => {
+  const backend = readFileSync(
+    new URL('../api/agent.js', import.meta.url),
+    'utf8',
+  )
+  const frontend = readFileSync(
+    new URL('../src/components/AIAssistant.jsx', import.meta.url),
+    'utf8',
+  )
+  assert.doesNotMatch(backend, /propose_trade_plan/)
+  assert.match(backend, /actionProposals:\s*\[\]/)
+  assert.match(backend, /不得替代V3/)
+  assert.doesNotMatch(frontend, /applyAssistantProposal/)
+  assert.doesNotMatch(frontend, /交易提案/)
+  assert.match(frontend, /实际动作、价格和手数以页面当前V3决策为准/)
 })

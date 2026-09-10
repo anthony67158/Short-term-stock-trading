@@ -22,41 +22,35 @@ const config = {
       reasoning: true,
       enabled: true,
     }],
-    advisor: [{
-      baseUrl: 'https://advisor.example/v1',
-      apiKey: 'advisor-key',
-      model: 'advisor-model',
-      enabled: true,
-    }],
   },
 }
 
-test('LLM配置公开持仓分布分析专用角色', () => {
-  assert.deepEqual(ROLES.portfolio, {
-    envs: ['PORTFOLIO_MODEL'],
+test('LLM配置用解释角色承载组合诊断说明', () => {
+  assert.deepEqual(ROLES.explain, {
+    envs: [
+      'EXPLAIN_MODEL',
+      'ADVISOR_MODEL',
+      'PORTFOLIO_MODEL',
+      'REVIEW_MODEL',
+    ],
     def: 'DeepSeek-V4-Pro',
-    label: '持仓分布分析',
+    label: 'V3决策与组合解释',
   })
 })
 
-test('持仓分析只路由到portfolio独立端点', () => {
+test('旧portfolio端点迁移到explain角色', () => {
   const endpoints = endpointsForRole(config, 'portfolio')
   assert.deepEqual(
     endpoints.map((endpoint) => endpoint.id),
-    ['portfolio-1'],
+    ['explain-1'],
   )
   assert.equal(endpoints[0].baseUrl, 'https://portfolio.example/v1')
-  assert.equal(
-    endpoints.some((endpoint) =>
-      endpoint.baseUrl === 'https://advisor.example/v1'),
-    false,
-  )
 })
 
-test('持仓分析选路不会跨到其他角色端点', () => {
+test('持仓分析选路使用解释池', () => {
   assert.equal(
     pickEndpoint(config, 1000, 'portfolio').id,
-    'portfolio-1',
+    'explain-1',
   )
 })
 
@@ -64,4 +58,6 @@ test('持仓分析实现不再调用军师角色作为备用模型', () => {
   assert.doesNotMatch(portfolioAnalysis, /role:\s*'advisor'/)
   assert.doesNotMatch(portfolioAnalysis, /getModel\('advisor'\)/)
   assert.doesNotMatch(portfolioAnalysis, /fallbackModel/)
+  assert.match(portfolioAnalysis, /role:\s*'explain'/)
+  assert.match(portfolioAnalysis, /getModel\('explain'\)/)
 })

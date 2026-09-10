@@ -131,7 +131,7 @@ test('AI建议链路为三种模式检索理论并回传到个股建议展示', 
   )
   assert.match(
     ai,
-    /useRole === 'review' \|\| mode === 'review'[\s\S]{0,120}ADVISOR_REVIEW_SYSTEM/,
+    /mode === 'review'[\s\S]{0,120}ADVISOR_REVIEW_SYSTEM/,
   )
   assert.match(ai, /正在提炼短线实战经验/)
   assert.match(ai, /短线经验库/)

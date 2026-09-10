@@ -1191,6 +1191,7 @@ export default function StockDetail({ stock, onClose }) {
                     <>
                       {adv ? (
                         <V3DecisionSummary
+                          code={stock.code}
                           advice={adv}
                           holdingLots={myHold?.qty || 0}
                           stopPrice={book.holding.find((item) => item.code === stock.code)?.sl}

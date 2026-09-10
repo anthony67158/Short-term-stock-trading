@@ -2365,8 +2365,7 @@ function HoldingItem({ h, quote: q }) {
   const [tSide, setTSide] = useState('buy') // buy 低吸/买回 | sell 高抛/卖出
   const [tPrice, setTPrice] = useState('')
   const [tQty, setTQty] = useState('1')
-  const [tAdvice, setTAdvice] = useState(null) // {loading,result,error} AI做T参考
-  const [tStyle, setTStyle] = useState('auto') // auto(按历史规律) | conservative | balanced | aggressive
+  const [tAdvice, setTAdvice] = useState(null) // 当前V3决策对做T记账的边界说明
   const [openDays, setOpenDays] = useState({}) // 做T流水按天折叠，key→是否展开
   const [planDetailOpen, setPlanDetailOpen] = useState(false)
   const [tradeErr, setTradeErr] = useState('')
@@ -2665,11 +2664,9 @@ function HoldingItem({ h, quote: q }) {
     setTQty('1')
   }
 
-  // AI 做T参考（可指定风格，切风格即用新风格重新生成）
-  const askTAdvice = async (styleOverride) => {
-    const useStyle = styleOverride || tStyle
-    if (styleOverride && styleOverride !== tStyle) setTStyle(styleOverride)
-    setTAdvice({ loading: true, phase: '正在准备分析…', sources: [], reasoning: '', quant: null })
+  // 做T不再另行生成交易方向，只读取当前V3决策与已有第一腿。
+  const askTAdvice = async () => {
+    setTAdvice({ loading: true, phase: '正在读取当前V3决策…', sources: [], reasoning: '', quant: null })
     const onPhase = (p) => setTAdvice((s) => (s && s.loading ? { ...s, phase: p.text } : s))
     // 细粒度事件:数据源勾选清单 + 军师思维链增量,实时展示"发生了什么"
     const onEvent = (event, data) => {
@@ -2713,7 +2710,6 @@ function HoldingItem({ h, quote: q }) {
         nextTradeDay: nextTradingDayLabel(),
         tradeContext: tradeActivityContext(latestBook.closed || [], h.code),
         tContext,
-        style: useStyle,
       }, onPhase, undefined, onEvent)
       if (r.ok) {
         setTAdvice({ result: r.result })
@@ -2951,8 +2947,8 @@ function HoldingItem({ h, quote: q }) {
           stopPrice={h.sl}
           loading={generation?.active}
           view={decisionView}
-          monitoring={trackedView?.monitoring}
         />
+        <MonitoringRules monitoring={trackedView?.monitoring} />
         <div className="card-decision-meta">
           {holdAdvice && <AdviceUpdatedAt
             entry={adviceEntry}
@@ -3240,21 +3236,14 @@ function HoldingItem({ h, quote: q }) {
                 </div>
               )}
         <div className="t-panel">
-          {/* AI 做T参考 */}
+          {/* 当前V3做T边界 */}
           <div className="t-ai">
-            {/* 风格选择：默认「自动」由 AI 按该股历史规律选定 */}
-            <div className="t-style">
-              <span className="t-style-label">风格</span>
-              {[['auto', '自动'], ['conservative', '稳健'], ['balanced', '均衡'], ['aggressive', '激进']].map(([k, label]) => (
-                <button key={k} className={'t-style-btn' + (tStyle === k ? ' active ' + k : '')} onClick={() => askTAdvice(k)} title={k === 'auto' ? '根据这只股的历史规律自动选择风格和做T方向' : ''}>{label}</button>
-              ))}
-            </div>
             {!tAdvice && (
-              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="spark" size={14} />{tStyle === 'auto' ? '按历史规律生成做T策略' : `生成做T参考（${tStyle === 'conservative' ? '稳健' : tStyle === 'aggressive' ? '激进' : '均衡'}）`}</button>
+              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="target" size={14} />查看当前V3做T边界</button>
             )}
             {tAdvice && tAdvice.loading && (
               <div className="t-ai-loading-wrap">
-                <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || '正在分析历史规律、分时、大盘和资金…'}</div>
+                <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || '正在读取当前V3决策…'}</div>
                 {visibleAiSources(searchConfig.enabled, tAdvice.sources).length > 0 && (
                   <div className="adv-sources">
                     {visibleAiSources(searchConfig.enabled, tAdvice.sources).map((s, i) => (
@@ -3286,7 +3275,7 @@ function HoldingItem({ h, quote: q }) {
                   {tAdvice.result.chosenStyle && <span className={'t-style-tag ' + tAdvice.result.chosenStyle}>{{ conservative: '稳健', balanced: '均衡', aggressive: '激进' }[tAdvice.result.chosenStyle] || tAdvice.result.chosenStyle}</span>}
                   {tAdvice.result.confidence && <span className="t-conf">信心 {tAdvice.result.confidence}</span>}
                   <div className="t-ai-actions" style={{ marginLeft: 'auto' }}>
-                    <button type="button" className="expand-btn" onClick={() => askTAdvice()}>重新生成</button>
+                    <button type="button" className="expand-btn" onClick={() => askTAdvice()}>重新读取</button>
                     <button type="button" className="expand-btn" onClick={() => setTAdvice(null)}>收起</button>
                   </div>
                 </div>
@@ -3300,7 +3289,7 @@ function HoldingItem({ h, quote: q }) {
                   <Reasoning text={tAdvice.result.reasoning} />
                 )}
                 {tAdvice.result.actionPlan && (
-                  <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">这样操作</span><HL text={tAdvice.result.actionPlan} /></div>
+                  <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">V3边界</span><HL text={tAdvice.result.actionPlan} /></div>
                 )}
                 {tAdvice.result.histPattern && (
                   <div className="t-ai-hist"><Icon name="history" size={12} /><span>历史规律</span><HL text={tAdvice.result.histPattern} /></div>

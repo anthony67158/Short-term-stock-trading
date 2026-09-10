@@ -388,6 +388,17 @@ function AnalysisResult({ result }) {
               <p>{assessment.rationale}</p>
             </div>
           </div>
+          {analysis.explanation?.status === 'ready' && (
+            <div
+              className="portfolio-analysis-explanation"
+              aria-label="组合白话解读"
+            >
+              <p><b>为什么</b>{analysis.explanation.summary}</p>
+              <p><b>最强反方</b>{analysis.explanation.counterCase}</p>
+              <p><b>何时失效</b>{analysis.explanation.invalidation}</p>
+              <p><b>证据缺口</b>{analysis.explanation.evidenceGap}</p>
+            </div>
+          )}
 
           <PortfolioExecutionPlan analysis={analysis} />
 
@@ -503,7 +514,7 @@ function AnalysisResult({ result }) {
           <DecisionPath nodes={displayResult.decisionNodes} />
           <EvidenceList evidence={displayResult.evidence} />
           <div className="portfolio-analysis-meta">
-            <span>{displayResult.meta?.model || '规则降级'}</span>
+            <span>{displayResult.meta?.model || 'V3决策'}</span>
             {displayResult.meta?.endpoint && <span>{displayResult.meta.endpoint}</span>}
             {displayResult.meta?.quantModelLabel && <span>{displayResult.meta.quantModelLabel}</span>}
             <span>{displayResult.generatedAt ? new Date(displayResult.generatedAt).toLocaleString('zh-CN') : ''}</span>
@@ -515,7 +526,6 @@ function AnalysisResult({ result }) {
 }
 
 export default function PortfolioAnalysis({ distribution }) {
-  const [deepMode, setDeepMode] = useState(true)
   const [state, setState] = useState({
     loading: false,
     jobStatus: 'idle',
@@ -647,7 +657,7 @@ export default function PortfolioAnalysis({ distribution }) {
     try {
       const { response, data } = await request({
         op: 'start',
-        deepMode,
+        deepMode: false,
         refresh,
       }, 18000)
       if (data?.job) applyStatus(data)
@@ -786,15 +796,6 @@ export default function PortfolioAnalysis({ distribution }) {
               <b>自动复核</b>
               <small>{reviewCaption}</small>
             </span>
-          </label>
-          <label className="portfolio-analysis-mode">
-            <input
-              type="checkbox"
-              checked={deepMode}
-              onChange={(event) => setDeepMode(event.target.checked)}
-              disabled={state.loading}
-            />
-            <span>深度分析</span>
           </label>
           {state.loading ? (
             <button type="button" className="btn" disabled>

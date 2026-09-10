@@ -770,8 +770,14 @@ function buildExecutionPlan({
     )
     .join('；')
 
+  const intentionalHold = (
+    executionSummary.verdict === 'hold'
+    && orders.length === 0
+  )
   const missing = []
-  if (!orders.length) missing.push('缺少明确的调仓指令')
+  if (!orders.length && !intentionalHold) {
+    missing.push('缺少明确的调仓指令')
+  }
   if (orders.some((item) => item.estimatedLots <= 0)) {
     missing.push('存在不足一手或超出资金预算的指令')
   }
@@ -788,7 +794,7 @@ function buildExecutionPlan({
   if (!executionSummary.todayGoal || !executionSummary.nextReviewTrigger) {
     missing.push('缺少今日目标或下次复核触发器')
   }
-  let score = 30
+  let score = intentionalHold ? 75 : 30
   if (orders.length) score += 25
   if (orders.length && orders.every((item) => item.estimatedLots > 0)) score += 10
   if (orders.length && orders.every((item) =>
@@ -1038,6 +1044,299 @@ export function normalizePortfolioAnalysis(
     risks: stringList(input.risks, 8, 240),
     decisionNodes,
   }
+}
+
+export function buildV3PortfolioAnalysis({
+  distribution = {},
+  adviceByCode = {},
+  evidenceIds: sourceEvidenceIds = [],
+  quantEvidenceIds = {},
+  now = Date.now(),
+} = {}) {
+  const allowedEvidenceIds = [...new Set(
+    sourceEvidenceIds.filter(Boolean),
+  )]
+  const totalAssets = positive(distribution.totalAssets)
+  const projectedByCode = new Map()
+  const missingV3 = []
+  const stockActions = (distribution.stocks || []).map((stock, index) => {
+    const entry = adviceByCode?.[stock.code]
+    const advice = entry?.advice || entry || {}
+    const source = advice.decisionSource || {}
+    const plan = advice.decisionPlan || {}
+    const currentWeightPct = rounded(stock.accountWeightPct)
+    const referencePrice = positive(
+      plan.prices?.reference || stock.price,
+    )
+    const quantityLots = Math.max(
+      0,
+      Math.trunc(finite(plan.quantity?.lots)),
+    )
+    const expiresAt = Date.parse(plan.validUntil)
+    const current = (
+      source.engine === 'V3'
+      && source.state === 'READY'
+      && plan.decisionId
+      && Number.isFinite(expiresAt)
+      && expiresAt > now
+    )
+    const reviewedExit = (
+      source.hardProtection === true
+      || source.exitReviewRequired === false
+      || advice.reviewDecision?.terminal === true
+    )
+    let action = 'hold'
+    if (
+      current
+      && plan.actionability === 'READY'
+      && quantityLots > 0
+    ) {
+      if (['EXIT', 'REDUCE'].includes(plan.action)) {
+        action = reviewedExit
+          ? plan.action === 'EXIT' ? 'exit' : 'reduce'
+          : 'watch'
+      } else if (plan.action === 'ADD') {
+        action = 'add'
+      }
+    } else if (
+      current
+      && ['EXIT', 'REDUCE'].includes(plan.action)
+      && !reviewedExit
+    ) {
+      action = 'watch'
+    }
+    if (!current) missingV3.push(stock.code)
+
+    const deltaWeightPct = (
+      totalAssets > 0
+      && referencePrice > 0
+      && quantityLots > 0
+    ) ? quantityLots * 100 * referencePrice / totalAssets * 100 : 0
+    const targetWeightPct = action === 'exit'
+      ? 0
+      : action === 'reduce'
+        ? Math.max(0, currentWeightPct - deltaWeightPct)
+        : action === 'add'
+          ? Math.min(100, currentWeightPct + deltaWeightPct)
+          : currentWeightPct
+    projectedByCode.set(stock.code, targetWeightPct)
+    const evidence = [
+      quantEvidenceIds[stock.code],
+      ...allowedEvidenceIds,
+    ].filter(Boolean)
+    const reason = text(
+      advice.actionPlan
+      || (
+        current
+          ? '当前V3没有核定新的调仓动作'
+          : '当前没有有效且未过期的V3决策'
+      ),
+      320,
+    )
+    return {
+      priority: index + 1,
+      code: stock.code,
+      name: stock.name,
+      action,
+      targetWeightPct: rounded(targetWeightPct),
+      triggerPrice: rounded(referencePrice, 3),
+      trigger: text(plan.trigger || advice.actionPlan, 220),
+      invalidation: text(
+        advice.invalidation
+        || '报价、账户交易事实或V3决策版本变化后重新评估',
+        220,
+      ),
+      reason,
+      evidenceIds: evidence.slice(0, 8),
+    }
+  })
+
+  stockActions.sort((left, right) => {
+    const rank = { exit: 0, reduce: 1, add: 2, watch: 3, hold: 4 }
+    return rank[left.action] - rank[right.action]
+      || left.priority - right.priority
+  })
+  stockActions.forEach((item, index) => {
+    item.priority = index + 1
+  })
+
+  const targetPositionPct = rounded(
+    (distribution.stocks || []).reduce(
+      (sum, stock) =>
+        sum + (projectedByCode.get(stock.code) || 0),
+      0,
+    ),
+  )
+  const categoryTargets = {
+    corePct: 0,
+    standardPct: 0,
+    satellitePct: 0,
+  }
+  const categoryKey = {
+    '核心仓': 'corePct',
+    '标准仓': 'standardPct',
+    '卫星仓': 'satellitePct',
+  }
+  for (const stock of (distribution.stocks || [])) {
+    const key = categoryKey[stock.category]
+    if (!key) continue
+    categoryTargets[key] = rounded(
+      categoryTargets[key]
+      + (projectedByCode.get(stock.code) || 0),
+    )
+  }
+
+  const conceptTargets = new Map()
+  for (const stock of (distribution.stocks || [])) {
+    conceptTargets.set(
+      stock.concept,
+      rounded(
+        (conceptTargets.get(stock.concept) || 0)
+        + (projectedByCode.get(stock.code) || 0),
+      ),
+    )
+  }
+  const conceptActions = [...conceptTargets.entries()].map(
+    ([concept, targetWeightPct]) => ({
+      concept,
+      targetWeightPct,
+      reason: '由当前持仓和已核定V3动作汇总',
+      evidenceIds: allowedEvidenceIds.slice(0, 3),
+    }),
+  )
+  const executable = stockActions.filter((item) =>
+    ['exit', 'reduce', 'add'].includes(item.action)
+  )
+  const todayGoal = executable.length
+    ? executable.map((item) =>
+        `${{
+          exit: '退出',
+          reduce: '减仓',
+          add: '加仓',
+        }[item.action]}${item.name}`
+      ).join('；')
+    : '当前没有经过V3核定的新调仓动作'
+  const topConcept = distribution.groups?.[0]
+  const positionScore = Math.max(
+    0,
+    Math.round(100 - Math.max(0, targetPositionPct - 60) * 2),
+  )
+  const normalized = normalizePortfolioAnalysis({
+    headline: executable.length
+      ? '按当前V3决策执行组合调整'
+      : '当前组合维持原仓位，等待新的V3决策',
+    executionSummary: {
+      verdict: executable.length ? 'rebalance' : 'hold',
+      todayGoal,
+      nextReviewTrigger:
+        '任一股票V3决策、价格或账户交易事实变化后重新汇总',
+    },
+    positionAssessment: {
+      score: positionScore,
+      level: targetPositionPct >= 85
+        ? '过高'
+        : targetPositionPct >= 60 ? '中性' : '稳健',
+      rationale:
+        `当前仓位${rounded(distribution.positionPct)}%，`
+        + `按已核定V3动作预计为${targetPositionPct}%。`,
+    },
+    allocation: {
+      targetPositionPct,
+      targetCashReservePct: rounded(100 - targetPositionPct),
+      categoryTargets,
+      adjustments: conceptActions.map((item) => {
+        const current = finite(
+          (distribution.groups || []).find(
+            (group) => group.name === item.concept,
+          )?.accountWeightPct,
+        )
+        return {
+          target: item.concept,
+          action: item.targetWeightPct > current + 0.1
+            ? 'increase'
+            : item.targetWeightPct < current - 0.1
+              ? 'reduce'
+              : 'hold',
+          changePct: rounded(Math.abs(item.targetWeightPct - current)),
+          reason: item.reason,
+        }
+      }),
+      cashStrategy:
+        `按当前V3动作预计保留${rounded(100 - targetPositionPct)}%现金。`,
+      dynamicRules: [
+        '只有新的V3决策可以改变个股动作、价格和手数。',
+        '账户成交、T+1或现金变化后立即重新汇总。',
+      ],
+    },
+    concentration: {
+      level: finite(topConcept?.accountWeightPct) >= 35
+        ? '偏高'
+        : '可控',
+      note: topConcept
+        ? `${topConcept.name}当前占总资产${rounded(topConcept.accountWeightPct)}%。`
+        : '暂无可识别概念。',
+    },
+    stockActions,
+    recommendations: [],
+    conceptActions,
+    scenarioPlan: [
+      {
+        regime: 'strong',
+        signal: '市场转强且个股形成新的V3正期望决策',
+        targetPositionPct,
+        actions: ['重新运行V3并只执行最新核定动作'],
+      },
+      {
+        regime: 'weak',
+        signal: '市场转弱、价格触及风险边界或账户事实变化',
+        targetPositionPct,
+        actions: ['重新运行V3；账本硬止损优先'],
+      },
+    ],
+    risks: missingV3.length
+      ? [`${missingV3.join('、')}缺少当前有效V3决策，未生成调仓动作`]
+      : [],
+    decisionNodes: executable.map((item) => ({
+      key: 'stock',
+      title: `${item.name}${{
+        exit: '退出',
+        reduce: '减仓',
+        add: '加仓',
+      }[item.action]}`,
+      status: ['exit', 'reduce'].includes(item.action)
+        ? 'risk'
+        : 'ok',
+      conclusion: item.reason,
+      evidenceIds: item.evidenceIds,
+    })),
+  }, {
+    distribution,
+    allowedEvidenceIds,
+    allowedHoldingCodes: (distribution.stocks || []).map(
+      (stock) => stock.code,
+    ),
+    holdingCatalog: Object.fromEntries(
+      (distribution.stocks || []).map((stock) => {
+        const advice = adviceByCode?.[stock.code]?.advice
+          || adviceByCode?.[stock.code]
+          || {}
+        const score = advice.selectedV3Plan?.opportunityScore || {}
+        return [stock.code, {
+          quantScore: nullableNumber(score.pWinGivenFill) == null
+            ? null
+            : rounded(score.pWinGivenFill * 100),
+          highConfidence: nullableNumber(score.expectedNetR) > 0,
+        }]
+      }),
+    ),
+    recommendationCatalog: {},
+  })
+  normalized.decisionAuthority = {
+    engine: 'V3',
+    llmMayChangeDecision: false,
+    generatedAt: now,
+  }
+  return normalized
 }
 
 export function fallbackPortfolioAnalysis(

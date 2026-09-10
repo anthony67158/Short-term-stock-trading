@@ -3,29 +3,24 @@
 //   价格触及关键价位(买点/止损/止盈/补仓/减仓)后，在当前分时窗口内直接判定:
 //     · 先算【确定性信号】(基于腾讯公开分时 fetchTrendsTx + 日线 fetchKlineTx,computeTechnicals):
 //       买入侧看「止跌企稳/站回均价线/缩量」;卖出侧看「冲高滞涨/跌破均价/放量不涨」;止损侧看「真跌破而非插针」。
-//     · 再交给【LLM Judge(role:'judge')】做最终研判,喂它:本次交易意图 + 建议的确认条件(exitTiming)/
-//       失效条件(invalidation) + 确定性信号 + 技术面摘要 + 分时快照,产出 {decision, confidence, reason}。
+//     · 确定性信号与 V3 复核形成终态；LLM 不参与交易确认。
 //   decision:
 //     'confirm' → 立即执行买入/加仓/减仓/锁利润等明确动作。
 //     'wait'    → 本次终态维持观望/持有，原触发价结束，不再循环。
 //     'invalid' → 放弃本次操作，原计划失效，不再围绕该价纠缠。
 //
 // 关键约束:
-//   · 绝不触碰量化 /predict(36维OHLCV)模型口径——这里只用公开行情 + 通用技术指标 + LLM。
-//   · LLM 不可用/超时/解析失败 → 回退到确定性信号的结论,绝不阻断(宁可 wait,不误发强提示)。
+//   · 绝不触碰量化 /predict(36维OHLCV)模型口径——这里只用公开行情和通用技术指标。
 //   · 无状态:每次传入 alert/advice/quote,内部自取盘中数据,不缓存跨请求状态。
 
 import { fetchTrendsTx, fetchKlineTx } from './stock_detail.js';
 import { computeTechnicals, techSummaryForAI } from './_ta.js';
-import { callChatWithRetry, parseLLMJson } from './_llm.js';
-import { getModel, getReasoning } from './_llm_config.js';
 import { put, hasStorage } from './_blob.js';
 import { marketTimeContext } from './_market_time.js';
-import { isConfirmationPhase, isMinuteSnapshotFresh, normalizeConfidence } from '../shared/decisionGuards.js';
+import { isConfirmationPhase, isMinuteSnapshotFresh } from '../shared/decisionGuards.js';
 import {
   confirmationPolicy,
   fuseConfirmation,
-  shouldCallLlmJudge,
 } from '../shared/confirmPolicy.js';
 import {
   actionIntentOf,
@@ -42,7 +37,6 @@ import {
 } from '../shared/advicePriceContract.js';
 import { positionGateForAlert } from '../shared/alertPositionPolicy.js';
 import { buildJudgeKnowledgeActionAssessment } from '../shared/knowledgeAction.js';
-import { quantJudgeDiscipline } from '../shared/quantAdviceContext.js';
 import {
   compactStockFundSnapshot,
   compareStockFundSnapshots,
@@ -56,23 +50,6 @@ import {
   buildIntradayOpenSummary,
   buildReviewDecisionPacket,
 } from '../shared/reviewDecisionPacket.js';
-
-export const JUDGE_MAX_TOKENS = 260;
-export const JUDGE_MODEL_BUDGET_MS = 20000;
-
-export function buildJudgeUserPrompt(payload) {
-  const intent = String(payload?.动作类型 || '');
-  const outcomes = intent === 'buy'
-    ? '立即买入|维持观望|放弃买入'
-    : intent === 'add'
-      ? '立即加仓|维持持有|放弃加仓'
-      : intent === 'stop'
-        ? '立即止损|维持持有|放弃本次操作'
-        : '立即减仓|锁定利润|维持持有';
-  return '请判断此刻交易时机。数据如下(JSON):\n' + JSON.stringify(payload)
-    + `\n本次终局结论只能从“${outcomes}”中选择。`
-    + '\n输出格式:{"decision":"confirm|wait|invalid","terminalInstruction":"明确操作结论","priceLow":数字或null,"priceHigh":数字或null,"quantity":整数手数或0,"basisType":"已验证理论|实时资金与价格|重大催化","basis":"一句话可追溯依据","confidence":0-100,"reason":"一句话中文理由"}';
-}
 
 function compactText(value, maximum = 240) {
   return String(value || '')
@@ -520,105 +497,43 @@ export function deterministicJudge(side, prim, tech) {
   return { decision, score: round(score, 1), hits };
 }
 
-// ---- LLM Judge:最终研判闸门 ----
-// 喂:交易意图 + 建议的确认条件/失效条件 + 确定性结论 + 技术面摘要 + 分时快照。
-// 要求返回严格 JSON:{decision:'confirm'|'wait'|'invalid', confidence:0-100, reason:'一句话'}。
-async function llmJudge({
-  a,
-  name,
-  advice,
-  det,
-  reviewPacket,
-  deadlineAt,
-}) {
-  const model = getModel('judge');
-  if (!model) return null;   // 未配置 judge 端点/模型 → 跳过 LLM,用确定性结论
-  const intent = actionIntentOf(a);
-  const sideZh = actionLabelOf(a);
-  const adv = buildJudgeAdviceContext({ ...(a.judgeContext || {}), ...(advice || {}) });
-  const modelDiscipline = quantJudgeDiscipline(adv.quantContext);
-  const sys = '你是顶尖的A股短线操盘手，负责价格触发后的10秒终局确认。'
-    + '价格已经到达军师预设点位，你必须基于原军师计划和最新分时证据立即拍板，不得重新选价、不得延后到下一轮。'
-    + '你的职责只是执行闸门，不是重新生成军师计划：不得改变交易方向，不得创建新的观察价、止损目标或后续计划。'
-    + '军师建议是本次交易计划的上层约束：先核对其方向、手数、仓位、盈亏比、止损目标、技术资金消息依据与失效条件；'
-    + 'priceContract是服务端校验后的唯一权威价格契约，禁止改价或另造价位。'
-    + '当前持仓状态由服务端账本核验：无持仓只能买入，绝不能解释为加仓、减仓、卖出或止损；'
-    + '加仓必须确认原军师仍支持且触价后承接有效；减仓和锁利润要结合冲高回落、VWAP与量能；硬止损优先。'
-    + '本轮服务端最新资金是实时判断依据：必须同时分析主力与散户代理资金，并对比原军师生成时的资金基准；'
-    + '若资金关系由正面转为背离或主力转流出，必须降低买入/加仓把握；资金不可用时明确降级，不得沿用旧资金冒充实时。'
-    + '不要求所有指标同时同向：只要至少一类可追溯依据成立（已验证理论、实时资金与价格、重大催化）即可综合决断。'
-    + 'wait是本次触发的终态“维持观望/维持持有”，不是继续围绕该价格循环复核；invalid是放弃本次操作。'
-    + (modelDiscipline ? `量化模型纪律：${modelDiscipline}` : '')
-    + '只输出 JSON,不要多余文字。';
-  const payload = {
-    股票: `${name || a.code}(${a.code})`,
-    动作类型: intent,
-    本次交易意图: sideZh,
-    复核输入包: reviewPacket,
-    确定性闸门: {
-      结论: det.decision,
-      评分: det.score,
-      命中: det.hits,
-    },
-    量化模型纪律: modelDiscipline || null,
-  };
-  const messages = [
-    { role: 'system', content: sys },
-    { role: 'user', content: buildJudgeUserPrompt(payload) },
-  ];
-  try {
-    // Judge 只调用一次完整模型；20s 预算覆盖已观测到的上游首包延迟，
-    // 到时仍未返回则立即回退客观信号。
-    const startedAt = Date.now();
-    const remainingMs = Number(deadlineAt) > 0
-      ? Number(deadlineAt) - startedAt
-      : JUDGE_MODEL_BUDGET_MS;
-    if (remainingMs < 1000) return null;
-    const TIMEOUT_MS = Math.max(
-      1200,
-      Math.min(JUDGE_MODEL_BUDGET_MS, remainingMs),
-    );
-    const { resp, done } = await callChatWithRetry({
-      role: 'judge', model,
-      messages,
-      temperature: 0,
-      maxTokens: JUDGE_MAX_TOKENS,
-      timeoutMs: TIMEOUT_MS,
-      headerTimeoutMs: TIMEOUT_MS,
-      responseFormat: { type: 'json_object' },
-      reasoning: getReasoning('judge'),
-    }, { retries: 1, budgetLeftMs: () => TIMEOUT_MS - (Date.now() - startedAt) });
-    try {
-      if (!resp || resp.__err || !resp.ok) return null;
-      const j = await resp.json().catch(() => null);
-      const content = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
-      const { value } = parseLLMJson(content || '');
-      if (!value || !value.decision) return null;
-      const d = String(value.decision).toLowerCase();
-      const decision = ['confirm', 'wait', 'invalid'].includes(d) ? d : 'wait';
-      return {
-        decision,
-        terminalInstruction: compactText(
-          value.terminalInstruction,
-          160,
-        ),
-        priceLow: Number.isFinite(Number(value.priceLow))
-          ? Number(value.priceLow)
-          : null,
-        priceHigh: Number.isFinite(Number(value.priceHigh))
-          ? Number(value.priceHigh)
-          : null,
-        quantity: lotsOf(value.quantity),
-        basisType: compactText(value.basisType, 40),
-        basis: compactText(value.basis, 240),
-        confidence: Math.min(
-          normalizeConfidence(value.confidence),
-          adv.quantContext?.experimental ? 85 : 100,
-        ),
-        reason: String(value.reason || '').slice(0, 200),
-      };
-    } finally { done(); }
-  } catch { return null; }
+export function applyConfirmationFundGuard(
+  side,
+  deterministic,
+  fundContext,
+) {
+  if (
+    side !== 'buy'
+    || deterministic?.decision !== 'confirm'
+  ) return deterministic;
+  if (fundContext?.available !== true || !fundContext.current) {
+    return {
+      ...deterministic,
+      decision: 'wait',
+      hits: [
+        ...(deterministic?.hits || []),
+        '最新主力与小单资金不可用，本次不确认新增风险',
+      ],
+    };
+  }
+  const main = Number(fundContext.current.mainNetYi);
+  const retail = Number(fundContext.current.retailNetYi);
+  if (
+    Number.isFinite(main)
+    && Number.isFinite(retail)
+    && main < 0
+    && retail > 0
+  ) {
+    return {
+      ...deterministic,
+      decision: 'wait',
+      hits: [
+        ...(deterministic?.hits || []),
+        '主力流出且小单承接，本次不确认新增风险',
+      ],
+    };
+  }
+  return deterministic;
 }
 
 // ============ 对外主入口 ============
@@ -876,10 +791,15 @@ export async function judgeConfirmation({
     },
     now: observedAt,
   });
+  const guardedDet = applyConfirmationFundGuard(
+    side,
+    det,
+    fundContext,
+  );
   const signals = {
     side,
     primitives: prim,
-    deterministic: det,
+    deterministic: guardedDet,
     techVerdict: tech && tech.verdict,
     funds: fundContext,
     reviewDecisionPacket: reviewPacket,
@@ -899,59 +819,19 @@ export async function judgeConfirmation({
     return enriched;
   }
 
-  if (!shouldCallLlmJudge(side, det)) {
-    const fused = fuseConfirmation({
-      side,
-      deterministic: det,
-      llm: null,
-      observationAgeMs: prim.observationAgeMs,
-    });
-    const result = {
-      ...fused,
-      side,
-      signals,
-      source: 'ta',
-      actionIntent: intent,
-      knowledgeAction,
-    };
-    await logVerdict(a, name, prim, result);
-    return result;
-  }
-
-  // LLM 最终闸门(可回退)，最终结果由非对称融合策略裁决。
-  const callJudge = providers.llmJudge || llmJudge;
-  const llm = await callJudge({
-    side,
-    a,
-    name,
-    advice,
-    prim,
-    tech,
-    det,
-    position,
-    fundContext,
-    reviewPacket,
-    deadlineAt: Date.now() + JUDGE_MODEL_BUDGET_MS,
-  });
   const fused = fuseConfirmation({
     side,
-    deterministic: det,
-    llm,
+    deterministic: guardedDet,
+    llm: null,
     observationAgeMs: prim.observationAgeMs,
   });
   const result = {
     ...fused,
-    terminalInstruction: llm?.terminalInstruction || '',
-    priceLow: llm?.priceLow ?? null,
-    priceHigh: llm?.priceHigh ?? null,
-    quantity: llm?.quantity ?? 0,
-    basisType: llm?.basisType || '',
-    basis: llm?.basis || '',
     side,
     signals,
-    source: llm ? 'llm+ta' : 'ta',
+    source: 'ta',
     actionIntent: intent,
-    knowledgeAction: llm?.knowledgeAction || knowledgeAction,
+    knowledgeAction,
   };
   const terminal = finalize(result, prim);
   await logVerdict(a, name, prim, terminal);

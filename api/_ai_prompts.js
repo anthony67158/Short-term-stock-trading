@@ -21,11 +21,10 @@ export function isAdvisorMode(mode) {
 }
 
 export function llmRoleForAdviceMode(mode, reviewOrigin = '') {
-  if (
-    mode === 'review'
-    || REVIEW_ORIGINS.has(String(reviewOrigin || ''))
-  ) return 'review'
-  return isAdvisorMode(mode) ? 'advisor' : 'agent'
+  if (mode === 'review' || REVIEW_ORIGINS.has(String(reviewOrigin || ''))) {
+    return 'explain'
+  }
+  return isAdvisorMode(mode) ? 'explain' : 'assistant'
 }
 
 export function maxTokensForMode(

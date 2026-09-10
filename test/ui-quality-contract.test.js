@@ -1009,9 +1009,9 @@ test('移动端复合头部、分段按钮与批量进度使用稳定单列布�
   )
 })
 
-test('移动端三个工作区加军师工具占四栏且不悬浮遮挡内容', () => {
+test('移动端三个工作区加研究助手占四栏且不悬浮遮挡内容', () => {
   assert.match(assistant, /className={'ai-fab'/)
-  assert.match(assistant, /<span className="ai-fab-text">军师<\/span>/)
+  assert.match(assistant, /<span className="ai-fab-text">助手<\/span>/)
   assert.match(
     precision,
     /@media \(max-width:\s*900px\)\s*{[\s\S]*?\.nav-tabs\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s,

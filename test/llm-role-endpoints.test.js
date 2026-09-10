@@ -34,24 +34,18 @@ const sector = readFileSync(
   'utf8',
 )
 
-test('所有实际LLM能力映射为七个独立角色和十一个固定端点槽位', () => {
+test('实际LLM能力收敛为四个角色和五个固定端点槽位', () => {
   assert.deepEqual(Object.keys(ROLES), [
-    'advisor',
-    'review',
-    'portfolio',
-    'agent',
+    'explain',
+    'assistant',
     'daily',
     'sector',
-    'judge',
   ])
   assert.deepEqual(ROLE_ENDPOINT_SLOTS, {
-    advisor: 2,
-    review: 4,
-    portfolio: 1,
-    agent: 1,
+    explain: 2,
+    assistant: 1,
     daily: 1,
     sector: 1,
-    judge: 1,
   })
 })
 
@@ -64,7 +58,7 @@ test('每个角色只路由到自己的专用端点', () => {
         baseUrl: `https://${role}-${index + 1}.example/v1`,
         apiKey: `${role}-key-${index + 1}`,
         model: `${role}-model-${index + 1}`,
-        reasoning: role === 'advisor',
+        reasoning: role === 'explain',
         enabled: true,
       })),
     ]),
@@ -85,8 +79,8 @@ test('每个角色只路由到自己的专用端点', () => {
     assert.ok(endpoints.every((endpoint) =>
       endpoint.baseUrl.includes(role)))
   }
-  assert.equal(endpointCountForRole(config, 'advisor'), 2)
-  assert.equal(endpointCountForRole(config, 'review'), 4)
+  assert.equal(endpointCountForRole(config, 'explain'), 2)
+  assert.equal(endpointCountForRole(config, 'assistant'), 1)
 })
 
 test('旧版主端点和资源池可无损迁移到角色端点槽位', () => {
@@ -111,7 +105,7 @@ test('旧版主端点和资源池可无损迁移到角色端点槽位', () => {
   }
 
   assert.deepEqual(
-    resolveRoleEndpoints(legacy, 'advisor').map((endpoint) => ({
+    resolveRoleEndpoints(legacy, 'explain').map((endpoint) => ({
       baseUrl: endpoint.baseUrl,
       model: endpoint.model,
     })),
@@ -124,7 +118,7 @@ test('旧版主端点和资源池可无损迁移到角色端点槽位', () => {
     }],
   )
   assert.equal(
-    resolveRoleEndpoints(legacy, 'daily')[0].model,
+    resolveRoleEndpoints(legacy, 'assistant')[0].model,
     'agent-model',
   )
 })
@@ -134,16 +128,16 @@ test('旧配置缺少的固定槽位以停用状态补齐', () => {
     baseUrl: 'https://main.example/v1',
     apiKey: 'main-key',
     models: { advisor: 'advisor-main' },
-  }, 'advisor')
+  }, 'explain')
 
   assert.equal(migrated.length, 2)
   assert.equal(migrated[0].enabled, true)
-  assert.equal(migrated[1].id, 'advisor-2')
+  assert.equal(migrated[1].id, 'explain-2')
   assert.equal(migrated[1].enabled, false)
-  assert.equal(migrated[1].model, ROLES.advisor.def)
+  assert.equal(migrated[1].model, ROLES.explain.def)
 })
 
-test('旧配置缺少复核角色时不得借用军师端点', () => {
+test('旧advisor和agent配置迁移为解释与助手角色', () => {
   const legacy = {
     baseUrl: 'https://main.example/v1',
     apiKey: 'main-key',
@@ -158,10 +152,47 @@ test('旧配置缺少复核角色时不得借用军师端点', () => {
     },
   }
 
-  assert.deepEqual(resolveRoleEndpoints(legacy, 'review'), [])
-  const slots = roleEndpointSlots(legacy, 'review')
-  assert.equal(slots.length, 4)
-  assert.ok(slots.every((endpoint) => endpoint.enabled === false))
+  assert.equal(resolveRoleEndpoints(legacy, 'explain')[0].model, 'advisor-model')
+  assert.equal(resolveRoleEndpoints(legacy, 'advisor')[0].role, 'explain')
+})
+
+test('旧advisor空槽按顺序由portfolio补齐且不复制重复端点', () => {
+  const legacy = {
+    roleEndpoints: {
+      advisor: [{
+        baseUrl: 'https://advisor.example/v1',
+        apiKey: 'advisor-key',
+        model: 'advisor-model',
+      }, {
+        model: 'unused-placeholder',
+        enabled: false,
+      }],
+      portfolio: [{
+        baseUrl: 'https://portfolio.example/v1',
+        apiKey: 'portfolio-key',
+        model: 'portfolio-model',
+      }],
+      review: [{
+        baseUrl: 'https://advisor.example/v1',
+        apiKey: 'advisor-key',
+        model: 'advisor-model',
+      }],
+    },
+  }
+
+  assert.deepEqual(
+    resolveRoleEndpoints(legacy, 'explain').map((endpoint) => ({
+      baseUrl: endpoint.baseUrl,
+      model: endpoint.model,
+    })),
+    [{
+      baseUrl: 'https://advisor.example/v1',
+      model: 'advisor-model',
+    }, {
+      baseUrl: 'https://portfolio.example/v1',
+      model: 'portfolio-model',
+    }],
+  )
 })
 
 test('策略日报使用独立daily角色而不是复用agent', () => {
@@ -174,7 +205,7 @@ test('各入口按自己的角色判断专用端点是否可用', () => {
   assert.match(ai, /llmReady\(useRole\)/)
   assert.match(ai, /llmRoleForAdviceMode\(/)
   assert.doesNotMatch(ai, /getModel\('chat'\)/)
-  assert.match(agent, /llmReady\('agent'\)/)
+  assert.match(agent, /llmReady\('assistant'\)/)
   assert.match(dailyReport, /llmReady\('daily'\)/)
 })
 
@@ -187,15 +218,14 @@ test('复杂生成统一使用有界推理且工具规划不启用深度思考',
 })
 
 test('配置界面按角色展示端点且不再暴露通用资源池', () => {
-  assert.match(frontend, /7 个角色/)
-  assert.match(frontend, /11 个端点/)
-  assert.match(frontend, /复核角色/)
-  assert.match(frontend, /4 路并行/)
+  assert.match(frontend, /'explain'/)
+  assert.match(frontend, /'assistant'/)
   assert.match(frontend, /roleEndpoints/)
-  assert.match(frontend, /军师操作建议生成/)
-  assert.match(frontend, /复核角色/)
-  assert.match(frontend, /Number\(roleSlots\?\.\[role\]\) > 1/)
-  assert.match(frontend, /role !== 'advisor'/)
+  assert.match(frontend, /V3决策与组合解释/)
+  assert.match(frontend, /ROLE_ORDER\.length/)
+  assert.match(frontend, /role !== 'explain'/)
+  assert.doesNotMatch(frontend, /'judge'/)
+  assert.doesNotMatch(frontend, /'review'/)
   assert.doesNotMatch(frontend, /对话\/盘面分析/)
   assert.match(frontend, /`端点 \$\{index \+ 1\}`/)
   assert.doesNotMatch(frontend, /多端点资源池/)

@@ -1,5 +1,5 @@
 // ============ LLM 角色端点路由（角色隔离 + 熔断 + 故障转移）============
-// 新配置按角色保存固定槽位：advisor 两路、review 四路，其余角色一路。请求只能进入自身角色槽位；
+// 新配置按角色保存固定槽位：explain 两路，其余角色一路。请求只能进入自身角色槽位；
 // 多路角色按最少在途选择，并在网络错误/5xx/429 后切换备用端点。
 // 旧 baseUrl/endpoints 结构只在迁移期读取，保存新配置后不再跨角色共享。
 //
@@ -8,10 +8,9 @@
 //   连续失败达阈值 → 熔断冷却 COOLDOWN_MS;冷却到期自动半开重试(一次成功即清零恢复)。
 
 import {
+  canonicalLlmRole,
   ROLES,
-  resolveJudgeEndpoint,
   resolveRoleEndpoints,
-  resolveSectorEndpoint,
 } from './_llm_config.js';
 
 const COOLDOWN_MS = 60 * 1000;   // 熔断冷却:连续失败达阈值后暂时不选它
@@ -145,6 +144,7 @@ export function endpointsFrom(config) {
 //   发给一个并不提供该模型的网关只会报错。附加端点没配该角色模型 → 由 endpointServesRole 提前从
 //   该角色的路由候选里剔除,故正常不会走到这里的 fallback;万一走到也只回退传入 fallback,不借全局。
 export function modelForEndpoint(config, ep, role, fallback) {
+  role = canonicalLlmRole(role);
   if (ep && ep.models && ep.models[role]) return ep.models[role];
   if (ep && ep.id === 'default' && config && config.models && config.models[role]) return config.models[role];
   return fallback || '';
@@ -154,16 +154,16 @@ export function modelForEndpoint(config, ep, role, fallback) {
 //   主端点(default)始终承接(用全局模型);附加端点仅在自带该角色模型时才承接。
 //   → 保证请求只会被发到「确实提供对应模型」的网关,杜绝把主端点模型名硬塞给其它端点。
 export function endpointServesRole(ep, role) {
+  role = canonicalLlmRole(role);
   if (!ep) return false;
   if (!role) return true;
   if (ep.role) return ep.role === role;
-  if (role === 'judge') return ep.id === 'judge-dedicated';
-  if (role === 'sector') return ep.id === 'sector-dedicated';
   if (ep.id === 'default') return true;
   return !!(ep.models && ep.models[role]);
 }
 
 export function endpointsForRole(config, role) {
+  role = canonicalLlmRole(role);
   if (role) {
     const dedicated = resolveRoleEndpoints(config, role)
       .filter((endpoint) =>
@@ -191,49 +191,24 @@ export function endpointsForRole(config, role) {
       )
     ) return dedicated;
   }
-  if (role === 'judge') {
-    const judge = resolveJudgeEndpoint(config);
-    if (!judge || judge.enabled === false || !judge.baseUrl || !judge.apiKey || !judge.model) return [];
-    return [{
-      id: 'judge-dedicated',
-      baseUrl: judge.baseUrl,
-      apiKey: judge.apiKey,
-      weight: 1,
-      models: { judge: judge.model },
-      reasoning: { judge: !!judge.reasoning },
-    }];
-  }
-  if (role === 'sector') {
-    const sector = resolveSectorEndpoint(config);
-    if (!sector || sector.enabled === false || !sector.baseUrl || !sector.apiKey || !sector.model) return [];
-    return [{
-      id: 'sector-dedicated',
-      baseUrl: sector.baseUrl,
-      apiKey: sector.apiKey,
-      weight: 1,
-      models: { sector: sector.model },
-      reasoning: { sector: !!sector.reasoning },
-    }];
-  }
   const all = endpointsFrom(config);
   if (!role) return all;
   const served = all.filter((endpoint) => endpointServesRole(endpoint, role));
   return served.length ? served : all;
 }
 
-// 承接某角色的【可用端点数】。advisor 的数量是一次性生成并发上限的权威来源。
-// 通用生成角色保留最小 1，避免任务调度器因配置缺失进入零并发死锁；
-// 真正调用前仍由 llmReady(role)/poolFetch 拒绝无可用端点的请求。
+// 承接某物理角色的可用端点数。V3决策任务使用独立计算容量，
+// 不再由LLM端点数量决定。
 export function endpointCountForRole(config, role) {
-  const eps = endpointsForRole(config, role);
-  if (['review', 'judge', 'sector'].includes(role)) return eps.length;
-  return Math.max(1, eps.length);
+  role = canonicalLlmRole(role);
+  return endpointsForRole(config, role).length;
 }
 
 // 端点级深度思考解析:选定端点后按角色定是否启用 reasoning。
 //   端点显式配了该角色(true/false)→ 用之;否则回退全局 config.reasoning[role];再回退传入 fallback。
 //   注:附加端点 reasoning 里只存 true 的角色(见 _llm_config),故 undefined 即"该端点未单独指定"→ 回退全局。
 export function reasoningForEndpoint(config, ep, role, fallback) {
+  role = canonicalLlmRole(role);
   // ① 端点显式配了该角色(true/false)→ 用之(最高优先,用户对该端点的直接意愿)。
   if (ep && ep.reasoning && ep.reasoning[role] != null) return !!ep.reasoning[role];
   // ② 调用方明确要求开启(fallback=true)→ 尊重之。
@@ -253,6 +228,7 @@ export function reasoningForEndpoint(config, ep, role, fallback) {
 // role:传入时只在【承接该角色】的端点里选(附加端点须自带该角色模型),避免把请求路由到不提供对应模型的网关。
 //   若某角色只有主端点承接(附加端点都没配该角色模型),自然退化为单主端点。
 export function pickEndpoint(config, now = Date.now(), role) {
+  role = canonicalLlmRole(role);
   const eps = endpointsForRole(config, role);
   if (!eps.length) return null;
   const usable = eps.filter((e) => h(e.id).cooldownUntil <= now);
@@ -346,6 +322,7 @@ export async function poolFetch(config, path, {
   forceNoReason = false, forceReason = false, deferSuccess = false,
   headerTimeoutMs = timeoutMs,
 } = {}, maxTries = 2) {
+  role = canonicalLlmRole(role);
   const roleEps = endpointsForRole(config, role);
   if (!roleEps.length) return { resp: { __err: new Error('no LLM endpoint configured') }, endpoint: null };
   let releaseRole = () => {};
@@ -499,32 +476,4 @@ export function poolStatus(config, now = Date.now()) {
       cooling: s.cooldownUntil > now, cooldownMsLeft: Math.max(0, s.cooldownUntil - now),
     };
   });
-}
-
-export function judgeEndpointStatus(config, now = Date.now()) {
-  const endpoint = endpointsForRole(config, 'judge')[0];
-  if (!endpoint) return null;
-  const state = h(endpoint.id);
-  return {
-    id: endpoint.id,
-    baseUrl: endpoint.baseUrl,
-    inflight: state.inflight,
-    fails: state.fails,
-    cooling: state.cooldownUntil > now,
-    cooldownMsLeft: Math.max(0, state.cooldownUntil - now),
-  };
-}
-
-export function sectorEndpointStatus(config, now = Date.now()) {
-  const endpoint = endpointsForRole(config, 'sector')[0];
-  if (!endpoint) return null;
-  const state = h(endpoint.id);
-  return {
-    id: endpoint.id,
-    baseUrl: endpoint.baseUrl,
-    inflight: state.inflight,
-    fails: state.fails,
-    cooling: state.cooldownUntil > now,
-    cooldownMsLeft: Math.max(0, state.cooldownUntil - now),
-  };
 }

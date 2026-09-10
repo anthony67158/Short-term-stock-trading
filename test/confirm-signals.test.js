@@ -3,11 +3,8 @@ import assert from 'node:assert/strict'
 
 import {
   buildJudgeFundContext,
-  buildJudgeUserPrompt,
   deterministicJudge,
   intradayPrimitives,
-  JUDGE_MAX_TOKENS,
-  JUDGE_MODEL_BUDGET_MS,
   judgePriceContractGate,
   judgeConfirmation,
 } from '../api/_confirm.js'
@@ -109,24 +106,6 @@ test('午休后的确认窗口不拼接上午分钟线', () => {
   assert.equal(prim.winLow, 10.3)
 })
 
-test('Judge生成一次性终局结论、执行区间、手数与依据', () => {
-  const prompt = buildJudgeUserPrompt({
-    股票: '贵州茅台(600519)',
-    动作类型: 'buy',
-  })
-
-  assert.match(prompt, /"decision":"confirm\|wait\|invalid"/)
-  assert.match(prompt, /立即买入\|维持观望\|放弃买入/)
-  assert.match(prompt, /"priceLow":数字或null/)
-  assert.match(prompt, /"quantity":整数手数或0/)
-  assert.match(prompt, /"basisType"/)
-  assert.match(prompt, /"confidence":0-100/)
-  assert.match(prompt, /"reason":"一句话中文理由"/)
-  assert.doesNotMatch(prompt, /knowledgeAction|知行合一|可执行性/)
-  assert.ok(JUDGE_MAX_TOKENS <= 300)
-  assert.equal(JUDGE_MODEL_BUDGET_MS, 20000)
-})
-
 test('快速复核比较本轮服务端资金与原军师资金基准', () => {
   const context = buildJudgeFundContext({
     source: 'realtime',
@@ -147,11 +126,9 @@ test('快速复核比较本轮服务端资金与原军师资金基准', () => {
   assert.equal(context.change.relationChanged, true)
 })
 
-test('快速Judge每次触价重新拉取服务端主力与散户资金', async () => {
+test('确定性确认每次触价重新拉取服务端主力与散户资金', async () => {
   const now = Date.parse('2026-08-28T02:05:00.000Z')
   let fundCalls = 0
-  let receivedFundContext = null
-  let receivedReviewPacket = null
   const trends = Array.from({ length: 6 }, (_, index) => ({
     time: `10:0${index}`,
     price: 10 + index * 0.02,
@@ -216,41 +193,30 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
           historyComplete: false,
         }
       },
-      llmJudge: async ({ fundContext, reviewPacket }) => {
-        receivedFundContext = fundContext
-        receivedReviewPacket = reviewPacket
-        return {
-          decision: 'wait',
-          confidence: 82,
-          reason: '主力转流出且散户代理转流入，本次不执行',
-          basisType: '实时资金与价格',
-          basis: '主力与散户资金关系已反转',
-        }
-      },
     },
   })
 
   assert.equal(fundCalls, 1)
-  assert.equal(receivedFundContext.current.mainNetYi, -0.5)
-  assert.equal(receivedFundContext.current.retailNetYi, 0.6)
-  assert.equal(receivedFundContext.current.main5dYi, 2.87)
-  assert.equal(receivedFundContext.current.retail5dYi, -4.17)
+  assert.equal(result.signals.funds.current.mainNetYi, -0.5)
+  assert.equal(result.signals.funds.current.retailNetYi, 0.6)
+  assert.equal(result.signals.funds.current.main5dYi, 2.87)
+  assert.equal(result.signals.funds.current.retail5dYi, -4.17)
   assert.equal(
-    receivedFundContext.current.fiveDaySource,
+    result.signals.funds.current.fiveDaySource,
     'quote-aggregate',
   )
-  assert.equal(receivedFundContext.change.relationChanged, true)
+  assert.equal(result.signals.funds.change.relationChanged, true)
   assert.equal(
-    receivedReviewPacket.schemaVersion,
+    result.signals.reviewDecisionPacket.schemaVersion,
     'review-decision-packet.v1',
   )
-  assert.equal(receivedReviewPacket.channel, 'JUDGE')
+  assert.equal(result.signals.reviewDecisionPacket.channel, 'JUDGE')
   assert.equal(
-    receivedReviewPacket.current.intradayFromOpen.firstTime,
+    result.signals.reviewDecisionPacket.current.intradayFromOpen.firstTime,
     '10:00',
   )
   assert.equal(
-    receivedReviewPacket.requestedDecision.stage,
+    result.signals.reviewDecisionPacket.requestedDecision.stage,
     'EXECUTION_GATE',
   )
   assert.equal(result.signals.funds.current.source, 'realtime')
@@ -269,9 +235,8 @@ test('快速Judge每次触价重新拉取服务端主力与散户资金', async 
   )
 })
 
-test('快速Judge资金源失败时明确降级且不沿用旧资金冒充实时', async () => {
+test('确定性确认资金源失败时明确降级且不沿用旧资金冒充实时', async () => {
   const now = Date.parse('2026-08-28T02:05:00.000Z')
-  let receivedFundContext = null
   const trends = Array.from({ length: 6 }, (_, index) => ({
     time: `10:0${index}`,
     price: 10 + index * 0.02,
@@ -310,21 +275,13 @@ test('快速Judge资金源失败时明确降级且不沿用旧资金冒充实时
       fetchStockFund: async () => {
         throw new Error('fund source unavailable')
       },
-      llmJudge: async ({ fundContext }) => {
-        receivedFundContext = fundContext
-        return {
-          decision: 'wait',
-          confidence: 80,
-          reason: '最新资金缺失，本次不执行',
-        }
-      },
     },
   })
 
-  assert.equal(receivedFundContext.available, false)
-  assert.equal(receivedFundContext.current, null)
-  assert.equal(receivedFundContext.baseline.mainNetYi, 0.8)
-  assert.equal(receivedFundContext.change.status, 'UNAVAILABLE')
+  assert.equal(result.signals.funds.available, false)
+  assert.equal(result.signals.funds.current, null)
+  assert.equal(result.signals.funds.baseline.mainNetYi, 0.8)
+  assert.equal(result.signals.funds.change.status, 'UNAVAILABLE')
   assert.equal(result.signals.funds.current, null)
   assert.equal(result.decision, 'wait')
 })

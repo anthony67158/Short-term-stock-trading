@@ -70,6 +70,21 @@ for (const [code, name, price, action, lots, state] of values) {
       invalidation: '报价或账户变化后重新评估',
       nextOpenPlan: '下一交易时段重新评估',
       futurePlan: '按价格与风险条件管理',
+      ...(code === '600036'
+        ? {
+            v3Explanation: {
+              schemaVersion: 'v3-explanation.v1',
+              status: 'ready',
+              decisionId: `test-${code}`,
+              model: 'LOCAL_EXPLAIN_DOUBLE',
+              generatedAt: now,
+              summary: '当前持有路径的费后价值高于立即减仓。',
+              counterCase: '资金转弱时持有优势可能消失。',
+              invalidation: '价格或账户事实变化后重新运行V3。',
+              evidenceGap: '缺少真实盘中逐笔成交。',
+            },
+          }
+        : {}),
     },
   }
 }

@@ -6,34 +6,30 @@ import {
   resetPoolHealthForTests,
 } from '../api/_llm_pool.js'
 
-const config = {
-  roleEndpoints: {
-    advisor: [{
-      id: 'advisor-1',
-      role: 'advisor',
-      baseUrl: 'https://advisor.example/v1',
-      apiKey: 'test-key',
-      model: 'advisor-model',
-      enabled: true,
-    }],
-    review: [{
-      id: 'review-1',
-      role: 'review',
-      baseUrl: 'https://review.example/v1',
-      apiKey: 'test-key',
-      model: 'review-model',
-      enabled: true,
-    }],
-  },
-}
-
 const response = () => ({
   ok: true,
   status: 200,
   json: async () => ({}),
 })
 
-test('同一角色每个端点最多承接一个在途请求', async () => {
+const onePerRole = {
+  roleEndpoints: {
+    explain: [{
+      baseUrl: 'https://explain.example/v1',
+      apiKey: 'test-key',
+      model: 'explain-model',
+      enabled: true,
+    }],
+    assistant: [{
+      baseUrl: 'https://assistant.example/v1',
+      apiKey: 'test-key',
+      model: 'assistant-model',
+      enabled: true,
+    }],
+  },
+}
+
+test('同一解释端点最多承接一个在途请求', async () => {
   resetPoolHealthForTests()
   const originalFetch = global.fetch
   const pending = []
@@ -44,14 +40,14 @@ test('同一角色每个端点最多承接一个在途请求', async () => {
   }
 
   try {
-    const first = poolFetch(config, '/chat/completions', {
-      role: 'advisor',
-      body: { model: 'advisor-model' },
+    const first = poolFetch(onePerRole, '/chat/completions', {
+      role: 'explain',
+      body: { model: 'explain-model' },
     })
     await new Promise((resolve) => setTimeout(resolve, 0))
-    const second = poolFetch(config, '/chat/completions', {
-      role: 'advisor',
-      body: { model: 'advisor-model' },
+    const second = poolFetch(onePerRole, '/chat/completions', {
+      role: 'explain',
+      body: { model: 'explain-model' },
     })
     await new Promise((resolve) => setTimeout(resolve, 10))
 
@@ -69,56 +65,50 @@ test('同一角色每个端点最多承接一个在途请求', async () => {
   }
 })
 
-test('advisor与review容量互相独立', async () => {
+test('解释与助手容量互相独立', async () => {
   resetPoolHealthForTests()
   const originalFetch = global.fetch
   const pending = []
-  let calls = 0
+  const urls = []
   global.fetch = async (url) => {
-    calls++
-    return new Promise((resolve) => pending.push({ url, resolve }))
+    urls.push(url)
+    return new Promise((resolve) => pending.push(resolve))
   }
 
   try {
-    const advisor = poolFetch(config, '/chat/completions', {
-      role: 'advisor',
-      body: { model: 'advisor-model' },
+    const explain = poolFetch(onePerRole, '/chat/completions', {
+      role: 'explain',
+      body: { model: 'explain-model' },
     })
-    const review = poolFetch(config, '/chat/completions', {
-      role: 'review',
-      body: { model: 'review-model' },
+    const assistant = poolFetch(onePerRole, '/chat/completions', {
+      role: 'assistant',
+      body: { model: 'assistant-model' },
     })
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    assert.equal(calls, 2)
-    assert.equal(
-      pending.some((item) => item.url.startsWith('https://advisor.example')),
-      true,
-    )
-    assert.equal(
-      pending.some((item) => item.url.startsWith('https://review.example')),
-      true,
-    )
-    for (const item of pending.splice(0)) item.resolve(response())
-    await Promise.all([advisor, review])
+    assert.equal(urls.length, 2)
+    assert.ok(urls.some((url) =>
+      url.startsWith('https://explain.example')))
+    assert.ok(urls.some((url) =>
+      url.startsWith('https://assistant.example')))
+    for (const resolve of pending.splice(0)) resolve(response())
+    await Promise.all([explain, assistant])
   } finally {
-    for (const item of pending.splice(0)) item.resolve(response())
+    for (const resolve of pending.splice(0)) resolve(response())
     global.fetch = originalFetch
     resetPoolHealthForTests()
   }
 })
 
-test('四个复核请求会同时分散到四个独立端点', async () => {
+test('两路解释请求分散到两个解释端点', async () => {
   resetPoolHealthForTests()
   const originalFetch = global.fetch
   const pending = []
   const urls = []
-  const reviewConfig = {
+  const config = {
     roleEndpoints: {
-      review: Array.from({ length: 4 }, (_, index) => ({
-        id: `review-${index + 1}`,
-        role: 'review',
-        baseUrl: `https://review-${index + 1}.example/v1`,
+      explain: Array.from({ length: 2 }, (_, index) => ({
+        baseUrl: `https://explain-${index + 1}.example/v1`,
         apiKey: `key-${index + 1}`,
         model: `model-${index + 1}`,
         enabled: true,
@@ -131,16 +121,16 @@ test('四个复核请求会同时分散到四个独立端点', async () => {
   }
 
   try {
-    const requests = Array.from({ length: 4 }, () =>
-      poolFetch(reviewConfig, '/chat/completions', {
-        role: 'review',
-        body: { model: 'review-model' },
+    const requests = Array.from({ length: 2 }, () =>
+      poolFetch(config, '/chat/completions', {
+        role: 'explain',
+        body: { model: 'explain-model' },
       })
     )
     await new Promise((resolve) => setTimeout(resolve, 10))
 
-    assert.equal(urls.length, 4)
-    assert.equal(new Set(urls).size, 4)
+    assert.equal(urls.length, 2)
+    assert.equal(new Set(urls).size, 2)
     for (const resolve of pending.splice(0)) resolve(response())
     await Promise.all(requests)
   } finally {

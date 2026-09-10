@@ -567,13 +567,11 @@ async function runJudge({
   data,
   initialAdvice,
   alert,
-  calls,
   trace,
   now,
 }) {
   const judge = input.judge || {}
   const quote = liveQuote(judge.quote || input.trigger.quote, now)
-  let packetLength = 0
   const side = alert?.actKind === 'reduce'
     ? 'sell'
     : alert?.actKind === 'add'
@@ -621,15 +619,6 @@ async function runJudge({
         judge.fundFailure === true
           ? null
           : clone(judge.funds || {}),
-      llmJudge: async ({ reviewPacket }) => {
-        calls.judge += 1
-        packetLength = JSON.stringify(reviewPacket || {}).length
-        traceStep(trace, 'judge-llm-stub', {
-          packetSchema: reviewPacket?.schemaVersion,
-          packetLength,
-        })
-        return clone(judge.modelOutput)
-      },
     },
   })
   const wakeup = queueAdviceReviewForVerdict(
@@ -653,7 +642,7 @@ async function runJudge({
     result,
     wakeup,
     notification,
-    promptLength: packetLength,
+    promptLength: 0,
   }
 }
 
@@ -736,7 +725,6 @@ export async function runDecisionLifecycleHarnessCase(testCase) {
       data,
       initialAdvice: initial.result,
       alert,
-      calls,
       trace,
       now,
     })

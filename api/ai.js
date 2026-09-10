@@ -1042,6 +1042,80 @@ export default async function handler(req, res) {
   }
 
   const mode = (body && body.mode) || 'market';
+  if (mode === 't_advice') {
+    const streaming = body?.stream === true;
+    res.setHeader('Content-Type', streaming
+      ? 'text/event-stream; charset=utf-8' : 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    const finish = (value) => {
+      if (streaming) {
+        res.write(`event: result\ndata: ${JSON.stringify(value)}\n\n`);
+        return res.end();
+      }
+      return res.status(200).send(JSON.stringify(value));
+    };
+    const payload = body?.payload || {};
+    const code = String(payload.code || '');
+    const advice = accountAuth.account?.data?.advice?.[code]?.advice;
+    const plan = advice?.decisionPlan;
+    const valid = (
+      advice?.decisionSource?.engine === 'V3'
+      && advice?.decisionSource?.state === 'READY'
+      && plan?.decisionId
+      && Date.parse(plan.validUntil) > Date.now()
+    );
+    if (!valid) {
+      return finish({
+        ok: false,
+        mode,
+        error: '当前没有有效V3持仓决策，请先更新V3决策',
+      });
+    }
+    const stage = String(payload.tContext?.stage || 'idle');
+    const reference = Number(plan.prices?.reference) || null;
+    const target = Number(plan.prices?.target) || null;
+    let result = {
+      dir: 'none',
+      dirLabel: '遵循当前V3决策',
+      suggestQty: 0,
+      actionPlan: advice.actionPlan,
+      plain: '做T页面只负责记录真实买卖腿，不另行生成方向、价格或手数。',
+      support: Number(plan.prices?.stop) || null,
+      resistance: target,
+      quantNote: advice.quantNote || '',
+      fundNote: advice.fundNote || '',
+      invalidation: advice.invalidation || '',
+      ...(stage === 'buy_wait_sell'
+        ? { leg2Price: target }
+        : stage === 'sell_wait_buy'
+          ? { leg2Price: reference }
+          : {}),
+    };
+    result = applyTActionAdvicePolicy({
+      mode,
+      result,
+      payload,
+    });
+    return finish({
+      ok: true,
+      mode,
+      model: advice.decisionSource.modelVersion || 'V3',
+      updatedAt: Date.now(),
+      result,
+      meta: {
+        decisionSource: advice.decisionSource,
+        llmCalls: 0,
+      },
+    });
+  }
+  if (mode === 'plan') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    return res.status(410).send(JSON.stringify({
+      ok: false,
+      mode,
+      error: '旧交易计划生成入口已停用，请使用当前V3决策',
+    }));
+  }
   if (['buy_advice', 'hold_advice', 'review'].includes(mode)) {
     const streaming = body?.stream === true;
     res.setHeader('Content-Type', streaming
@@ -1102,10 +1176,8 @@ export default async function handler(req, res) {
       updatedAt: 0,
     };
   const effectiveReasoning = (role) => getReasoning(role);
-  const MODEL = getModel('agent');
-  // 主建议与复核严格分池：首次操作建议走 advisor，定时/Judge 复核走 review。
-  const ADVISOR_MODEL = getModel('advisor');
-  const REVIEW_MODEL = getModel('review');
+  const MODEL = getModel('assistant');
+  const ADVISOR_MODEL = getModel('explain');
   if (!llmReady(useRole)) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     return res.status(200).send(JSON.stringify({
@@ -1266,9 +1338,7 @@ export default async function handler(req, res) {
           degraded: true,
           fallbackOnly: true,
           mode,
-          model: useRole === 'review'
-            ? getModel('review')
-            : getModel('advisor'),
+          model: getModel('explain'),
           updatedAt: Date.now(),
           warning: error,
           result: fallback,
@@ -1279,9 +1349,7 @@ export default async function handler(req, res) {
         ok: false,
         degraded: true,
         mode,
-        model: useRole === 'review'
-          ? getModel('review')
-          : getModel('advisor'),
+        model: getModel('explain'),
         updatedAt: Date.now(),
         error,
         ...extra,
@@ -2297,7 +2365,7 @@ export default async function handler(req, res) {
       ? ensureEvidenceSnapshot()
       : null;
     const useModel = isAdvisor
-      ? (useRole === 'review' ? REVIEW_MODEL : ADVISOR_MODEL)
+      ? ADVISOR_MODEL
       : MODEL;
     // —— 编排层须与底层实际下发的 reasoning_effort 对齐 ——
     // 深度思考开关既可开在全局(config.reasoning[role]),也可开在【端点级】(ep.reasoning[role])。
@@ -2308,7 +2376,7 @@ export default async function handler(req, res) {
     const useReasoning = resolveReasoningMode(effectiveReasoning(useRole), fastMode, forceReasoning);
     const sysPrompt = isAdvisor
       ? (
-          useRole === 'review' || mode === 'review'
+          mode === 'review'
             ? ADVISOR_REVIEW_SYSTEM
             : fastMode
               ? ADVISOR_FAST_SYSTEM
@@ -2511,7 +2579,7 @@ export default async function handler(req, res) {
         temperature: 0.2,
         maxTokens: outputMaxTokens,
         timeoutMs: llmTimeout,
-        headerTimeoutMs: useRole === 'review'
+        headerTimeoutMs: mode === 'review'
           ? 12000
           : useReasoning
             ? Math.min(llmTimeout, 180000)
@@ -2594,7 +2662,7 @@ export default async function handler(req, res) {
         temperature: 0.2,   // JSON 结构化输出：低温提升稳定性与可解析率，减少字段漂移
         maxTokens: outputMaxTokens,
         timeoutMs: llmTimeout,
-        headerTimeoutMs: useRole === 'review'
+        headerTimeoutMs: mode === 'review'
           ? 12000
           : useReasoning
             ? Math.min(llmTimeout, 180000)

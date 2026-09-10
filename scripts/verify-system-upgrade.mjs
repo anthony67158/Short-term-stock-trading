@@ -112,15 +112,9 @@ try {
     await monitoredHolding.locator('.monitoring-rules').waitFor()
     assert.equal(
       await monitoredHolding
-        .locator('.action-command-primary')
+        .locator('.v3-decision-headline strong')
         .textContent(),
-      '继续持有',
-    )
-    assert.equal(
-      await monitoredHolding
-        .locator('.action-command-qty')
-        .textContent(),
-      '1手',
+      '继续持有 1 手',
     )
     assert.equal(
       await monitoredHolding
@@ -159,6 +153,13 @@ try {
           scrollWidth: element.scrollWidth,
           height: element.clientHeight,
           scrollHeight: element.scrollHeight,
+          decisionBottom:
+            element.querySelector('.card-decision-slot')
+              ?.getBoundingClientRect().bottom,
+          monitoringBottom: rules?.getBoundingClientRect().bottom,
+          metricsTop:
+            element.querySelector('.hold-card-metrics')
+              ?.getBoundingClientRect().top,
           rules: rows.length,
           monitoringBorderTop:
             containerStyle?.borderTopWidth,
@@ -205,6 +206,11 @@ try {
     )
     assert.equal(monitoredGeometry.ruleBorderTop, '0px')
     assert.equal(monitoredGeometry.redundantProgress, 0)
+    assert.ok(
+      monitoredGeometry.monitoringBottom
+        <= monitoredGeometry.metricsTop + 1,
+      JSON.stringify({ width, monitoredGeometry }),
+    )
     results.push({
       view: 'monitoring-card',
       width,
@@ -213,27 +219,45 @@ try {
     await monitoredHolding.screenshot({
       path: `${output}/${width}-monitoring-card.png`,
     })
+    if (width === 1440) {
+      await monitoredHolding.locator(
+        'summary[aria-label="立讯精密更多操作"]',
+      ).click()
+      await monitoredHolding.getByText(
+        '记录自主做T',
+        { exact: true },
+      ).click()
+      const tDialog = page.getByRole('dialog', {
+        name: /做T · 立讯精密/,
+      })
+      await tDialog.waitFor()
+      const tText = await tDialog.innerText()
+      assert.match(tText, /查看当前V3做T边界/)
+      assert.doesNotMatch(tText, /稳健|均衡|激进|生成做T参考/)
+      await tDialog.getByRole('button', {
+        name: '关闭做T弹层',
+        exact: true,
+      }).click()
+    }
     const immediateHolding = page.locator(
       '.trade-card[data-code="000001"]',
     )
-    await immediateHolding.locator('.action-command').waitFor()
+    await immediateHolding.locator('.v3-decision-summary').waitFor()
     assert.match(
       await immediateHolding
-        .locator('.action-command-primary')
+        .locator('.v3-decision-headline strong')
         .textContent(),
-      /清仓|退出观察/,
+      /等待退出前复核/,
     )
     assert.match(
       await immediateHolding
-        .locator('.action-command-text')
+        .locator('.v3-decision-reason')
         .textContent(),
-      /清仓/,
+      /约60秒/,
     )
     assert.equal(
-      await immediateHolding
-        .locator('.action-command-qty')
-        .textContent(),
-      '10手',
+      await immediateHolding.locator('.action-command-qty').count(),
+      0,
     )
     assert.equal(
       await immediateHolding.locator('.monitoring-rules').count(),
@@ -264,18 +288,21 @@ try {
     })
     const conditional = page.locator('.plan-cand').filter({ hasText: '演示候选A' })
     const approved = page.locator('.plan-cand').filter({ hasText: '演示候选B' })
-    assert.equal(
-      await conditional.locator('.action-command-qty').textContent(),
-      '预案最多 · 20手',
+    assert.match(
+      await conditional.locator('.v3-decision-headline strong').textContent(),
+      /等待回踩 84元/,
     )
-    assert.equal(await approved.locator('.action-command-qty').textContent(), '1手')
+    assert.equal(
+      await approved.locator('.v3-decision-headline strong').textContent(),
+      '待买入 1 手',
+    )
     const selectionOrigin = page.locator('.selection-origin > summary').first()
     if (await selectionOrigin.isVisible()) {
       await selectionOrigin.click()
       assert.equal(await page.locator('.selection-origin[open]').count(), 1)
     }
     await check('positions')
-    await page.locator('.plan-cand .stock-name-link').first().click()
+    await conditional.locator('.stock-name-link').click()
     await page.locator('.detail-panel .selection-origin').waitFor()
     await page.waitForTimeout(400)
     const dialog = await page.locator('.detail-panel').boundingBox()

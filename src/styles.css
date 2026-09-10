@@ -786,23 +786,6 @@ body {
 .evidence-title { color: var(--text); font-size: 11.5px; font-weight: 650; }
 .evidence-meta { color: var(--muted); font-size: 9.5px; font-variant-numeric: tabular-nums; }
 .evidence-summary { color: var(--text2); font-size: 10.5px; line-height: 1.45; }
-.proposal-list { display: flex; flex-direction: column; gap: 7px; margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--border); }
-.proposal-head { display: flex; align-items: center; gap: 5px; color: var(--text); font-size: 11px; font-weight: 700; }
-.proposal-card { display: flex; flex-direction: column; gap: 7px; padding: 10px; background: var(--surface-quiet, color-mix(in srgb, var(--color-accent) 5%, transparent)); border: 1px solid var(--border-soft); border-radius: 9px; }
-.proposal-card-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
-.proposal-action { padding: 1px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; }
-.proposal-action.buy { color: var(--red); background: rgba(224,67,47,.09); }
-.proposal-action.sell { color: var(--green); background: rgba(31,157,67,.09); }
-.proposal-prices { display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--muted); font-size: 10.5px; font-variant-numeric: tabular-nums; }
-.proposal-prices b { color: var(--text); }
-.proposal-reason { color: var(--text2); font-size: 11px; line-height: 1.5; }
-.proposal-confirm { color: var(--muted); font-size: 10.5px; }
-.proposal-evidence { color: var(--accent2); font-size: 9.5px; }
-.proposal-apply { align-self: flex-start; }
-.proposal-foot { color: var(--muted); font-size: 9.5px; }
-.proposal-notice { margin: 0 16px 8px; padding: 7px 9px; color: var(--text2); background: var(--surface-quiet); border: 1px solid var(--border-soft); border-radius: 8px; font-size: 11px; }
-.proposal-dialog-body p { margin: 0 0 10px; line-height: 1.6; }
-.proposal-dialog-grid { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; padding: 10px; margin-bottom: 10px; background: var(--surface-quiet); border-radius: 8px; font-size: 12px; }
 .theory-chip {
   font-size: 10.5px; padding: 2px 8px; border-radius: 5px;
   background: rgba(88,166,255,.10); color: #58a6ff; border: 1px solid rgba(88,166,255,.22);

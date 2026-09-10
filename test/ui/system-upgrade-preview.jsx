@@ -58,6 +58,12 @@ book.advice['002475'] = {
     invalidation: '跌破54元或主力净流出达到3亿元时退出。',
     fundNote: '当前主力净流入0.5亿元，未触发资金退出条件。',
     techNote: '现价54.5元位于分时均价54.3元上方。',
+    decisionSource: {
+      engine: 'V3',
+      state: 'READY',
+      evaluatedAt: now,
+      modelVersion: 'LOCAL_TEST_DOUBLE',
+    },
     decisionPlan: {
       schemaVersion: 'decision-plan.v2',
       decisionId: 'decision-demo-monitoring',
@@ -65,6 +71,7 @@ book.advice['002475'] = {
       action: 'HOLD',
       actionability: 'HOLD',
       quantity: { lots: 0 },
+      prices: { reference: 54.5, stop: 54, target: 56 },
       validUntil: new Date(now + 86400000).toISOString(),
     },
     monitoringPlan: {
@@ -132,13 +139,20 @@ book.advice['000001'] = {
     actionPlan: '清仓10手，按当前可卖数量人工执行并记录成交。',
     nextAction: '清仓10手，按当前可卖数量人工执行并记录成交。',
     opQty: '清仓10手',
+    decisionSource: {
+      engine: 'V3',
+      state: 'READY',
+      evaluatedAt: now,
+      modelVersion: 'LOCAL_TEST_DOUBLE',
+    },
     decisionPlan: {
       schemaVersion: 'decision-plan.v2',
       decisionId: 'decision-demo-immediate-exit',
       mode: 'hold_advice',
       action: 'EXIT',
-      actionability: 'READY',
+      actionability: 'CONDITIONAL',
       quantity: { lots: 10 },
+      prices: { reference: 11.7, stop: 10.26, target: 12.4 },
       validUntil: new Date(now + 86400000).toISOString(),
     },
     monitoringPlan: {
@@ -199,21 +213,32 @@ book.executionPlans = [{
 }]
 book.advice['002594'].advice = {
   ...book.advice['002594'].advice,
+  pullbackWatchPrice: 84,
+  stopPrice: 80,
+  targetPrice: 92,
+  decisionSource: {
+    engine: 'V3',
+    state: 'READY',
+    evaluatedAt: now,
+    modelVersion: 'LOCAL_TEST_DOUBLE',
+  },
   decisionPlan: {
     schemaVersion: 'decision-plan.v2',
+    decisionId: 'decision-demo-watch',
     action: 'WATCH',
     actionability: 'WATCH',
     quantity: { lots: 0 },
-    prices: { reference: 10, stop: 9.5, target: 11.5 },
+    prices: { reference: 84, stop: 80, target: 92 },
+    validUntil: new Date(now + 86400000).toISOString(),
     entryBudget: {
       state: 'ESTIMATED',
       executionAllowed: false,
       lots: 20,
-      referencePrice: 10,
-      stopPrice: 9.5,
-      targetPrice: 11.5,
-      costs: { estimatedNetAmount: 2005 },
-      stopLossAmount: 105,
+      referencePrice: 84,
+      stopPrice: 80,
+      targetPrice: 92,
+      costs: { estimatedNetAmount: 16805 },
+      stopLossAmount: 805,
       reasons: [],
     },
     actionPolicy: {
@@ -221,22 +246,41 @@ book.advice['002594'].advice = {
       nextSessionPlan: {
         action: 'BUY',
         session: 'NEXT_TRADING_DAY',
-        trigger: '回踩10元企稳后确认本次买点',
+        trigger: '回踩84元企稳后重新评估',
       },
     },
   },
+  v3Explanation: {
+    schemaVersion: 'v3-explanation.v1',
+    status: 'ready',
+    decisionId: 'decision-demo-watch',
+    model: 'LOCAL_EXPLAIN_DOUBLE',
+    generatedAt: now,
+    summary: '当前没有费后价值为正的可执行路径。',
+    counterCase: '若回踩后资金重新转强，原判断可能过于保守。',
+    invalidation: '价格或账户事实变化后重新运行V3。',
+    evidenceGap: '缺少真实盘中逐笔成交。',
+  },
   priceContract: {
     schemaVersion: 'advice-price-contract.v1',
-    levels: [{ key: 'watch_pullback', price: 10, direction: 'LTE', strict: true }],
+    levels: [{ key: 'watch_pullback', price: 84, direction: 'LTE', strict: true }],
   },
 }
 book.advice['688981'].advice.decisionPlan = {
   schemaVersion: 'decision-plan.v2',
+  decisionId: 'decision-demo-buy',
   action: 'BUY',
   actionability: 'READY',
   quantity: { lots: 1 },
   prices: { reference: 102, stop: 97, target: 112 },
   actionPolicy: { riskTier: 'FULL' },
+  validUntil: new Date(now + 86400000).toISOString(),
+}
+book.advice['688981'].advice.decisionSource = {
+  engine: 'V3',
+  state: 'READY',
+  evaluatedAt: now,
+  modelVersion: 'LOCAL_TEST_DOUBLE',
 }
 for (const entry of Object.values(book.advice)) {
   entry.at = now

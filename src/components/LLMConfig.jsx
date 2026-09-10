@@ -5,23 +5,17 @@ import { api } from '../apiBase'
 import { accountRequestHeaders } from '../quantModel'
 
 const ROLE_ORDER = [
-  'advisor',
-  'review',
-  'portfolio',
-  'agent',
+  'explain',
+  'assistant',
   'daily',
   'sector',
-  'judge',
 ]
 
 const ROLE_META = {
-  advisor: { icon: 'spark', label: '军师操作建议生成', badge: '2 路并行' },
-  review: { icon: 'shield', label: '复核角色', badge: '4 路并行' },
-  portfolio: { icon: 'layers', label: '持仓分布分析', badge: '组合' },
-  agent: { icon: 'brain', label: '智能体助手', badge: '工具调用' },
+  explain: { icon: 'spark', label: 'V3决策与组合解释', badge: '2 路并行' },
+  assistant: { icon: 'brain', label: '智能体助手', badge: '工具调用' },
   daily: { icon: 'history', label: '策略日报', badge: '日报' },
   sector: { icon: 'chart', label: '板块前瞻', badge: '板块' },
-  judge: { icon: 'gauge', label: '交易确认 Judge', badge: '低延迟' },
 }
 
 const CONFIG_REQUEST_TIMEOUT_MS = {
@@ -416,7 +410,7 @@ export default function LLMConfig() {
               ))}
             </datalist>
           </label>
-          {role !== 'advisor' && (
+          {role !== 'explain' && (
             <button
               type="button"
               className={'llm-reason-toggle' + (
@@ -477,7 +471,14 @@ export default function LLMConfig() {
           <div className="modal-title">
             <Icon name="brain" size={18} />
             模型角色与端点
-            <span className="llm-role-count">7 个角色 · 11 个端点</span>
+            <span className="llm-role-count">
+              {ROLE_ORDER.length} 个角色 · {
+                ROLE_ORDER.reduce(
+                  (sum, role) => sum + Math.max(1, Number(roleSlots?.[role]) || 1),
+                  0,
+                )
+              } 个端点
+            </span>
           </div>
           <button
             type="button"
@@ -496,7 +497,7 @@ export default function LLMConfig() {
               正在读取角色端点
             </div>
           ) : ROLE_ORDER.map((role) => {
-            const meta = ROLE_META[role] || ROLE_META.agent
+            const meta = ROLE_META[role] || ROLE_META.assistant
             const endpoints = roleEndpoints[role] || []
             return (
               <section className="llm-role-group" key={role}>

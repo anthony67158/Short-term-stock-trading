@@ -567,7 +567,7 @@ async function processAccount(
         a.enabled = false;
         a.phase = 'superseded';
         a.supersededAt = Date.now();
-        a.triggeredMsg = '军师主计划已更新，旧观察价自动撤销';
+        a.triggeredMsg = 'V3主决策已更新，旧观察价自动撤销';
         changed = true;
         continue;
       }
@@ -672,7 +672,7 @@ async function processAccount(
         a.enabled = false;
         a.phase = 'superseded';
         a.supersededAt = now;
-        a.triggeredMsg = '军师主计划已更新，旧执行确认自动撤销';
+        a.triggeredMsg = 'V3主决策已更新，旧执行确认自动撤销';
         changed = true;
         continue;
       }
@@ -774,7 +774,7 @@ async function processAccount(
         a.enabled = false;
         a.phase = 'superseded';
         a.supersededAt = Date.now();
-        a.triggeredMsg = '军师主计划已更新，旧执行确认自动撤销';
+        a.triggeredMsg = 'V3主决策已更新，旧执行确认自动撤销';
         delete a.confirmLease;
         changed = true;
         continue;

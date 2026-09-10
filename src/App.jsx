@@ -515,7 +515,7 @@ export function MainApp() {
             title="打开军师（⌘K / Ctrl+K / /）"
           >
             <Icon name="spark" size={14} />
-            <span>问军师</span>
+            <span>研究助手</span>
             <kbd>⌘K</kbd>
           </button>
           <div className="nav-meta">

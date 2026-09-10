@@ -1,19 +1,49 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { v3DecisionPresentation } from '../../shared/v3DecisionPresentation.js'
+import { loadV3Explanation } from '../v3Explanation.js'
 import Icon from './Icon'
 
 export default function V3DecisionSummary({
   advice, holdingLots = 0, stopPrice = null, managed = true,
   loading = false, detailed = false, view: preparedView, currentPrice,
-  sellableLots = null, monitoring = null,
+  sellableLots = null, code = '',
 }) {
   const [expanded, setExpanded] = useState(false)
+  const decisionId = advice?.decisionPlan?.decisionId || ''
+  const savedExplanation = advice?.v3Explanation?.decisionId === decisionId
+    ? advice.v3Explanation
+    : null
+  const savedExplanationKey = [
+    decisionId,
+    savedExplanation?.status,
+    savedExplanation?.generatedAt,
+  ].join(':')
+  const [explanation, setExplanation] = useState(savedExplanation)
+  const [explanationLoading, setExplanationLoading] = useState(false)
+  const [explanationError, setExplanationError] = useState('')
+  useEffect(() => {
+    setExplanation(savedExplanation)
+    setExplanationError('')
+    setExplanationLoading(false)
+  }, [savedExplanationKey])
   const view = preparedView || v3DecisionPresentation({
     advice, holdingLots, stopPrice, managed, loading, currentPrice, sellableLots,
   })
   const score = advice?.selectedV3Plan?.opportunityScore
   const probability = (value) => value != null && Number.isFinite(Number(value))
     ? `${(Number(value) * 100).toFixed(1)}%` : '暂无'
+  const requestExplanation = async () => {
+    if (!code || !decisionId || explanationLoading) return
+    setExplanationLoading(true)
+    setExplanationError('')
+    try {
+      setExplanation(await loadV3Explanation(code, decisionId))
+    } catch (error) {
+      setExplanationError(error?.message || '模型解读暂不可用')
+    } finally {
+      setExplanationLoading(false)
+    }
+  }
   return (
     <section className={`v3-decision-summary ${view.tone}`} aria-label="V3操作决策">
       <div className="v3-decision-eyebrow">
@@ -30,11 +60,6 @@ export default function V3DecisionSummary({
         {view.executable && <div><dt>参考价格</dt><dd>{view.reference}</dd></div>}
         <div><dt>风险边界</dt><dd>{view.protection}</dd></div>
       </dl>
-      {monitoring?.rules?.filter((rule) => rule.state === 'OBSERVING').map((rule) => (
-        <p className="v3-decision-reason" key={rule.id} role="status">
-          {rule.text || '条件持续观察'} · 倒计时 {rule.remainingSeconds} 秒
-        </p>
-      ))}
       {detailed && (
         <>
           <button type="button" className="v3-evidence-toggle" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
@@ -49,6 +74,34 @@ export default function V3DecisionSummary({
               <p>{advice?.fundNote || '资金数据暂不可用。'}</p>
               {score?.outOfDistribution && <p>部分行情特征超出训练范围，当前预测仍取自V3模型。</p>}
               {advice?.decisionSource?.modelVersion && <p>模型版本 {advice.decisionSource.modelVersion}</p>}
+              {explanation?.status === 'ready' ? (
+                <div className="v3-ai-explanation" aria-label="白话解读">
+                  <p><b>为什么</b>{explanation.summary}</p>
+                  <p><b>最强反方</b>{explanation.counterCase}</p>
+                  <p><b>何时失效</b>{explanation.invalidation}</p>
+                  <p><b>证据缺口</b>{explanation.evidenceGap}</p>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="v3-explain-btn"
+                  disabled={!code || !decisionId || explanationLoading}
+                  aria-busy={explanationLoading}
+                  onClick={requestExplanation}
+                >
+                  <Icon
+                    name={explanationLoading ? 'refresh' : 'spark'}
+                    className={explanationLoading ? 'spin' : ''}
+                    size={13}
+                  />
+                  {explanationLoading ? '正在解读' : '白话解读'}
+                </button>
+              )}
+              {(explanationError || explanation?.status === 'failed') && (
+                <p className="v3-explanation-error" role="status">
+                  {explanationError || explanation.error}
+                </p>
+              )}
             </div>
           )}
         </>

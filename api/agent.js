@@ -23,7 +23,6 @@ import {
 import {
   SECTOR_CONCEPT_EXPLANATION_MAX_TOKENS,
 } from '../shared/sectorConceptExplanation.js';
-import { sanitizeTradeProposal } from '../shared/tradeProposal.js';
 
 // ============ 股票 Agent：工具增强的智能体 ============
 // LLM 自主调用 skill 工具（查行情/选股/板块/涨停/异动/新闻…）多轮后综合作答
@@ -34,13 +33,7 @@ const TOOL_LABEL_CN = {
   search_stock: '股票搜索', get_quote: '实时行情', get_stock_detail: '公司主营',
   get_quant_score: '量化打分', screen_stocks: '条件选股', get_sector_rank: '板块资金排行',
   get_limit_pool: '涨停连板池', get_movers: '盘中异动', get_market: '大盘情绪', web_news: '联网新闻',
-  propose_trade_plan: '生成交易提案',
 };
-
-function toSecid(code) {
-  const c = String(code).trim();
-  return /^(6|9|5)/.test(c) ? '1.' + c : '0.' + c;
-}
 
 // ---------- Skill 工具定义（给 LLM 看的 schema） ----------
 const TOOLS = [
@@ -72,7 +65,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'get_quant_score',
-      description: '查询个股的【量化模型打分】：0~100综合分(越高越偏多)、偏多/偏空/中性判断、建议做T方向(正T低吸/反T高抛)、多因子解读(动量/均线/RSI/量价/均值回归)。分析或推荐某只个股、给买卖价参考、判断该不该买/该不该做T时，务必调用它作为量化依据。',
+      description: '查询个股量化与技术数据，用于解释动量、均线、RSI、量价和均值回归；这些数据只作研究证据，不能生成或覆盖V3交易动作。',
       parameters: { type: 'object', properties: { code: { type: 'string', description: '6位股票代码' } }, required: ['code'] },
     },
   },
@@ -136,30 +129,6 @@ const TOOLS = [
       parameters: { type: 'object', properties: { query: { type: 'string', description: '搜索词，如"贵州茅台"或"半导体 政策"' } }, required: ['query'] },
     },
   },
-  {
-    type: 'function',
-    function: {
-      name: 'propose_trade_plan',
-      description: '生成一个等待用户二次确认的交易计划/预警草案，本工具绝不下单也不写账号。只有数据充分、结论明确且给出可执行价格时才调用；观望或数据不足时不要调用。',
-      parameters: {
-        type: 'object',
-        properties: {
-          code: { type: 'string', description: '6位股票代码' },
-          name: { type: 'string', description: '股票名称' },
-          action: { type: 'string', enum: ['buy', 'add', 'reduce', 'sell'], description: '买入/加仓/减仓/卖出' },
-          entryPrice: { type: 'number', description: '触发关注的价格' },
-          targetPrice: { type: 'number', description: '可选目标价' },
-          stopPrice: { type: 'number', description: '可选止损价' },
-          qty: { type: 'integer', description: '可选计划手数' },
-          triggerOp: { type: 'string', enum: ['lte', 'gte'], description: 'lte=价格小于等于触发，gte=价格大于等于触发' },
-          reason: { type: 'string', description: '提案理由，最多一句话' },
-          confirmSignal: { type: 'string', description: '到价后仍需确认的信号' },
-          evidenceIds: { type: 'array', items: { type: 'string' }, description: '支持该提案的证据编号，如证据1' },
-        },
-        required: ['code', 'name', 'action', 'entryPrice', 'triggerOp', 'reason', 'evidenceIds'],
-      },
-    },
-  },
 ];
 
 // 外部数据源 fetch(东财等)统一超时护栏:原来裸 fetch 无超时,上游卡住会拖住整轮 SSE agent 流、
@@ -176,7 +145,7 @@ async function extFetch(url, opts = {}, timeoutMs = 8000) {
 }
 
 // ---------- Skill 工具执行器（真正调数据） ----------
-async function execTool(name, args, origin, allowedEvidenceIds = []) {
+async function execTool(name, args, origin) {
   const call = async (pathname, timeoutMs = 8000) => {
     // 内部 API 调用加超时保护(原来无超时——某个工具后端卡住会拖垮整轮 agent、烧光预算)
     // timeoutMs 可覆盖：普通工具 8s 足够；量化含冷启动需放宽(见 get_quant_score)
@@ -273,19 +242,13 @@ async function execTool(name, args, origin, allowedEvidenceIds = []) {
       const news = await fetchNews(kw, 6);
       return { query: kw, news };
     }
-    if (name === 'propose_trade_plan') {
-      const proposal = sanitizeTradeProposal(args, allowedEvidenceIds);
-      return proposal && proposal.evidenceIds.length
-        ? { proposal }
-        : { error: '提案字段、价格关系或证据编号无效' };
-    }
     return { error: 'unknown tool' };
   } catch (e) {
     return { error: String(e.message || e) };
   }
 }
 
-const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验的资深游资交易员+投研分析师。你能自主调用工具查实时行情、选股、板块资金、涨停池、盘中异动、大盘情绪、联网新闻，并用成熟的交易理论体系做出专业判断。
+const SYSTEM = `你是股票研究助手，负责调用工具查询实时行情、板块资金、涨停池、盘中异动、大盘情绪和联网新闻，并把证据解释清楚。V3与服务端风控拥有交易决策权；你不得生成或修改动作、价格、手数、路径、止损、目标和账户风险预算。
 
 【你精通并须在分析中灵活运用的交易理论/体系】
 - 市场情绪周期：冰点→修复→发酵→高潮→退潮，用涨停家数、连板高度、炸板率、晋级率判断当前处在周期哪个阶段，决定进攻还是防守。
@@ -313,18 +276,19 @@ const SYSTEM = `你是"操盘手 Alpha"，一位有十年A股短线实战经验�
 【工作方式】
 1. 自主决定调用哪些工具、调几次，多轮调用直到信息足够。
 2. 【效率铁律·非常重要】同一步需要多个数据时，务必在**同一轮里一次性发起多个工具调用**（系统会并行执行、显著更快），不要一次只调一个、来回磨蹭。例如做选股时，第一轮就同时调 get_market + get_sector_rank + get_limit_pool + get_movers 把全景一次拿全。
-3. 【推荐/选股/遍览市场（最复杂，按此配方走，避免超时）】
-   - 第1轮（并行）：get_market（大盘能不能做）+ get_sector_rank（强势主线）+ get_limit_pool（连板梯队/情绪）+ get_movers inflow（主力抢筹）。必要时同轮再加 screen_stocks（按主力净流入或涨幅筛一批候选）。
-   - 第2轮（并行）：从上一轮锁定 3~5 个候选，对它们**同时**调 get_quant_score（逐只量化打分+买卖价位）。消息面不是必需——只在明显需要催化剂佐证时，对最强的 1 只补一次 web_news，不要每只都查新闻(会拖慢)。
-   - 第3轮：直接综合成文，不再调工具。
-   - 目标是**2~3 轮出结论**：先铺全景、再深挖候选、然后总结，切忌一只一只慢慢串行查，也不要在细枝末节上反复补查。凑够数据就果断下结论。
-4. 【分析个股】一轮内并行 get_quote + get_stock_detail + **get_quant_score(量化打分+技术买卖价位，分析/推荐个股必调)** (+web_news)，从量化打分、情绪周期位置、量价、资金、题材、支撑压力多维度分析，给出短线操作倾向。引用量化分时说人话（如"量化分72偏多、模型建议正T低吸"），并把 buyZone/sellZone/止损止盈等具体价位告诉用户。
+3. 【市场研究（最复杂，按此配方走，避免超时）】
+   - 第1轮（并行）：get_market + get_sector_rank + get_limit_pool + get_movers，必要时同轮再加 screen_stocks 形成研究样本。
+   - 第2轮（并行）：对3~5个样本同时调用 get_quant_score；只在需要核验催化时补一次 web_news。
+   - 第3轮：直接总结证据、分歧和风险，不输出交易提案。
+   - 目标是2~3轮完成，避免逐只串行查询。
+4. 【分析个股】一轮内并行 get_quote + get_stock_detail + get_quant_score，必要时补 web_news。解释量价、资金、题材、支撑压力和证据缺口；用户问买卖时明确以页面当前V3指令为准，不自行给出动作、价格或手数。
 5. 【判断大盘/能不能做】用情绪周期理论 + 涨跌比/涨停数/资金判断当前阶段和策略。
 6. 用户提到股票名没代码，先 search_stock（可与其他工具同轮并行）。
-7. 当数据充分且你给出明确可执行的买入/加仓/减仓/卖出价位时，必须先调用 propose_trade_plan 生成草案，再输出结论；观望、持有不动或数据不足时禁止生成提案。该草案只供用户二次确认，不是成交指令。
+7. 禁止生成交易提案或写入计划；只能解释数据、最强反方、失效证据和需要重新运行V3的条件。
 
 【铁律】
 - 只依据工具返回的真实数据，绝不编造代码/价格/数据；没有就说不知道。
+- 不得替代V3回答“现在买卖什么、什么价、多少手”，也不得把研究排序写成可执行指令。
 - 每个结论都要有"数据+理论"双支撑，像老手带徒弟一样把逻辑讲透，但不啰嗦。
 - 是客观分析和交易参考，不是买卖指令；结尾简短提示风险与纪律。
 
@@ -348,9 +312,9 @@ export default async function handler(req, res) {
   // 运行时配置优先：预热同步缓存后取 agent 独立端点和模型。
   await ensureConfig();
   const aiSearchConfig = await ensureAiSearchConfig();
-  const AGENT_MODEL = getModel('agent');
-  const AGENT_REASONING = getReasoning('agent');
-  if (!llmReady('agent')) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: 'agent 角色端点未配置' })); }
+  const AGENT_MODEL = getModel('assistant');
+  const AGENT_REASONING = getReasoning('assistant');
+  if (!llmReady('assistant')) { applyCors(res); res.setHeader('Content-Type', 'application/json; charset=utf-8'); return res.status(200).send(JSON.stringify({ ok: false, error: '助手端点未配置' })); }
 
   // ===== SSE 流式：边分析边推送(工具进度 + 答案 token)，用户实时看到进展、不再"超时空手" =====
   const { emit: send } = makeSSE(res);
@@ -491,7 +455,6 @@ export default async function handler(req, res) {
     ];
 
     const toolTrace = [];
-    const actionProposals = [];
     const MAX_ROUNDS = 6;
     const START = Date.now();
     const BUDGET = 115000; // 总预算 115s（FC 超时已放到 600s）；多轮工具调用 + 流式总结的慢模型不再被误杀
@@ -509,7 +472,7 @@ export default async function handler(req, res) {
         && !conceptExplanationMode;
       return callChat({
         model: AGENT_MODEL,
-        role: 'agent',
+        role: 'assistant',
         messages,
         ...(useTools
           ? {
@@ -562,29 +525,22 @@ export default async function handler(req, res) {
       const parsed = toolCalls.map((tc) => { let args = {}; try { args = JSON.parse(tc.function.arguments || '{}'); } catch { /* ignore */ } return { tc, args }; });
       parsed.forEach(({ tc, args }) => send('tool', { status: 'calling', tool: tc.function.name, label: TOOL_LABEL_CN[tc.function.name] || tc.function.name, args }));
       // 并行执行
-      const allowedEvidenceIds = evidenceLog.map((item) => item.id);
       const results = await Promise.all(parsed.map(({ tc, args }) =>
-        execTool(tc.function.name, args, origin, allowedEvidenceIds)
+        execTool(tc.function.name, args, origin)
       ));
       parsed.forEach(({ tc, args }, i) => {
         const r = results[i] || {};
         const ok = !r.error;
-        const isProposal = tc.function.name === 'propose_trade_plan';
-        const addedEvidence = ok && !isProposal
+        const addedEvidence = ok
           ? appendEvidence(evidenceFromTool(tc.function.name, args, r, { now: Date.now() }))
           : [];
         const evidenceIds = addedEvidence.map((item) => item.id);
-        if (ok && r.proposal && actionProposals.length < 5
-            && !actionProposals.some((item) => item.id === r.proposal.id)) {
-          actionProposals.push(r.proposal);
-        }
         toolTrace.push({ tool: tc.function.name, args, evidenceIds });
         // 给前端一个"查到了什么"的极简摘要(条数/关键值)，让进度更有信息量
         let brief = '';
         if (Array.isArray(r.list)) brief = `${r.list.length} 条`;
         else if (r.count != null) brief = `${r.count} 条`;
         else if (r.name) brief = r.name;
-        else if (r.proposal) brief = '草案已生成';
         send('tool', { status: ok ? 'done' : 'error', tool: tc.function.name, label: TOOL_LABEL_CN[tc.function.name] || tc.function.name, brief, error: ok ? undefined : String(r.error).slice(0, 60) });
         messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ _evidenceIds: evidenceIds, ...r }).slice(0, 6000) });
       });
@@ -625,7 +581,7 @@ export default async function handler(req, res) {
       theoryRefs,
       evidence: evidenceLog,
       searchReference,
-      actionProposals,
+      actionProposals: [],
       model: AGENT_MODEL,
       updatedAt: Date.now(),
       answer: answerBuf,

@@ -50,13 +50,13 @@ const roleConfig = {
 test('角色端点可按角色和槽位复用已保存Key', () => {
   assert.deepEqual(
     resolveLlmConfigTarget(roleConfig, {
-      role: 'advisor',
+      role: 'explain',
       slot: 1,
       baseUrl: 'https://advisor.example/v1',
       apiKey: '',
     }),
     {
-      endpointId: 'advisor-1',
+      endpointId: 'explain-1',
       baseUrl: 'https://advisor.example/v1',
       apiKey: 'advisor-secret',
     },
@@ -66,13 +66,13 @@ test('角色端点可按角色和槽位复用已保存Key', () => {
 test('尚未保存的合法角色槽位可用新连接验证', () => {
   assert.deepEqual(
     resolveLlmConfigTarget(roleConfig, {
-      role: 'advisor',
+      role: 'explain',
       slot: 2,
       baseUrl: 'https://advisor-2.example/v1',
       apiKey: 'advisor-2-secret',
     }),
     {
-      endpointId: 'advisor-2',
+      endpointId: 'explain-2',
       baseUrl: 'https://advisor-2.example/v1',
       apiKey: 'advisor-2-secret',
     },
@@ -82,20 +82,20 @@ test('尚未保存的合法角色槽位可用新连接验证', () => {
 test('已保存Key不得复用于任意外部Base URL', () => {
   assert.deepEqual(
     resolveLlmConfigTarget(roleConfig, {
-      role: 'advisor',
+      role: 'explain',
       slot: 1,
       baseUrl: 'https://other.example/v1',
       apiKey: '',
     }),
     {
-      endpointId: 'advisor-1',
+      endpointId: 'explain-1',
       baseUrl: 'https://other.example/v1',
       apiKey: '',
     },
   )
   assert.match(
     resolveLlmConfigTarget(roleConfig, {
-      role: 'advisor',
+      role: 'explain',
       slot: 3,
     }).error,
     /槽位/,
@@ -116,9 +116,9 @@ test('旧版端点验证契约在迁移期仍可复用已保存Key', () => {
   )
 })
 
-test('模型测试预算至少120秒且FC显式声明可用持仓模型', () => {
+test('模型测试预算至少120秒且FC显式声明解释模型', () => {
   assert.equal(MODEL_TEST_TIMEOUT_MS, 120000)
-  assert.match(serverless, /PORTFOLIO_MODEL:\s*DeepSeek-V4-Pro/)
+  assert.match(serverless, /EXPLAIN_MODEL:\s*DeepSeek-V4-Pro/)
 })
 
 test('配置页按角色和槽位验证、测试各自端点', () => {

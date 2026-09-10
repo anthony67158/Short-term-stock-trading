@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 import { buildUserPrompt } from '../api/_ai_prompts.js'
 import {
@@ -210,4 +211,27 @@ test('三类军师提示词都明确消费做T阶段而不是重新猜测动作'
     }),
     /本轮做T已完成.*今日可卖0手/,
   )
+})
+
+test('做T策略入口只读取当前V3决策且不再调用模型生成方向', () => {
+  const api = readFileSync(
+    new URL('../api/ai.js', import.meta.url),
+    'utf8',
+  )
+  const branch = api.slice(
+    api.indexOf("if (mode === 't_advice')"),
+    api.indexOf("if (mode === 'plan')"),
+  )
+  const frontend = readFileSync(
+    new URL('../src/components/PlanTab.jsx', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(branch, /decisionSource\?\.engine === 'V3'/)
+  assert.match(branch, /applyTActionAdvicePolicy/)
+  assert.match(branch, /llmCalls:\s*0/)
+  assert.doesNotMatch(branch, /callChat|ensureConfig|getModel/)
+  assert.match(frontend, /查看当前V3做T边界/)
+  assert.doesNotMatch(frontend, /按历史规律生成做T策略/)
+  assert.doesNotMatch(frontend, /生成做T参考/)
 })
