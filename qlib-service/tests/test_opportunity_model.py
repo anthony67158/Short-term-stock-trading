@@ -21,6 +21,8 @@ from opportunity_contract import (  # noqa: E402
 )
 from opportunity_model import (  # noqa: E402
     ARTIFACT_FILENAMES,
+    ENSEMBLE_ARTIFACT_FILENAMES,
+    ENSEMBLE_PREDICTION_CONTRACT_VERSION,
     PREDICTION_CONTRACT_VERSION,
     _CatBoostJsonRanker,
     predict_opportunity_items,
@@ -223,6 +225,81 @@ class OpportunityModelTest(unittest.TestCase):
         self.assertAlmostEqual(result["expectedNetR"], 0.65)
         self.assertAlmostEqual(result["netRLowerBound"], -0.5)
         self.assertAlmostEqual(result["expectedShortfall10"], -1.3)
+        self.assertAlmostEqual(result["rankingScore"], 0.5)
+
+    def test_seed_ensemble_averages_member_predictions_before_decision(self):
+        metadata = meta()
+        identity = {
+            "method": "sigmoid",
+            "coefficient": 1.0,
+            "intercept": 0.0,
+        }
+        rank_value = {
+            "method": "isotonic",
+            "sampleCount": 100,
+            "score": [-1.0, 0.0, 1.0],
+            "expectedNetR": [-0.5, 0.5, 1.5],
+        }
+        rank_calibration = {
+            "method": "empirical-cdf",
+            "sampleCount": 100,
+            "scoreQuantiles": [-1.0, 0.0, 1.0],
+        }
+        metadata.update({
+            "predictionContract":
+                ENSEMBLE_PREDICTION_CONTRACT_VERSION,
+            "modelHeads": [
+                slot
+                for slot in ENSEMBLE_ARTIFACT_FILENAMES
+                if slot != "meta"
+            ],
+            "ensembleSize": 2,
+            "ensembleMembers": [{
+                "seed": 42,
+                "calibration": {
+                    "pFill": identity,
+                    "pWinGivenFill": identity,
+                },
+                "rankingCalibration": rank_calibration,
+                "rankValueCalibration": rank_value,
+                "q10CalibrationOffset": 0.0,
+            }, {
+                "seed": 7,
+                "calibration": {
+                    "pFill": identity,
+                    "pWinGivenFill": identity,
+                },
+                "rankingCalibration": rank_calibration,
+                "rankValueCalibration": rank_value,
+                "q10CalibrationOffset": 0.0,
+            }],
+            "rankBlendWeight": 0.5,
+        })
+        member = lambda p_fill, p_win, q10: {
+            "pFill": FakeModel(p_fill),
+            "pWinGivenFill": FakeModel(p_win),
+            "winPayoffR": FakeModel(2.0),
+            "lossPayoffR": FakeModel(-1.0),
+            "netRLower10": FakeModel(q10),
+            "ranking": FakeModel(0.0),
+        }
+
+        result = predict_opportunity_items(
+            {"items": [item()]},
+            models={
+                "ensemble": [
+                    member(0.2, 0.2, -0.4),
+                    member(0.8, 0.8, -0.2),
+                ],
+            },
+            metadata=metadata,
+        )[0]
+
+        self.assertEqual(result["state"], "READY")
+        self.assertAlmostEqual(result["pFill"], 0.5)
+        self.assertAlmostEqual(result["pWinGivenFill"], 0.5)
+        self.assertAlmostEqual(result["expectedNetR"], 0.5)
+        self.assertAlmostEqual(result["netRLowerBound"], -0.3)
         self.assertAlmostEqual(result["rankingScore"], 0.5)
 
     def test_v5_request_can_use_loaded_v4_model_during_cutover(self):

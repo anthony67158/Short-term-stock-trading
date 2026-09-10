@@ -17,7 +17,11 @@ from upload_opportunity_model import (  # noqa: E402
     ARTIFACT_FILENAMES,
     publish_opportunity_release,
 )
-from opportunity_model import PREDICTION_CONTRACT_VERSION  # noqa: E402
+from opportunity_model import (  # noqa: E402
+    ENSEMBLE_ARTIFACT_FILENAMES,
+    ENSEMBLE_PREDICTION_CONTRACT_VERSION,
+    PREDICTION_CONTRACT_VERSION,
+)
 
 
 class FakeBucket:
@@ -37,6 +41,59 @@ class FakeBucket:
 
 
 class UploadOpportunityModelTest(unittest.TestCase):
+    def test_uploads_seed_ensemble_with_its_own_artifact_layout(self):
+        bucket = FakeBucket()
+        with tempfile.TemporaryDirectory() as directory:
+            for slot, filename in ENSEMBLE_ARTIFACT_FILENAMES.items():
+                content = "{}"
+                if slot == "meta":
+                    content = json.dumps({
+                        "schemaVersion": "opportunity-score.v1",
+                        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+                        "modelVersion": "opportunity-score.ensemble3",
+                        "featureNames": list(FEATURE_NAMES),
+                        "predictionContract":
+                            ENSEMBLE_PREDICTION_CONTRACT_VERSION,
+                        "modelHeads": ["ensemble"],
+                        "ensembleSize": 2,
+                        "ensembleMembers": [{
+                            "seed": 42,
+                            "calibration": {},
+                            "rankingCalibration": {},
+                            "rankValueCalibration": {},
+                        }, {
+                            "seed": 7,
+                            "calibration": {},
+                            "rankingCalibration": {},
+                            "rankValueCalibration": {},
+                        }],
+                        "shadowEligible": False,
+                        "shadowOnly": True,
+                        "productionEligible": False,
+                    })
+                with open(
+                    os.path.join(directory, filename),
+                    "w",
+                    encoding="utf-8",
+                ) as handle:
+                    handle.write(content)
+
+            manifest = publish_opportunity_release(
+                bucket,
+                directory,
+                activate_baseline=True,
+            )
+
+        self.assertEqual(
+            set(manifest["files"]),
+            set(ENSEMBLE_ARTIFACT_FILENAMES),
+        )
+        self.assertEqual(
+            manifest["predictionContract"],
+            ENSEMBLE_PREDICTION_CONTRACT_VERSION,
+        )
+        self.assertFalse(manifest["productionEligible"])
+
     def test_uploads_hashed_artifacts_before_atomic_manifest(self):
         bucket = FakeBucket()
         with tempfile.TemporaryDirectory() as directory:
