@@ -125,7 +125,7 @@ export function v3DecisionPresentation({
   }
   return {
     headline, reason, timing, tone, icon, executable, action, qty,
-    isV3, ready, waiting, hardStop,
+    isV3, ready, waiting, hardStop, exitReviewRequired,
     kind: { BUY: 'buy', ADD: 'add', EXIT: 'sell', REDUCE: 'reduce', HOLD: 'hold', WATCH: 'wait' }[action],
     actionable: executable,
     quantity: executable ? `${qty}手` : '',

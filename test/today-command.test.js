@@ -10,7 +10,7 @@ function entry(advice) {
     advice: { decisionSource: { engine: 'V3', state: 'READY' }, ...advice } }
 }
 
-test('当前指令优先退出风险并保留服务端核定数量', () => {
+test('当前指令优先展示退出复核但不提前暴露可执行手数', () => {
   const advice = new Map([
     ['600001:hold_advice', entry({
       mode: 'hold_advice',
@@ -84,8 +84,9 @@ test('当前指令优先退出风险并保留服务端核定数量', () => {
   })
 
   assert.equal(commands[0].code, '600001')
-  assert.equal(commands[0].state, 'READY_EXIT')
-  assert.equal(commands[0].quantity, '2手')
+  assert.equal(commands[0].state, 'CONFIRMING')
+  assert.equal(commands[0].quantity, '')
+  assert.match(commands[0].actionLabel, /退出前复核/)
   assert.equal(commands[1].state, 'WAITING')
   assert.equal(commands[1].quantity, '')
   assert.equal(commands[1].riskAmount, 180)

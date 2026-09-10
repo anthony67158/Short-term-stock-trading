@@ -184,6 +184,8 @@ export function buildTodayCommandList({
             ? 'RECORD'
             : executionReady && isContinuousTrading(now)
               ? exitSide ? 'READY_EXIT' : 'READY'
+              : view?.exitReviewRequired === true
+                ? 'CONFIRMING'
               : ['confirming', 'reviewing'].includes(alertPhase)
                 ? 'CONFIRMING'
                 : view?.actionable === true
