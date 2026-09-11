@@ -73,19 +73,19 @@ test('匿名调用持仓诊断必须在采集行情与调用模型前返回401',
   })
 })
 
-test('持仓诊断只使用鉴权账号快照并由V3汇总动作', () => {
+test('持仓诊断只使用鉴权账号快照并由系统决策汇总动作', () => {
   assert.match(source, /authorizePaidRequest\(req\)/)
   assert.match(source, /accountAuth\.account\?\.data/)
   assert.doesNotMatch(source, /body\.(?:holding|account|cash)/)
   assert.match(source, /fetchAiSearchReference\(/)
   assert.match(source, /stock_detail\?/)
-  assert.match(source, /buildV3PortfolioAnalysis\(/)
+  assert.match(source, /buildDecisionPortfolioAnalysis\(/)
   assert.match(source, /generatePortfolioExplanation\(/)
   assert.match(source, /role:\s*'explain'/)
   assert.doesNotMatch(source, /toolChoice:\s*'required'/)
 })
 
-test('持仓诊断采集T+1约束并只汇总已有V3动作', () => {
+test('持仓诊断采集T+1约束并只汇总已有系统动作', () => {
   assert.match(source, /t1StatusOf\(/)
   assert.match(source, /selectPortfolioCandidates\(/)
   assert.match(source, /candidateRows/)
@@ -97,7 +97,7 @@ test('持仓诊断采集T+1约束并只汇总已有V3动作', () => {
 test('解释模型只能补充四段文字且不能修复或重写执行单', () => {
   assert.match(source, /summary、counterCase、/)
   assert.match(source, /invalidation、evidenceGap/)
-  assert.match(source, /normalizeV3Explanation\(/)
+  assert.match(source, /normalizeDecisionExplanation\(/)
   assert.match(source, /explanationOnly:\s*true/)
   assert.doesNotMatch(source, /repairLowQualityAnalysis/)
   assert.doesNotMatch(source, /normalizePortfolioAnalysis\(/)

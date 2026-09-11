@@ -1,4 +1,9 @@
-export const V3_EXPLANATION_SCHEMA_VERSION = 'v3-explanation.v2'
+import {
+  isDecisionEngineAdvice,
+} from './decisionEngineSource.js'
+
+export const DECISION_EXPLANATION_SCHEMA_VERSION =
+  'decision-explanation.v1'
 
 const OUTPUT_FIELDS = new Set([
   'summary',
@@ -95,29 +100,35 @@ function projectDecisionEvidence(value) {
   }
 }
 
-export function currentV3Advice(accountData, code, decisionId) {
+export function currentDecisionAdvice(accountData, code, decisionId) {
   if (!/^\d{6}$/.test(String(code || '')) || !decisionId) return null
   const entry = accountData?.advice?.[code]
   const advice = entry?.advice
   if (
-    advice?.decisionSource?.engine !== 'V3'
+    !isDecisionEngineAdvice(advice)
     || advice?.decisionPlan?.decisionId !== decisionId
   ) return null
   return { entry, advice }
 }
 
-export function cachedV3Explanation(advice, decisionId) {
-  const value = advice?.v3Explanation
-  return value?.schemaVersion === V3_EXPLANATION_SCHEMA_VERSION
+export function cachedDecisionExplanation(advice, decisionId) {
+  const value = advice?.decisionExplanation ?? advice?.v3Explanation
+  return [
+    DECISION_EXPLANATION_SCHEMA_VERSION,
+    'v3-explanation.v2',
+  ].includes(value?.schemaVersion)
     && value.decisionId === decisionId
     && ['ready', 'failed', 'running'].includes(value.status)
     ? value
     : null
 }
 
-export function buildV3ExplanationPacket(advice = {}) {
+export function buildDecisionExplanationPacket(advice = {}) {
   const plan = advice.decisionPlan || {}
-  const score = advice.selectedV3Plan?.opportunityScore || {}
+  const score = (
+    advice.selectedDecisionPlan
+    ?? advice.selectedV3Plan
+  )?.opportunityScore || {}
   const evidence = projectDecisionEvidence(advice.decisionEvidence)
   const knownGaps = evidence?.knownGaps
     || evidenceGaps(advice.decisionSource?.missingEvidence)
@@ -128,7 +139,7 @@ export function buildV3ExplanationPacket(advice = {}) {
       )
     : null
   return {
-    schemaVersion: 'v3-explanation-packet.v2',
+    schemaVersion: 'decision-explanation-packet.v1',
     decisionId: plan.decisionId,
     action: plan.action,
     actionability: plan.actionability,
@@ -162,7 +173,7 @@ export function buildV3ExplanationPacket(advice = {}) {
   }
 }
 
-export function normalizeV3Explanation(value, {
+export function normalizeDecisionExplanation(value, {
   decisionId,
   model,
   now = Date.now(),
@@ -180,7 +191,7 @@ export function normalizeV3Explanation(value, {
       )
     : null
   const explanation = {
-    schemaVersion: V3_EXPLANATION_SCHEMA_VERSION,
+    schemaVersion: DECISION_EXPLANATION_SCHEMA_VERSION,
     status: 'ready',
     decisionId: clean(decisionId, 120),
     model: clean(model, 100),
@@ -201,9 +212,9 @@ export function normalizeV3Explanation(value, {
   return explanation
 }
 
-export function failedV3Explanation(decisionId, error, now = Date.now()) {
+export function failedDecisionExplanation(decisionId, error, now = Date.now()) {
   return {
-    schemaVersion: V3_EXPLANATION_SCHEMA_VERSION,
+    schemaVersion: DECISION_EXPLANATION_SCHEMA_VERSION,
     status: 'failed',
     decisionId: clean(decisionId, 120),
     generatedAt: Number(now) || Date.now(),

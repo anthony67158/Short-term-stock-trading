@@ -3,15 +3,15 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
-  buildV3ExplanationPacket,
-  cachedV3Explanation,
-  currentV3Advice,
-  normalizeV3Explanation,
-  V3_EXPLANATION_SCHEMA_VERSION,
-} from '../shared/v3Explanation.js'
+  buildDecisionExplanationPacket,
+  cachedDecisionExplanation,
+  currentDecisionAdvice,
+  normalizeDecisionExplanation,
+  DECISION_EXPLANATION_SCHEMA_VERSION,
+} from '../shared/decisionExplanation.js'
 import {
   mutateExplanation,
-} from '../api/v3_explain.js'
+} from '../api/decision_explain.js'
 
 const decisionPlan = {
   decisionId: 'decision.v3',
@@ -88,7 +88,7 @@ const advice = {
 }
 
 test('解释包只投影V3已核定事实', () => {
-  const packet = buildV3ExplanationPacket(advice)
+  const packet = buildDecisionExplanationPacket(advice)
   assert.deepEqual(packet.prices, {
     reference: 10,
     stop: 9,
@@ -110,13 +110,13 @@ test('解释输出拒绝动作价格手数等越权字段', () => {
     invalidation: '触发既定失效条件时重评。',
     evidenceGap: '无',
   }
-  assert.equal(normalizeV3Explanation(valid, {
+  assert.equal(normalizeDecisionExplanation(valid, {
     decisionId: 'decision.v3',
     model: 'explain-model',
     now: 1,
     evidenceGaps: [],
   }).status, 'ready')
-  assert.equal(normalizeV3Explanation({
+  assert.equal(normalizeDecisionExplanation({
     ...valid,
     evidenceGap: '缺少基本面和做空力量',
   }, {
@@ -125,7 +125,7 @@ test('解释输出拒绝动作价格手数等越权字段', () => {
     now: 1,
     evidenceGaps: ['资金逐日历史仅1个交易日'],
   }).evidenceGap, '资金逐日历史仅1个交易日')
-  assert.throws(() => normalizeV3Explanation({
+  assert.throws(() => normalizeDecisionExplanation({
     ...valid,
     action: 'SELL',
   }, { decisionId: 'decision.v3' }), /越权字段/)
@@ -138,7 +138,7 @@ test('缓存和权威建议必须绑定当前decisionId', () => {
         advice: {
           ...advice,
           v3Explanation: {
-            schemaVersion: V3_EXPLANATION_SCHEMA_VERSION,
+            schemaVersion: DECISION_EXPLANATION_SCHEMA_VERSION,
             status: 'ready',
             decisionId: 'decision.v3',
           },
@@ -146,22 +146,22 @@ test('缓存和权威建议必须绑定当前decisionId', () => {
       },
     },
   }
-  const current = currentV3Advice(account, '600001', 'decision.v3')
+  const current = currentDecisionAdvice(account, '600001', 'decision.v3')
   assert.ok(current)
   assert.equal(
-    cachedV3Explanation(current.advice, 'decision.v3')?.status,
+    cachedDecisionExplanation(current.advice, 'decision.v3')?.status,
     'ready',
   )
-  assert.equal(currentV3Advice(account, '600001', 'stale'), null)
+  assert.equal(currentDecisionAdvice(account, '600001', 'stale'), null)
 })
 
 test('解释接口只读取权威账号且不改写决策字段', () => {
   const source = readFileSync(
-    new URL('../api/v3_explain.js', import.meta.url),
+    new URL('../api/decision_explain.js', import.meta.url),
     'utf8',
   )
   assert.match(source, /authorizePaidRequest\(req\)/)
-  assert.match(source, /currentV3Advice/)
+  assert.match(source, /currentDecisionAdvice/)
   assert.match(source, /role:\s*'explain'/)
   assert.match(source, /forceNoReason:\s*true/)
   assert.match(source, /evidenceGap只能逐项复述facts\.knownGaps/)
@@ -187,7 +187,7 @@ test('解释保存冲突会重读权威建议且只追加解释字段', async ()
   let writes = 0
   let saved = null
   const explanation = {
-    schemaVersion: V3_EXPLANATION_SCHEMA_VERSION,
+    schemaVersion: DECISION_EXPLANATION_SCHEMA_VERSION,
     status: 'ready',
     decisionId: 'decision.v3',
     summary: '当前计划解释',
@@ -226,7 +226,7 @@ test('解释保存冲突会重读权威建议且只追加解释字段', async ()
     originalPlan,
   )
   assert.deepEqual(
-    saved.data.advice['600001'].advice.v3Explanation,
+    saved.data.advice['600001'].advice.decisionExplanation,
     explanation,
   )
 })

@@ -2,6 +2,10 @@ import {
   executionPrice,
   tradeFees,
 } from './ashareStrategyExecution.js'
+import {
+  DECISION_ENGINE_ID,
+  isDecisionEngineAdvice,
+} from './decisionEngineSource.js'
 
 function finite(value, fallback = 0) {
   const number = Number(value)
@@ -1046,7 +1050,7 @@ export function normalizePortfolioAnalysis(
   }
 }
 
-export function buildV3PortfolioAnalysis({
+export function buildDecisionPortfolioAnalysis({
   distribution = {},
   adviceByCode = {},
   evidenceIds: sourceEvidenceIds = [],
@@ -1058,7 +1062,7 @@ export function buildV3PortfolioAnalysis({
   )]
   const totalAssets = positive(distribution.totalAssets)
   const projectedByCode = new Map()
-  const missingV3 = []
+  const missingDecisions = []
   const stockActions = (distribution.stocks || []).map((stock, index) => {
     const entry = adviceByCode?.[stock.code]
     const advice = entry?.advice || entry || {}
@@ -1074,7 +1078,7 @@ export function buildV3PortfolioAnalysis({
     )
     const expiresAt = Date.parse(plan.validUntil)
     const current = (
-      source.engine === 'V3'
+      isDecisionEngineAdvice(advice)
       && source.state === 'READY'
       && plan.decisionId
       && Number.isFinite(expiresAt)
@@ -1105,7 +1109,7 @@ export function buildV3PortfolioAnalysis({
     ) {
       action = 'watch'
     }
-    if (!current) missingV3.push(stock.code)
+    if (!current) missingDecisions.push(stock.code)
 
     const deltaWeightPct = (
       totalAssets > 0
@@ -1128,8 +1132,8 @@ export function buildV3PortfolioAnalysis({
       advice.actionPlan
       || (
         current
-          ? '当前V3没有核定新的调仓动作'
-          : '当前没有有效且未过期的V3决策'
+          ? '当前决策模型没有核定新的调仓动作'
+          : '当前没有有效且未过期的系统决策'
       ),
       320,
     )
@@ -1143,7 +1147,7 @@ export function buildV3PortfolioAnalysis({
       trigger: text(plan.trigger || advice.actionPlan, 220),
       invalidation: text(
         advice.invalidation
-        || '报价、账户交易事实或V3决策版本变化后重新评估',
+        || '报价、账户交易事实或系统决策版本变化后重新评估',
         220,
       ),
       reason,
@@ -1200,7 +1204,7 @@ export function buildV3PortfolioAnalysis({
     ([concept, targetWeightPct]) => ({
       concept,
       targetWeightPct,
-      reason: '由当前持仓和已核定V3动作汇总',
+      reason: '由当前持仓和已核定系统动作汇总',
       evidenceIds: allowedEvidenceIds.slice(0, 3),
     }),
   )
@@ -1215,7 +1219,7 @@ export function buildV3PortfolioAnalysis({
           add: '加仓',
         }[item.action]}${item.name}`
       ).join('；')
-    : '当前没有经过V3核定的新调仓动作'
+    : '当前没有经过系统核定的新调仓动作'
   const topConcept = distribution.groups?.[0]
   const positionScore = Math.max(
     0,
@@ -1223,13 +1227,13 @@ export function buildV3PortfolioAnalysis({
   )
   const normalized = normalizePortfolioAnalysis({
     headline: executable.length
-      ? '按当前V3决策执行组合调整'
-      : '当前组合维持原仓位，等待新的V3决策',
+      ? '按当前系统决策执行组合调整'
+      : '当前组合维持原仓位，等待新的系统决策',
     executionSummary: {
       verdict: executable.length ? 'rebalance' : 'hold',
       todayGoal,
       nextReviewTrigger:
-        '任一股票V3决策、价格或账户交易事实变化后重新汇总',
+        '任一股票系统决策、价格或账户交易事实变化后重新汇总',
     },
     positionAssessment: {
       score: positionScore,
@@ -1238,7 +1242,7 @@ export function buildV3PortfolioAnalysis({
         : targetPositionPct >= 60 ? '中性' : '稳健',
       rationale:
         `当前仓位${rounded(distribution.positionPct)}%，`
-        + `按已核定V3动作预计为${targetPositionPct}%。`,
+        + `按已核定系统动作预计为${targetPositionPct}%。`,
     },
     allocation: {
       targetPositionPct,
@@ -1262,9 +1266,9 @@ export function buildV3PortfolioAnalysis({
         }
       }),
       cashStrategy:
-        `按当前V3动作预计保留${rounded(100 - targetPositionPct)}%现金。`,
+        `按当前系统动作预计保留${rounded(100 - targetPositionPct)}%现金。`,
       dynamicRules: [
-        '只有新的V3决策可以改变个股动作、价格和手数。',
+        '只有新的系统决策可以改变个股动作、价格和手数。',
         '账户成交、T+1或现金变化后立即重新汇总。',
       ],
     },
@@ -1282,19 +1286,19 @@ export function buildV3PortfolioAnalysis({
     scenarioPlan: [
       {
         regime: 'strong',
-        signal: '市场转强且个股形成新的V3正期望决策',
+        signal: '市场转强且个股形成新的系统正期望决策',
         targetPositionPct,
-        actions: ['重新运行V3并只执行最新核定动作'],
+        actions: ['重新运行决策模型并只执行最新核定动作'],
       },
       {
         regime: 'weak',
         signal: '市场转弱、价格触及风险边界或账户事实变化',
         targetPositionPct,
-        actions: ['重新运行V3；账本硬止损优先'],
+        actions: ['重新运行决策模型；账本硬止损优先'],
       },
     ],
-    risks: missingV3.length
-      ? [`${missingV3.join('、')}缺少当前有效V3决策，未生成调仓动作`]
+    risks: missingDecisions.length
+      ? [`${missingDecisions.join('、')}缺少当前有效系统决策，未生成调仓动作`]
       : [],
     decisionNodes: executable.map((item) => ({
       key: 'stock',
@@ -1320,7 +1324,10 @@ export function buildV3PortfolioAnalysis({
         const advice = adviceByCode?.[stock.code]?.advice
           || adviceByCode?.[stock.code]
           || {}
-        const score = advice.selectedV3Plan?.opportunityScore || {}
+        const score = (
+          advice.selectedDecisionPlan
+          ?? advice.selectedV3Plan
+        )?.opportunityScore || {}
         return [stock.code, {
           quantScore: nullableNumber(score.pWinGivenFill) == null
             ? null
@@ -1332,7 +1339,7 @@ export function buildV3PortfolioAnalysis({
     recommendationCatalog: {},
   })
   normalized.decisionAuthority = {
-    engine: 'V3',
+    engine: DECISION_ENGINE_ID,
     llmMayChangeDecision: false,
     generatedAt: now,
   }

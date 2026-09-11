@@ -3,7 +3,7 @@ import { accountRequestHeaders } from './quantModel.js'
 
 const REQUEST_TIMEOUT_MS = 30_000
 
-export async function loadV3Explanation(code, decisionId, {
+export async function loadDecisionExplanation(code, decisionId, {
   signal,
 } = {}) {
   const controller = new AbortController()
@@ -12,7 +12,7 @@ export async function loadV3Explanation(code, decisionId, {
   else signal?.addEventListener('abort', abort, { once: true })
   const timer = setTimeout(abort, REQUEST_TIMEOUT_MS)
   try {
-    const response = await fetch(api('/api/v3_explain'), {
+    const response = await fetch(api('/api/decision_explain'), {
       method: 'POST',
       cache: 'no-store',
       signal: controller.signal,

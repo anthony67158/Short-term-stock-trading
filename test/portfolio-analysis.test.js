@@ -2,12 +2,15 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  buildV3PortfolioAnalysis,
+  buildDecisionPortfolioAnalysis,
   buildPortfolioDecisionNodes,
   normalizePortfolioAnalysis,
   sanitizePortfolioAnalysisRequest,
   selectPortfolioCandidates,
 } from '../shared/portfolioAnalysis.js'
+import {
+  DECISION_ENGINE_ID,
+} from '../shared/decisionEngineSource.js'
 
 const distribution = {
   totalAssets: 100000,
@@ -220,9 +223,9 @@ test('目标现金与仓位类别会收敛到目标总仓位口径', () => {
   })
 })
 
-test('组合执行单只汇总当前V3动作且未复核退出不得提前执行', () => {
+test('组合执行单只汇总当前系统动作且未复核退出不得提前执行', () => {
   const validUntil = new Date(Date.now() + 60_000).toISOString()
-  const pending = buildV3PortfolioAnalysis({
+  const pending = buildDecisionPortfolioAnalysis({
     distribution,
     evidenceIds: ['E1'],
     quantEvidenceIds: { '300476': 'E1' },
@@ -231,7 +234,7 @@ test('组合执行单只汇总当前V3动作且未复核退出不得提前执行
         advice: {
           actionPlan: '等待退出前复核',
           decisionSource: {
-            engine: 'V3',
+            engine: DECISION_ENGINE_ID,
             state: 'READY',
             hardProtection: false,
           },
@@ -251,7 +254,7 @@ test('组合执行单只汇总当前V3动作且未复核退出不得提前执行
   assert.equal(pending.stockActions[0].action, 'watch')
   assert.equal(pending.decisionAuthority.llmMayChangeDecision, false)
 
-  const reviewed = buildV3PortfolioAnalysis({
+  const reviewed = buildDecisionPortfolioAnalysis({
     distribution,
     evidenceIds: ['E1'],
     quantEvidenceIds: { '300476': 'E1' },
@@ -260,7 +263,7 @@ test('组合执行单只汇总当前V3动作且未复核退出不得提前执行
         advice: {
           actionPlan: '复核后减仓2手',
           decisionSource: {
-            engine: 'V3',
+            engine: DECISION_ENGINE_ID,
             state: 'READY',
             exitReviewRequired: false,
           },
@@ -283,7 +286,7 @@ test('组合执行单只汇总当前V3动作且未复核退出不得提前执行
   assert.equal(reviewed.executionPlan.orders.length, 1)
   assert.equal(reviewed.executionPlan.orders[0].action, 'reduce')
   assert.equal(reviewed.executionPlan.orders[0].estimatedLots, 2)
-  assert.equal(reviewed.decisionAuthority.engine, 'V3')
+  assert.equal(reviewed.decisionAuthority.engine, DECISION_ENGINE_ID)
 })
 
 test('持仓诊断生成金额手数明确且资金守恒的组合执行单', () => {
