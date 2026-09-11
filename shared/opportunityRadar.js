@@ -20,6 +20,9 @@ import {
 import {
   OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
 } from './opportunityScoreContract.js'
+import {
+  sanitizeStrategyPatternConfirmation,
+} from './strategyPatternConfirmation.js'
 
 export const OPPORTUNITY_RADAR_SCHEMA_VERSION =
   'opportunity-radar.v2'
@@ -382,6 +385,11 @@ function resolveCandidateSector(candidate = {}, maps) {
 function formulaEntryPlan(candidate, lane) {
   const price = finite(candidate.primaryPrice)
   if (price == null) return null
+  const source = candidate.entryPlan || {}
+  const patternConfirmation =
+    sanitizeStrategyPatternConfirmation(
+      source.strategyPatternConfirmation,
+    )
   const pullback = candidate.priceType === 'PULLBACK_WATCH'
   const immediate = candidate.priceType === 'IMMEDIATE'
   const nextSession = lane === 'next'
@@ -391,11 +399,16 @@ function formulaEntryPlan(candidate, lane) {
     window: nextSession
       ? '下一交易日开盘确认后'
       : '当前连续竞价时段',
-    trigger: immediate
-      ? '现价保持承接且当前打法未失效'
-      : pullback
-        ? '回踩观察价后重新站稳，且资金承接未转弱'
-        : '放量突破观察价并保持站稳',
+    trigger: String(source.trigger || (
+      immediate
+        ? '现价保持承接且当前打法未失效'
+        : pullback
+          ? '回踩观察价后重新站稳，且资金承接未转弱'
+          : '放量突破观察价并保持站稳'
+    )),
+    ...(patternConfirmation
+      ? { strategyPatternConfirmation: patternConfirmation }
+      : {}),
     maxPositionPct:
       finite(candidate.adaptive?.risk?.maxPositionPct) ?? 0,
     validUntil: finite(candidate.validUntil),

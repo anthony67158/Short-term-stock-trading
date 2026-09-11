@@ -183,6 +183,8 @@ function eventProjection(value, context) {
     cheapScore: finite(value?.cheapScore),
     recall: recallProjection(value?.recall),
     shadowFeatures: shadowProjection(value?.shadowFeatures),
+    strategyPatternModelFeatures:
+      value?.strategyPatternModelFeatures !== false,
     formulaEvaluations: (
       Array.isArray(value?.formulaEvaluations)
         ? value.formulaEvaluations

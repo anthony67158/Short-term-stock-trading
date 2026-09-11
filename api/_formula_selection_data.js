@@ -412,7 +412,12 @@ function uniqueReasons(values = []) {
   )]
 }
 
-function candidateEvent(quote, cheapScore, recall = {}) {
+function candidateEvent(
+  quote,
+  cheapScore,
+  recall = {},
+  patternModelFeatures = true,
+) {
   return {
     code: quote.code,
     name: quote.name,
@@ -422,6 +427,8 @@ function candidateEvent(quote, cheapScore, recall = {}) {
     recall,
     formulaEvaluations: [],
     shadowFeatures: {},
+    strategyPatternModelFeatures:
+      patternModelFeatures === true,
     strategyPatterns: [],
     decision: null,
     counterfactualPlans: [],
@@ -591,7 +598,12 @@ export async function scanFormulaSelectionCandidates({
   const candidateEvents = new Map(
     eligibleWithRecall.map((item) => [
       String(item.quote.code),
-      candidateEvent(item.quote, item.cheapScore, item.recall),
+      candidateEvent(
+        item.quote,
+        item.cheapScore,
+        item.recall,
+        patternCapabilities.modelFeatures,
+      ),
     ]),
   )
   for (const item of prefiltered) {
