@@ -53,8 +53,8 @@ export function holdingAddReviewPlan(advice = {}) {
         advice.actionPlan,
       ]),
       summary: probe
-        ? 'V3加仓方向已通过，到价后确认小仓加仓'
-        : 'V3加仓方向已通过，到价后确认加仓',
+        ? '系统加仓方向已通过，到价后确认小仓加仓'
+        : '系统加仓方向已通过，到价后确认加仓',
       reviewIntent: {
         mode: 'ENTRY_CONFIRMATION',
         plannedAction: probe ? 'PROBE_ADD' : 'ADD',

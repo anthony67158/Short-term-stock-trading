@@ -8,7 +8,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, SERVICE_ROOT)
 
-from opportunity_contract import (  # noqa: E402
+from decision_engine.contracts import (  # noqa: E402
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
     feature_names_for_schema,

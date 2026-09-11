@@ -101,7 +101,7 @@ export async function readOpportunityRadarSnapshot({
       ),
       withTimeout(
         Promise.resolve().then(readTrainingStatus),
-        'V3训练状态读取',
+        '决策模型训练状态读取',
         5000,
       ),
     ])

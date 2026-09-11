@@ -404,6 +404,8 @@ export function unavailableOpportunityScore(input = {}, reason) {
     productionEligible: false,
     expectedShortfall10: null,
     calibration: null,
+    taskValues: null,
+    engine: null,
     outOfDistribution: false,
     inputContextVersion:
       input.inputContextVersion
@@ -423,6 +425,82 @@ function requiredMetric(value) {
   const number = finite(value)
   if (number == null) throw new Error('机会评分数值无效')
   return rounded(number, 6)
+}
+
+function optionalMetric(value) {
+  const number = finite(value)
+  return number == null ? null : rounded(number, 6)
+}
+
+function normalizeTaskValues(value) {
+  if (value == null) return null
+  if (
+    typeof value !== 'object'
+    || value.schemaVersion !== 'decision-task-values.v1'
+  ) {
+    throw new Error('决策任务头响应无效')
+  }
+  const portfolio = value.portfolio || {}
+  const source = String(portfolio.source || '')
+  return {
+    schemaVersion: 'decision-task-values.v1',
+    selection: {
+      rankingScore: optionalMetric(value.selection?.rankingScore),
+      expectedOpportunityR:
+        requiredMetric(value.selection?.expectedOpportunityR),
+    },
+    entry: {
+      expectedNetR: requiredMetric(value.entry?.expectedNetR),
+      pFill: probability(value.entry?.pFill),
+    },
+    portfolio: {
+      schemaVersion: String(portfolio.schemaVersion || ''),
+      addRelativeToHoldR:
+        requiredMetric(portfolio.addRelativeToHoldR),
+      holdR: requiredMetric(portfolio.holdR),
+      reduceRelativeToHoldR:
+        requiredMetric(portfolio.reduceRelativeToHoldR),
+      exitRelativeToHoldR:
+        requiredMetric(portfolio.exitRelativeToHoldR),
+      addExecutionAdjustedR:
+        requiredMetric(portfolio.addExecutionAdjustedR),
+      source,
+    },
+    execution: {
+      pFill: probability(value.execution?.pFill),
+    },
+    risk: {
+      q10R: requiredMetric(value.risk?.q10R),
+      cvarR: requiredMetric(value.risk?.cvarR),
+    },
+    review: {
+      recompute: value.review?.recompute !== false,
+      source: String(value.review?.source || ''),
+    },
+  }
+}
+
+function normalizeEngine(value) {
+  if (value == null) return null
+  if (typeof value !== 'object') {
+    throw new Error('决策引擎版本无效')
+  }
+  const heads = value.heads
+  if (!heads || typeof heads !== 'object') {
+    throw new Error('决策任务头版本无效')
+  }
+  return {
+    stateEncoder: String(value.stateEncoder || ''),
+    router: String(value.router || ''),
+    heads: Object.fromEntries(
+      Object.entries(heads)
+        .map(([name, version]) => [
+          String(name),
+          String(version || ''),
+        ])
+        .filter(([, version]) => version),
+    ),
+  }
 }
 
 export function isExecutableOpportunityScore(value) {
@@ -501,7 +579,17 @@ export function normalizeOpportunityScoreResponse(
       method: String(response.calibration?.method || 'none'),
       sampleCount,
       bucket: String(response.calibration?.bucket || ''),
+      pWinLevel: String(response.calibration?.pWinLevel || ''),
+      pWinBucket: String(response.calibration?.pWinBucket || ''),
+      pWinSampleCount: Math.max(
+        0,
+        Math.trunc(
+          finite(response.calibration?.pWinSampleCount) || 0,
+        ),
+      ),
     },
+    taskValues: normalizeTaskValues(response.taskValues),
+    engine: normalizeEngine(response.engine),
     outOfDistribution: response.outOfDistribution === true,
     inputContextVersion:
       expected.inputContextVersion

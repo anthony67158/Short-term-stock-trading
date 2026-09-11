@@ -32,10 +32,10 @@
     "opportunity:archive-daily": "python3 qlib-service/archive_public_market_day.py",
     "opportunity:archive-tushare-daily": "python3 qlib-service/archive_tushare_market_day.py",
     "opportunity:migrate-v5": "node --max-old-space-size=6144 scripts/migrate-opportunity-history-v5.mjs",
-    "opportunity:dataset": "python3 qlib-service/opportunity_dataset.py --input qlib-service/opportunity-outcomes.json --output qlib-service/opportunity-dataset.npz",
-    "opportunity:ensemble-poc": "python3 qlib-service/poc_v3_seed_ensemble.py --input qlib-service/opportunity-outcomes.json --output-dir qlib-service/opportunity-model/seed-ensemble",
-    "opportunity:train": "python3 qlib-service/train_opportunity_seed_ensemble.py --dataset qlib-service/opportunity-dataset.npz --output qlib-service/opportunity-model --poc-report qlib-service/opportunity-model/seed-ensemble/report.json",
-    "opportunity:promote": "python3 qlib-service/promote_opportunity_model.py --source qlib-service/opportunity-model/shadow --report qlib-service/opportunity-model/opportunity_training_report.json --output qlib-service/opportunity-model/production",
+    "decision:dataset": "cd qlib-service && python3 -m decision_engine.training.datasets --input opportunity-outcomes.json --output opportunity-dataset.npz",
+    "decision:bakeoff": "cd qlib-service && python3 -m decision_engine.training.ensemble_evaluation --input opportunity-outcomes.json --output-dir opportunity-model/seed-ensemble",
+    "decision:train": "cd qlib-service && python3 -m decision_engine.training.ensemble --dataset opportunity-dataset.npz --output opportunity-model --poc-report opportunity-model/seed-ensemble/report.json",
+    "decision:release": "cd qlib-service && python3 -m decision_engine.training.release --dataset opportunity-dataset.npz --champion opportunity-model/champion --challenger opportunity-model/shadow --output opportunity-model/release --decision-output opportunity-model/release_decision.json",
     "backtest": "node backtest/run.mjs"
   },
   "dependencies": {

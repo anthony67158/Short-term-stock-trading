@@ -10,10 +10,11 @@ https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
 服务基于 FastAPI、LightGBM 和 GARCH，提供量化评分、走势预测、模型信息与
 健康检查。模型优先从部署包加载，并按小时从阿里云 OSS 热更新。
 
-交易决策只由 V3 机会模型产生。36 维 `/predict` 仅提供日线辅助证据；
-Transformer V2/V2.1、独立 EAS 推理和对应训练管线已下线。
+交易决策只由模块化决策引擎产生。36 维 `/predict` 仅提供日线辅助证据；
+旧 V2/V3 单体决策入口、独立 EAS 推理和对应训练管线已下线。
 
-独立的 `POST /opportunity-score` 承载机会动作价值评分。当前生产模型
+独立的 `POST /decision-score` 一次返回选股、建仓、组合、执行、风险和复核
+任务头结果。当前生产模型
 以 `usagePolicy=DIRECT` 直接用于决策；每日新训练模型必须先与这个现役版本
 执行成员级冠军-挑战者评估，不能直接覆盖生产清单。
 分布外只提示，不关闭预测。文件、特征合同或预测数值异常仍如实报错，
@@ -23,13 +24,15 @@ Transformer V2/V2.1、独立 EAS 推理和对应训练管线已下线。
 五日主力/小单连续性及数据可用性字段；旧 V1-V4 请求在量化服务内按版本投影，
 新增字段补零，支持主服务与模型的无中断切换。
 
-机会模型训练必须从项目根目录执行以下顺序：
+决策模型训练必须从项目根目录执行以下顺序：
 
 ```bash
 set -a; . ./.env; set +a
 npm run opportunity:export
-npm run opportunity:dataset
-npm run opportunity:train
+npm run decision:dataset
+npm run decision:bakeoff
+npm run decision:train
+npm run decision:release
 ```
 
 少于 1000 个成熟候选、300 个完整成交结果或 60 个独立交易日时，训练只生成
@@ -46,9 +49,9 @@ runtime；与原生 CatBoost 的 1,000 条样本对拍最大绝对误差为
 
 ```bash
 cd qlib-service
-python3 download_opportunity_release.py \
+python3 download_decision_release.py \
   --output opportunity-model/champion
-python3 select_opportunity_release.py \
+python3 -m decision_engine.training.release \
   --dataset opportunity-dataset.npz \
   --champion opportunity-model/champion \
   --challenger opportunity-model/shadow \
@@ -59,7 +62,7 @@ python3 select_opportunity_release.py \
 只有决策为 `PUBLISH` 时才发布选中的完整组合：
 
 ```bash
-python3 upload_opportunity_model.py \
+python3 upload_decision_model.py \
   --directory opportunity-model/release \
   --prefix opportunitymodel/ \
   --activate-baseline \
@@ -86,8 +89,12 @@ python3 upload_opportunity_model.py \
 OSS。`daily-retrain.yml` 不读取 `TUSHARE_TOKEN`；Tushare 只保留为人工历史
 回填工具。夜间定时任务必须获得最新完整交易日分片，并读回校验 OSS 日线、
 资金流、1,000 股分钟池及至少 85% 覆盖率；端点失败、分片缺失或覆盖不足
-会直接阻断 V3 训练。盘中手动任务收到 `market_open_skipped` 时可使用已
+会直接阻断决策模型训练。盘中手动任务收到 `market_open_skipped` 时可使用已
 校验的最近完整分片，不会把未收盘数据写入 OSS。
+
+实时价格与日线优先读取同花顺扶摇，环境变量为 `FUYAO_API_KEY`；东方财富
+继续补充换手、行业与资金字段，腾讯作为公开行情兜底。扶摇成交额不会被误作
+换手率，业务响应即使 HTTP 为 200 也必须满足 `code == 0`。
 
 ## 生产架构
 

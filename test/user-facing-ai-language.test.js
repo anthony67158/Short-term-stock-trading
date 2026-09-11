@@ -56,7 +56,7 @@ test('用户界面使用业务语言而不是重复展示AI字样', () => {
 test('核心入口保留明确业务语义', () => {
   const source = Object.fromEntries(sources)
 
-  assert.match(source['src/components/StockDetail.jsx'], /V3 · 操作决策/)
+  assert.match(source['src/components/StockDetail.jsx'], /系统 · 操作决策/)
   assert.match(source['src/components/AlertPanel.jsx'], />自动预警</)
   assert.match(source['src/components/LLMConfig.jsx'], /模型角色与端点/)
   assert.match(source['src/components/SectorConceptExplanation.jsx'], /'解释'/)

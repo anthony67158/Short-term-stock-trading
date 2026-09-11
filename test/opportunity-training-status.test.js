@@ -14,7 +14,7 @@ const workbench = readFileSync(
   'utf8',
 )
 
-test('V3状态明确展示样本缺口与直接建仓资格', () => {
+test('决策模型状态明确展示样本缺口与直接建仓资格', () => {
   const status = normalizeOpportunityTrainingStatus({
     generatedAt: 123,
     state: 'NOT_READY',
@@ -47,7 +47,7 @@ test('V3状态明确展示样本缺口与直接建仓资格', () => {
   assert.match(status.directEntry.reason, /成熟候选/)
 })
 
-test('生产模型状态允许V3直接建仓', () => {
+test('生产模型状态允许系统直接建仓', () => {
   const status = normalizeOpportunityTrainingStatus({
     state: 'PRODUCTION_READY',
     activeModel: {
@@ -114,7 +114,7 @@ test('状态存储合并训练状态与最新结算进度', async () => {
 })
 
 test('作战台同时展示总样本、成交样本和独立交易日门槛', () => {
-  assert.match(workbench, /V3成熟样本/)
+  assert.match(workbench, /成熟样本/)
   assert.match(workbench, /成交样本/)
   assert.match(
     workbench,

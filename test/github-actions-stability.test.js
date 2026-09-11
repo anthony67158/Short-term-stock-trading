@@ -20,7 +20,7 @@ test('所有Python Actions共享精确版本依赖并包含TestClient运行时',
   assert.doesNotMatch(retrain, /pip install "fastapi/)
 })
 
-test('日线辅助模型与V3分离运行且每日流程不依赖Tushare', () => {
+test('日线辅助模型与决策模型分离运行且每日流程不依赖Tushare', () => {
   assert.match(retrain, /^\s{2}verify:/m)
   assert.match(retrain, /^\s{2}stock-retrain:/m)
   assert.match(retrain, /^\s{2}opportunity-retrain:/m)
@@ -36,9 +36,9 @@ test('日线辅助模型与V3分离运行且每日流程不依赖Tushare', () =>
   assert.match(retrain, /Collect mature opportunity outcomes/)
   assert.match(retrain, /Run three-seed LightGBM and CatBoost walk-forward/)
   assert.match(retrain, /Train and evaluate opportunity challenger/)
-  assert.match(retrain, /Download current production V3 as champion/)
-  assert.match(retrain, /Select improved V3 components and validate the whole model/)
-  assert.match(retrain, /Publish selected V3 release atomically/)
+  assert.match(retrain, /Download current production decision model as champion/)
+  assert.match(retrain, /Select improved decision heads and validate the whole model/)
+  assert.match(retrain, /Publish selected decision release atomically/)
   assert.match(retrain, /--activate-baseline/)
   assert.match(
     retrain,
@@ -53,6 +53,6 @@ test('Actions总是保留诊断产物且发布报告失败不遮蔽训练结果'
   assert.match(retrain, /if-no-files-found:\s*warn/)
   assert.match(
     retrain,
-    /Publish V3 result to in-app quant report[\s\S]*continue-on-error:\s*true/,
+    /Publish decision-model result to in-app quant report[\s\S]*continue-on-error:\s*true/,
   )
 })

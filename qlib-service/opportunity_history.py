@@ -6,11 +6,11 @@ import json
 import math
 import time
 
-from opportunity_dataset import (
+from decision_engine.training.datasets import (
     build_opportunity_dataset,
     opportunity_dataset_readiness,
 )
-from opportunity_contract import feature_names_for_schema
+from decision_engine.contracts import feature_names_for_schema
 
 
 HISTORY_SCHEMA_VERSION = "opportunity-history.v1"

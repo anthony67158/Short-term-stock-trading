@@ -64,7 +64,8 @@ export function buildActionEligibility({
     actions = [
       'HOLD',
       ...(canIncreaseRisk ? ['ADD'] : []),
-      ...(sellableLots > 0 ? ['REDUCE', 'EXIT'] : ['HOLD_LOCKED']),
+      ...(sellableLots > 0 ? ['REDUCE'] : ['HOLD_LOCKED']),
+      ...(sellableLots >= totalLots ? ['EXIT'] : []),
     ]
   }
   return {

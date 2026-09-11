@@ -32,33 +32,61 @@ export function actionValueFromOpportunityScore({
   score,
   eligibility,
   horizonDays = 5,
+  metrics = {},
 } = {}) {
   const normalizedAction = text(action, 24).toUpperCase()
-  const expectedNetR = finite(score?.expectedNetR)
+  const expectedNetR = finite(
+    metrics.expectedNetR ?? score?.expectedNetR,
+  )
   const q10R = finite(
-    score?.netRLowerBound
+    metrics.q10R
+    ?? score?.netRLowerBound
     ?? score?.meanConfidenceLowerBound,
   )
-  const expectedShortfall = finite(score?.expectedShortfall10)
+  const expectedShortfall = finite(
+    metrics.cvarR ?? score?.expectedShortfall10,
+  )
+  const executionCostR =
+    finite(metrics.executionCostR ?? score?.executionCostR) ?? 0
+  const avoidedTailLossR =
+    finite(metrics.avoidedTailLossR) ?? 0
+  const uncertaintyPenaltyR =
+    finite(metrics.uncertaintyPenaltyR) ?? 0
+  const opportunityCostR =
+    finite(metrics.opportunityCostR) ?? 0
   return {
     action: normalizedAction,
     route: text(route || 'IMMEDIATE', 24).toUpperCase(),
     feasible: actionIsEligible(eligibility, normalizedAction),
     pFill: normalizedAction === 'HOLD'
       ? 1
-      : probability(score?.pFill),
-    pSuccessGivenFill: probability(score?.pWinGivenFill),
+      : probability(metrics.pFill ?? score?.pFill),
+    pSuccessGivenFill: probability(
+      metrics.pSuccessGivenFill ?? score?.pWinGivenFill,
+    ),
     gainR: finite(score?.winPayoffR),
     lossR: finite(score?.lossPayoffR),
     expectedNetR,
     q10R,
     cvarR: expectedShortfall,
-    executionCostR: finite(score?.executionCostR) ?? 0,
+    avoidedTailLossR,
+    executionCostR,
     uncertaintyR: (
       q10R != null && expectedNetR != null
         ? Math.max(0, expectedNetR - q10R)
         : null
     ),
+    uncertaintyPenaltyR,
+    opportunityCostR,
+    actionUtilityR: expectedNetR == null
+      ? null
+      : +(
+          expectedNetR
+          + avoidedTailLossR
+          - executionCostR
+          - uncertaintyPenaltyR
+          - opportunityCostR
+        ).toFixed(6),
     horizonDays: Math.max(0, Math.trunc(finite(horizonDays) || 0)),
     modelVersion: text(score?.modelVersion, 120) || null,
     usagePolicy: text(score?.usagePolicy, 24) || null,

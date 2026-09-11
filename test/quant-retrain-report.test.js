@@ -64,11 +64,11 @@ test('量化汇报按runId幂等去重，旧记录按内容去重', () => {
   assert.deepEqual(reports.map((item) => item.id), ['new', 'legacy-new'])
 })
 
-test('每日重训工作流只把V3发布决策写入量化汇报OSS', () => {
+test('每日重训工作流只把决策模型发布结果写入量化汇报OSS', () => {
   const workflow = read('.github/workflows/daily-retrain.yml')
   const publisher = read('qlib-service/publish_model_retrain_report.py')
 
-  assert.match(workflow, /Publish V3 result to in-app quant report/)
+  assert.match(workflow, /Publish decision-model result to in-app quant report/)
   assert.match(workflow, /python publish_model_retrain_report\.py/)
   assert.match(workflow, /--model opportunity/)
   assert.doesNotMatch(workflow, /--model sector/)

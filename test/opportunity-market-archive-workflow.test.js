@@ -30,7 +30,9 @@ test('机会训练先合并并压实增量样本再训练', () => {
     ?.split('\n  market-data-archive:')[0] || ''
   const collect = job.indexOf('collect_opportunity_outcomes.py')
   const compact = job.indexOf('publish_opportunity_history.py')
-  const train = job.indexOf('train_opportunity_seed_ensemble.py')
+  const train = job.indexOf(
+    'decision_engine.training.ensemble',
+  )
 
   assert.ok(collect >= 0)
   assert.ok(compact > collect)
@@ -43,7 +45,7 @@ test('市场归档合同进入每日重训验证门禁', () => {
   assert.match(workflow, /tests\/test_validate_market_archive_report\.py/)
 })
 
-test('V3训练等待市场归档且每日流程不依赖Tushare', () => {
+test('决策模型训练等待市场归档且每日流程不依赖Tushare', () => {
   const job = workflow.split('  opportunity-retrain:')[1]
     ?.split('\n  market-data-archive:')[0] || ''
 

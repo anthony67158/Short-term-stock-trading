@@ -200,6 +200,59 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
         self.assertEqual(len(result), 48)
         self.assertEqual(result[0]["date"], "20260909093500")
 
+    def test_market_snapshot_prefers_complete_fuyao_prices(self):
+        timestamp = 1_788_940_800
+
+        def page(number):
+            start = (number - 1) * 100
+            rows = [{
+                "f2": 10.2,
+                "f5": 100,
+                "f6": 1_000_000,
+                "f8": 1.2,
+                "f10": 1.1,
+                "f12": f"{index:06d}",
+                "f14": f"股票{index}",
+                "f15": 10.5,
+                "f16": 9.8,
+                "f17": 10,
+                "f18": 10,
+                "f21": 1_020_000_000,
+                "f62": 10_000_000,
+                "f84": -5_000_000,
+                "f184": 1.2,
+                "f124": timestamp,
+            } for index in range(start, start + 100)]
+            return {"data": {"total": 800, "diff": rows}}
+
+        fuyao_rows = {
+            f"{index:06d}": {
+                "open": 10.8,
+                "high": 11.2,
+                "low": 10.7,
+                "close": 11,
+                "preClose": 10.2,
+                "volume": 20_000,
+                "amount": 220_000,
+            }
+            for index in range(800)
+        }
+        result = fetch_market_snapshot(
+            fetch_page=page,
+            fetch_fuyao=lambda: {
+                "date": "20260909",
+                "total": 800,
+                "coverage": 1,
+                "rows": fuyao_rows,
+            },
+            workers=2,
+        )
+
+        self.assertEqual(result["priceSource"], "THS_FUYAO")
+        self.assertEqual(result["daily"][0]["close"], 11)
+        self.assertEqual(result["daily"][0]["turnover"], 1.2)
+        self.assertEqual(result["funds"][0]["mainNetYi"], 0.1)
+
     def test_archive_uses_previous_oss_day_for_causal_universe(self):
         target_bucket = FakeBucket()
         previous = build_market_day_artifact(

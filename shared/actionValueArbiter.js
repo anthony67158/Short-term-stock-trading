@@ -22,24 +22,84 @@ function scoreReady(score) {
   )
 }
 
-function positive(plan) {
-  const score = plan?.opportunityScore
-  return (
-    scoreReady(score)
-    && Number(score.expectedNetR) > 0
-    && Number(score.pFill) > 0
-    && (
-      score.meanConfidenceLowerBound == null
-      || Number(score.meanConfidenceLowerBound) > 0
-    )
+function metric(score, path, fallback) {
+  const value = path.reduce(
+    (current, key) => current?.[key],
+    score?.taskValues,
   )
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
 }
 
-function utility(plan) {
-  return (
-    Number(plan?.opportunityScore?.pFill)
-    * Number(plan?.opportunityScore?.expectedNetR)
-  )
+function actionUtility(plan, action) {
+  const score = plan?.opportunityScore
+  if (!scoreReady(score)) return Number.NEGATIVE_INFINITY
+  const expected = Number(score.expectedNetR)
+  const fill = Number(score.pFill)
+  const fallback = Number.isFinite(expected) ? expected : 0
+  if (action === 'BUY') {
+    return metric(score, ['entry', 'expectedNetR'], fill * fallback)
+  }
+  if (action === 'ADD') {
+    return metric(
+      score,
+      ['portfolio', 'addExecutionAdjustedR'],
+      fill * fallback,
+    )
+  }
+  if (action === 'HOLD') {
+    return metric(score, ['portfolio', 'holdR'], fallback)
+  }
+  if (action === 'REDUCE') {
+    return metric(
+      score,
+      ['portfolio', 'reduceRelativeToHoldR'],
+      -fallback * 0.5,
+    )
+  }
+  if (action === 'EXIT') {
+    return metric(
+      score,
+      ['portfolio', 'exitRelativeToHoldR'],
+      -fallback,
+    )
+  }
+  return Number.NEGATIVE_INFINITY
+}
+
+function actionValue(plan, action, eligibility) {
+  const score = plan.opportunityScore
+  const expectedNetR = actionUtility(plan, action)
+  return actionValueFromOpportunityScore({
+    action,
+    route: plan.route,
+    score,
+    eligibility,
+    metrics: {
+      expectedNetR,
+      q10R: metric(
+        score,
+        ['risk', 'q10R'],
+        Number(score.netRLowerBound),
+      ),
+      cvarR: metric(
+        score,
+        ['risk', 'cvarR'],
+        Number(score.expectedShortfall10),
+      ),
+      pFill: ['HOLD', 'REDUCE', 'EXIT'].includes(action)
+        ? 1
+        : metric(score, ['execution', 'pFill'], Number(score.pFill)),
+    },
+  })
+}
+
+function bestCandidate(candidates) {
+  return [...candidates].sort(
+    (left, right) =>
+      Number(right.value.actionUtilityR)
+      - Number(left.value.actionUtilityR),
+  )[0] || null
 }
 
 function addReview(event) {
@@ -66,16 +126,38 @@ export function arbitrateActionValues({
       && modelVersions.size === 1
       && state.evidence.complete === true
     ))
-    .sort((left, right) => utility(right) - utility(left))
+    .sort(
+      (left, right) =>
+        actionUtility(right, state.eligibility.held ? 'HOLD' : 'BUY')
+        - actionUtility(left, state.eligibility.held ? 'HOLD' : 'BUY'),
+    )
   const immediate = scored.find((plan) => plan.route === 'IMMEDIATE')
     || null
-  const values = scored.map((plan) => actionValueFromOpportunityScore({
-    action: state.eligibility.held ? 'HOLD' : 'BUY',
-    route: plan.route,
-    score: plan.opportunityScore,
-    eligibility: state.eligibility,
-  }))
-  const vector = buildActionValueVector({ state, values })
+  const candidates = state.eligibility.held
+    ? [
+        ...(immediate ? ['HOLD', 'REDUCE', 'EXIT'].map((action) => ({
+          action,
+          plan: immediate,
+          value: actionValue(immediate, action, state.eligibility),
+        })) : []),
+        ...scored.map((plan) => ({
+          action: 'ADD',
+          plan,
+          value: actionValue(plan, 'ADD', state.eligibility),
+        })),
+      ]
+    : scored.map((plan) => ({
+        action: 'BUY',
+        plan,
+        value: actionValue(plan, 'BUY', state.eligibility),
+      }))
+  const engine = scored[0]?.opportunityScore?.engine || {}
+  const vector = buildActionValueVector({
+    state,
+    values: candidates.map((candidate) => candidate.value),
+    encoderVersion: engine.stateEncoder || 'feature-adapter.v1',
+    routerVersion: engine.router || 'deterministic-action-router.v1',
+  })
   if (state.eligibility.hardStop) {
     return {
       action: state.eligibility.sellableLots <= 0
@@ -90,9 +172,12 @@ export function arbitrateActionValues({
     }
   }
   if (!state.eligibility.held) {
-    const selectedPlan = scored[0] || null
+    const selected = bestCandidate(
+      candidates.filter((candidate) => candidate.value.feasible),
+    )
+    const selectedPlan = selected?.plan || null
     const executable = (
-      positive(selectedPlan)
+      Number(selected?.value?.actionUtilityR) > 0
       && selectedPlan.route === 'IMMEDIATE'
       && state.quote.live === true
       && state.eligibility.actions.includes('BUY')
@@ -105,25 +190,31 @@ export function arbitrateActionValues({
       reason: selectedPlan ? 'ENTRY_VALUE' : 'MODEL_UNAVAILABLE',
     }
   }
-  const currentPositive = positive(immediate)
-  if (!currentPositive) {
-    const action = state.eligibility.sellableLots <= 0
-      ? 'HOLD_LOCKED'
-      : state.eligibility.sellableLots >= state.eligibility.totalLots
-        ? 'EXIT'
-        : 'REDUCE'
+  if (!immediate) {
     return {
-      action,
-      selectedPlan: immediate,
+      action: state.eligibility.sellableLots <= 0
+        ? 'HOLD_LOCKED'
+        : 'HOLD',
+      selectedPlan: null,
       conditionalAddPlan: null,
       vector,
-      reason: immediate ? 'NEGATIVE_HOLD_VALUE' : 'MODEL_UNAVAILABLE',
+      reason: 'MODEL_UNAVAILABLE',
     }
   }
+  const current = bestCandidate(
+    candidates.filter((candidate) => (
+      ['HOLD', 'REDUCE', 'EXIT'].includes(candidate.action)
+      && candidate.value.feasible
+    )),
+  )
+  const currentAction = current?.action || 'HOLD'
+  const currentPositive = actionUtility(immediate, 'HOLD') > 0
   if (
     addReview(state.review)
     && state.quote.live === true
     && state.eligibility.actions.includes('ADD')
+    && currentPositive
+    && actionUtility(immediate, 'ADD') > 0
   ) {
     return {
       action: 'ADD',
@@ -133,20 +224,28 @@ export function arbitrateActionValues({
       reason: 'ADD_REVIEW_CONFIRMED',
     }
   }
-  const conditionalAddPlan = !state.review
+  const conditionalAdd = bestCandidate(
+    candidates.filter((candidate) => (
+      candidate.action === 'ADD'
+      && candidate.plan.route !== 'IMMEDIATE'
+      && candidate.value.feasible
+      && Number(candidate.value.actionUtilityR) > 0
+    )),
+  )
+  const conditionalAddPlan = currentAction === 'HOLD'
+    && !state.review
     && state.eligibility.actions.includes('ADD')
-    ? scored.find((plan) => (
-        plan.route !== 'IMMEDIATE'
-        && positive(plan)
-      )) || null
+    ? conditionalAdd?.plan || null
     : null
   return {
-    action: 'HOLD',
-    selectedPlan: conditionalAddPlan || immediate,
+    action: currentAction,
+    selectedPlan: conditionalAddPlan || current?.plan || immediate,
     conditionalAddPlan,
     vector,
     reason: conditionalAddPlan
       ? 'HOLD_WITH_ADD_TRIGGER'
-      : 'POSITIVE_HOLD_VALUE',
+      : currentAction === 'HOLD'
+        ? 'POSITIVE_HOLD_VALUE'
+        : 'PORTFOLIO_ACTION_VALUE',
   }
 }

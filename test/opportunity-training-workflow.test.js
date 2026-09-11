@@ -10,12 +10,12 @@ const read = (path) => readFileSync(
 const workflow = read('.github/workflows/daily-retrain.yml')
 const exporter = read('scripts/export-opportunity-outcomes.mjs')
 
-test('V3每日重训以现役版本为冠军并只发布通过验证的组合', () => {
+test('决策模型每日重训以现役版本为冠军并只发布通过验证的组合', () => {
   assert.match(workflow, /opportunity-retrain:/)
-  assert.match(workflow, /download_opportunity_release\.py/)
+  assert.match(workflow, /download_decision_release\.py/)
   assert.match(workflow, /collect_opportunity_outcomes\.py/)
-  assert.match(workflow, /train_opportunity_seed_ensemble\.py/)
-  assert.match(workflow, /select_opportunity_release\.py/)
+  assert.match(workflow, /decision_engine\.training\.ensemble/)
+  assert.match(workflow, /decision_engine\.training\.release/)
   assert.match(
     workflow,
     /--champion opportunity-model\/champion[\s\S]*?--challenger opportunity-model\/shadow/,
@@ -31,12 +31,12 @@ test('V3每日重训以现役版本为冠军并只发布通过验证的组合', 
   )
 })
 
-test('没有通过选择与整体兼容性验证时不得覆盖现役V3', () => {
+test('没有通过选择与整体兼容性验证时不得覆盖现役决策模型', () => {
   const selectionStep = workflow.match(
-    /- name: Select improved V3 components and validate the whole model([\s\S]*?)(?=\n      - name:)/,
+    /- name: Select improved decision heads and validate the whole model([\s\S]*?)(?=\n      - name:)/,
   )?.[1] || ''
   const publishStep = workflow.match(
-    /- name: Publish selected V3 release atomically([\s\S]*?)(?=\n      - name:)/,
+    /- name: Publish selected decision release atomically([\s\S]*?)(?=\n      - name:)/,
   )?.[1] || ''
 
   assert.match(selectionStep, /decision\.get\("action"\) == "PUBLISH"/)
@@ -56,7 +56,7 @@ test('每日重训把新成熟结果压实进版本化历史基线', () => {
   const collectAt = workflow.indexOf('python collect_opportunity_outcomes.py')
   const compactAt = workflow.indexOf('python publish_opportunity_history.py')
   const trainAt = workflow.indexOf(
-    'python train_opportunity_seed_ensemble.py',
+    'python -m decision_engine.training.ensemble',
   )
 
   assert.ok(collectAt >= 0)
@@ -83,7 +83,7 @@ test('市场归档强制使用QUANT_KEY且不再依赖Tushare', () => {
   assert.doesNotMatch(archive, /TUSHARE_TOKEN/)
 })
 
-test('辅助模型异常会留审计但不再拖垮V3主训练状态', () => {
+test('辅助模型异常会留审计但不再拖垮决策模型主训练状态', () => {
   const stock = workflow.split('  stock-retrain:')[1]
     ?.split('\n  opportunity-retrain:')[0] || ''
 

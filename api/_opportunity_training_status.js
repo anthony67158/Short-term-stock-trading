@@ -105,13 +105,13 @@ export function normalizeOpportunityTrainingStatus(
     directEntry: direct || productionEligible
       ? {
           eligible: true,
-          reason: direct ? 'V3当前模型直接启用，不等待训练或晋级'
-            : 'V3已通过独立时间窗、净R和回撤晋级闸门',
+          reason: direct ? '当前决策模型直接启用，不等待训练或晋级'
+            : '决策模型已通过独立时间窗、净R和回撤晋级闸门',
         }
       : {
           eligible: false,
           reason: readiness.blockers[0]
-            || 'V3尚未通过生产晋级闸门',
+            || '决策模型尚未通过生产晋级闸门',
         },
   }
 }

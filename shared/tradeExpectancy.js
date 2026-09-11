@@ -93,7 +93,7 @@ function modelEstimate(
     ) {
       return {
         state: 'CALIBRATED',
-        source: 'OPPORTUNITY_MODEL',
+        source: 'DECISION_MODEL',
         modelVersion:
           String(opportunityScore.modelVersion || '') || null,
         pFill,

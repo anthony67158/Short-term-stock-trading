@@ -5,7 +5,7 @@ import {
 import {
   buildOpportunityShadowFeatures,
 } from '../shared/opportunityShadowFeatures.js'
-import { fetchOpportunityScores } from './_opportunity_score.js'
+import { fetchDecisionScores } from './_action_value_client.js'
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -33,7 +33,7 @@ export async function loadAdvisorOpportunityScore({
   candles = [],
   trends = [],
   now = Date.now(),
-  scoreOpportunities = fetchOpportunityScores,
+  scoreOpportunities = fetchDecisionScores,
 } = {}) {
   const normalizedCode = String(code || '')
   if (

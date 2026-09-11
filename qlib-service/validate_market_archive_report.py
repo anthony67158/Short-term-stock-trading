@@ -110,11 +110,11 @@ def validate_report(
         }
     elif event == "schedule":
         raise ValueError(
-            "夜间定时训练未获得最新完整市场归档，已阻断V3训练"
+            "夜间定时训练未获得最新完整市场归档，已阻断决策模型训练"
         )
     else:
         raise ValueError(
-            str(report.get("reason") or "市场归档未完成，已阻断V3训练")
+            str(report.get("reason") or "市场归档未完成，已阻断决策模型训练")
         )
     _validate_settled_date(result["date"], current)
     if archive_loader is not None:

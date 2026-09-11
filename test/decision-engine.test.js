@@ -91,6 +91,79 @@ test('模块化引擎使用统一动作价值管理持仓而不调用旧加权�
   )
 })
 
+test('持仓仲裁读取任务头价值并输出完整动作向量', () => {
+  const held = {
+    ...payload,
+    holdQty: 2,
+    sellableTodayQty: 2,
+    holdingStopPrice: 9,
+  }
+  const scoredPlan = {
+    ...plan,
+    opportunityScore: {
+      ...plan.opportunityScore,
+      engine: {
+        stateEncoder: 'state-encoder.tree-v1',
+        router: 'action-router.tree-v1',
+        heads: { portfolio: 'portfolio-heads.tree-v1' },
+      },
+      taskValues: {
+        schemaVersion: 'decision-task-values.v1',
+        entry: { expectedNetR: 0.1, pFill: 0.8 },
+        portfolio: {
+          holdR: -0.2,
+          addExecutionAdjustedR: -0.16,
+          reduceRelativeToHoldR: 0.25,
+          exitRelativeToHoldR: 0.5,
+        },
+        risk: { q10R: -0.9, cvarR: -1.2 },
+        execution: { pFill: 0.8 },
+      },
+    },
+  }
+  const result = buildDecisionAction({
+    payload: held,
+    plans: [scoredPlan],
+  })
+
+  assert.equal(result.action, '清仓')
+  assert.deepEqual(
+    result.actionValues.actions.map((value) => value.action),
+    ['HOLD', 'REDUCE', 'EXIT', 'ADD'],
+  )
+  assert.equal(result.actionValues.actions[2].actionUtilityR, 0.5)
+  assert.equal(
+    result.actionValues.encoderVersion,
+    'state-encoder.tree-v1',
+  )
+})
+
+test('部分可卖仓位不能被仲裁成全部退出', () => {
+  const result = buildDecisionAction({
+    payload: {
+      ...payload,
+      holdQty: 2,
+      sellableTodayQty: 1,
+      holdingStopPrice: 9,
+    },
+    plans: [{
+      ...plan,
+      opportunityScore: {
+        ...plan.opportunityScore,
+        expectedNetR: -0.2,
+      },
+    }],
+  })
+
+  assert.equal(result.action, '减仓')
+  assert.equal(
+    result.actionValues.actions.find(
+      (value) => value.action === 'EXIT',
+    )?.feasible,
+    false,
+  )
+})
+
 test('持仓价值为正时保留当前仓位并生成单一路径加仓观察价', () => {
   const held = {
     ...payload,
@@ -193,7 +266,7 @@ test('系统完整编译保留同一路径价格与概率，保存恢复不依�
   assert.equal(decision.action, 'BUY')
   assert.equal(decision.actionability, 'READY')
   assert.ok(decision.quantity.lots > 0)
-  assert.equal(decision.risk.tradeExpectancy.source, 'OPPORTUNITY_MODEL')
+  assert.equal(decision.risk.tradeExpectancy.source, 'DECISION_MODEL')
   assert.equal(
     decision.prices.reference,
     result.result.selectedDecisionPlan.entryPlan.price,
@@ -274,7 +347,13 @@ test('持仓初评生成加仓观察价并保留账户核定预算', async () =>
         : 0.3,
     }]]),
   }))
-  assert.equal(blocked.result.decisionPlan.entryBudget.state, 'BLOCKED')
+  assert.equal(blocked.result.decisionPlan.entryBudget, null)
+  assert.equal(
+    blocked.result.actionValues.actions.find(
+      (value) => value.action === 'ADD',
+    )?.feasible,
+    false,
+  )
   assert.equal(blocked.result.holdingAddPlan, null)
   assert.equal(blocked.result.pullbackWatchPrice, null)
   assert.equal(blocked.result.breakoutWatchPrice, null)

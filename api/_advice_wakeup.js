@@ -209,7 +209,7 @@ export function queueAdviceReviewForPriceTrigger(
       : null,
     ...reviewIntent,
     reason: exitReassessment
-      ? '非止损退出建议已进入观察窗口，结合最新价格路径、资金和V3结果重新评估'
+      ? '非止损退出建议已进入观察窗口，结合最新价格路径、资金和系统决策结果重新评估'
       : entryConfirmation
       ? holdingReview
         ? '条件加仓价已触发，只确认加仓时机并生成具体执行价'

@@ -17,7 +17,7 @@ import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 const KEY_PATH = 'config/llm.json';
 const hasOwn = (obj, key) => !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 
-// V3负责交易决策，LLM只保留解释、助手、日报和板块研究四个物理角色。
+// 模块化引擎负责交易决策，LLM只保留解释、助手、日报和板块研究四个物理角色。
 // 旧角色只用于读取迁移，保存后不再作为配置入口。
 export const ROLES = {
   explain: {

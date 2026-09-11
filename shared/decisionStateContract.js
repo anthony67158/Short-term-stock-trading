@@ -22,6 +22,30 @@ function compactPath(plan = {}) {
   }
 }
 
+function stable(value) {
+  if (Array.isArray(value)) return value.map(stable)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort()
+      .map((key) => [key, stable(value[key])]),
+  )
+}
+
+function stateFingerprint(value) {
+  const source = JSON.stringify(stable(value))
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index)
+    first = Math.imul(first ^ code, 0x01000193)
+    second = Math.imul(second ^ code, 0x85ebca6b)
+  }
+  return `state.${(first >>> 0).toString(16).padStart(8, '0')}${
+    (second >>> 0).toString(16).padStart(8, '0')
+  }`
+}
+
 export function buildDecisionState({
   code,
   name,
@@ -59,7 +83,7 @@ export function buildDecisionState({
     evidence,
     model,
   })
-  return {
+  const state = {
     schemaVersion: DECISION_STATE_SCHEMA_VERSION,
     asOf: timestamp,
     code: normalizedCode,
@@ -107,6 +131,10 @@ export function buildDecisionState({
     },
     eligibility,
   }
+  return {
+    ...state,
+    stateFingerprint: stateFingerprint(state),
+  }
 }
 
 export function isDecisionState(value) {
@@ -114,6 +142,9 @@ export function isDecisionState(value) {
     value?.schemaVersion === DECISION_STATE_SCHEMA_VERSION
     && /^\d{6}$/.test(String(value.code || ''))
     && finite(value.asOf) > 0
+    && /^state\.[0-9a-f]{16}$/.test(
+      String(value.stateFingerprint || ''),
+    )
     && Array.isArray(value.paths)
     && value.eligibility?.actions?.length > 0
   )

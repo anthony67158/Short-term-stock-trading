@@ -15,7 +15,7 @@ test('AI选股提示词要求无立即买点时仍输出条件候选', () => {
   assert.match(prompt, /等待触发/)
   assert.match(prompt, /下一交易日开盘/)
   assert.match(prompt, /36因子日线模型仅作辅助证据/)
-  assert.match(prompt, /只服从服务端V3结果/)
+  assert.match(prompt, /只服从服务端系统决策/)
   assert.doesNotMatch(prompt, /Transformer|V2\.1|V2\.0/)
   assert.doesNotMatch(prompt, /noTrade=true 时 picks 必须为空数组/)
   assert.match(prompt, /IMMEDIATE=立即关注/)

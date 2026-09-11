@@ -1,6 +1,6 @@
 // ============ /api/confirm_signal：智能交易确认闸门(前端调用入口)============
-// 前端 alertStore 在某条V3价位预警进入「观察确认中(watching)」后轮询本端点，
-// 由服务端确定性信号闸门判断是否进入V3复核，LLM不参与动作确认。
+// 前端 alertStore 在某条系统价位预警进入「观察确认中(watching)」后轮询本端点，
+// 由服务端确定性信号闸门判断是否进入系统复核，LLM不参与动作确认。
 //
 // 入参(POST JSON):{ alert:{code,name,type,op,value,note,actKind?,opQty?,timing?,phase?},
 //                    advice?:{...AI建议对象,含 exitTiming/invalidation}, quote?:{price,pct,...} }
@@ -84,7 +84,7 @@ export function applyConfirmationVerdict(
     stored.enabled = false;
     stored.phase = 'superseded';
     stored.supersededAt = now;
-    stored.triggeredMsg = 'V3主决策已更新，旧执行确认自动撤销';
+    stored.triggeredMsg = '系统主决策已更新，旧执行确认自动撤销';
     return { queued: false, reason: 'stale-plan' };
   }
   if (!['confirm', 'invalid'].includes(verdict?.decision)) {

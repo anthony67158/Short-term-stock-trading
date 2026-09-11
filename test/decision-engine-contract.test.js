@@ -58,6 +58,33 @@ test('未持仓决策状态只开放等待与买入', () => {
   assert.equal(isDecisionState(state), true)
   assert.deepEqual(state.eligibility.actions, ['WAIT', 'BUY'])
   assert.equal(state.paths.length, 1)
+  assert.match(state.stateFingerprint, /^state\.[0-9a-f]{16}$/)
+  assert.equal(
+    buildDecisionState({
+      code: '600001',
+      asOf: 1,
+      quote: { price: 10, live: true },
+      position: { totalLots: 0 },
+      account: { complete: true, riskIncreaseAllowed: true },
+      evidence: { complete: true },
+      model: { ready: true },
+      paths: [path()],
+    }).stateFingerprint,
+    state.stateFingerprint,
+  )
+  assert.notEqual(
+    buildDecisionState({
+      code: '600001',
+      asOf: 1,
+      quote: { price: 10.01, live: true },
+      position: { totalLots: 0 },
+      account: { complete: true, riskIncreaseAllowed: true },
+      evidence: { complete: true },
+      model: { ready: true },
+      paths: [path()],
+    }).stateFingerprint,
+    state.stateFingerprint,
+  )
 })
 
 test('持仓硬止损绕过模型并只开放确定性退出', () => {

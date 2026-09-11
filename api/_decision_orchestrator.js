@@ -2,7 +2,7 @@ import { fetchQuotes } from './quote.js'
 import { fetchResilientKline, fetchTrendsTx } from './stock_detail.js'
 import { fetchResilientStockFund } from './_stock_fund.js'
 import { loadSectorOpportunity } from './_sector_opportunity.js'
-import { fetchOpportunityScores } from './_opportunity_score.js'
+import { fetchDecisionScores } from './_action_value_client.js'
 import { internalApiOrigin } from './_internal_origin.js'
 import { accountFrom, buildHoldPayload, computePortfolio } from './_portfolio.js'
 import { buildAccountRiskContext, accountRiskCodes } from '../shared/accountRiskBudget.js'
@@ -181,7 +181,7 @@ function buildDecisionEvidence({
 
 export async function evaluateDecision({
   code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
-  score = (inputs) => fetchOpportunityScores(inputs, { timeoutMs: 8000 }),
+  score = (inputs) => fetchDecisionScores(inputs, { timeoutMs: 8000 }),
   reviewEvent = null,
 }) {
   const quoteMap = Object.fromEntries(quotes.map((item) => [item.code, item]))
@@ -237,6 +237,8 @@ export async function evaluateDecision({
     },
     market: market || {},
     marketEnv: deriveMarketRegime(market || {}),
+    sectorOpportunity: sector || {},
+    accountCircuitBreaker: accountRisk.breaker,
     holdingStopPrice: Math.max(0, ...holding.map((item) => Number(item.sl) || 0)) || null,
     stockFund: fund,
     reviewEvent,

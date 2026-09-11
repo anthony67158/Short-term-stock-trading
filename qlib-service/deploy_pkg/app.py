@@ -1,5 +1,5 @@
 """
-量化打分 + 走势预测微服务  v3（LightGBM 打分 + GARCH 波动率）
+量化打分 + 模块化决策 + 走势预测微服务
 - 数据由调用方(Vercel/FC 主服务)POST 传入 K线
 - Plan A：LightGBM 达标概率模型打分（从 OSS 拉取 quantmodel/lgb_score.txt）；模型缺失自动回落纯 numpy 打分
 - Plan B：GARCH(1,1) 在线拟合条件波动率喂给蒙特卡洛；拟合失败回落历史 σ
@@ -16,9 +16,9 @@ import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
 from model_lib import model_score, garch_sigma, get_model, signal_prob, event_tag_for
-from opportunity_model import (
-    get_opportunity_models,
-    predict_opportunity_items,
+from decision_engine import (
+    get_decision_models,
+    predict_decision_items,
 )
 from sector_model import get_sector_models, predict_sector_items
 from archive_public_market_day import archive_latest_public
@@ -162,7 +162,7 @@ def forecast_outputs(
     }
 
 
-def forecast_availability(realtime=None, current_trading_day=False):
+def forecast_availability(current_trading_day=False):
     """Declare boundaries so daily outputs cannot masquerade as intraday."""
     return {
         "nextTradeDay": True,
@@ -170,11 +170,7 @@ def forecast_availability(realtime=None, current_trading_day=False):
         "currentSession": False,
         "currentSessionReason":
             "daily_model_has_no_intraday_remaining-session_label",
-        "currentSessionAlternative": (
-            "v2.1-intraday"
-            if isinstance(realtime, dict) and realtime.get("live")
-            else None
-        ),
+        "currentSessionAlternative": None,
     }
 
 
@@ -282,15 +278,15 @@ def sector_predict(
         raise HTTPException(status_code=503, detail=str(error)[:120])
 
 
-@app.post("/opportunity-score")
-def opportunity_score(
+@app.post("/decision-score")
+def decision_score(
     payload: dict = Body(...),
     x_api_key: str = Header(default=""),
 ):
     _check_key(x_api_key)
     try:
-        models, metadata = get_opportunity_models()
-        predictions = predict_opportunity_items(
+        models, metadata = get_decision_models()
+        predictions = predict_decision_items(
             payload,
             models=models,
             metadata=metadata,
@@ -313,7 +309,7 @@ def opportunity_score(
             "modelVersion":
                 (metadata or {}).get("modelVersion"),
             "predictions": predictions,
-            "note": "直接使用当前V3组合；回测与资格状态独立记录",
+            "note": "直接使用当前模块化决策模型；回测与资格状态独立记录",
         }
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)[:120])
@@ -443,7 +439,6 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
             "nextTradeDayForecast": next_fc,
             "currentTradingDayForecast": current_fc,
             "forecastAvailability": forecast_availability(
-                payload.get("realtime"),
                 current_trading_day=current_fc is not None,
             ),
             "decision": dec, "reads": reads,
@@ -463,25 +458,25 @@ def predict(payload: dict = Body(...), x_api_key: str = Header(default="")):
 def model_info(x_api_key: str = Header(default="")):
     _check_key(x_api_key)
     booster, meta = get_model()
-    opportunity_models, opportunity_meta = get_opportunity_models()
+    decision_models, decision_meta = get_decision_models()
     return {
         "loaded": booster is not None,
         "meta": meta,
-        "opportunity": {
-            "loaded": bool(opportunity_models),
+        "decision": {
+            "loaded": bool(decision_models),
             "modelVersion":
-                (opportunity_meta or {}).get("modelVersion"),
+                (decision_meta or {}).get("modelVersion"),
             "predictionContract":
-                (opportunity_meta or {}).get("predictionContract"),
-            "modelHeads": sorted((opportunity_models or {}).keys()),
+                (decision_meta or {}).get("predictionContract"),
+            "modelHeads": sorted((decision_models or {}).keys()),
             "baselineSelected": bool(
-                (opportunity_meta or {}).get("baselineSelected")
+                (decision_meta or {}).get("baselineSelected")
             ),
             "productionEligible": bool(
-                (opportunity_meta or {}).get("productionEligible")
+                (decision_meta or {}).get("productionEligible")
             ),
             "usagePolicy":
-                (opportunity_meta or {}).get("usagePolicy"),
+                (decision_meta or {}).get("usagePolicy"),
         },
     }
 

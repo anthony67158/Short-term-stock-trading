@@ -1,4 +1,4 @@
-"""Publish compact V3 training readiness for the trading workbench."""
+"""Publish compact decision-model readiness for the trading workbench."""
 
 import argparse
 import json
@@ -6,7 +6,7 @@ import os
 import time
 
 from model_lib import _oss_bucket
-from opportunity_dataset import (
+from decision_engine.training.datasets import (
     MINIMUM_DATES,
     MINIMUM_FILLED_SAMPLES,
     MINIMUM_SAMPLES,
@@ -203,14 +203,14 @@ def publish_training_status(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="发布V3机会模型训练状态",
+        description="发布决策模型训练状态",
     )
     parser.add_argument("--report", required=True)
     parser.add_argument("--promotion")
     parser.add_argument(
         "--prefix",
         default=os.environ.get(
-            "OPPORTUNITY_MODEL_PREFIX",
+            "DECISION_MODEL_PREFIX",
             "opportunitymodel/",
         ),
     )

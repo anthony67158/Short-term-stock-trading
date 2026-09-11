@@ -1312,7 +1312,7 @@ function genericPrompt(mode, payload, data, ragText) {
   if (mode === 'scan_pick') {
     return `【AI选股请求】先选产业方向，再选真实成分股；比较国家战略、产业周期和公司质量代理分，再用资金与量化确认。不能把涨停、连板或短期热度作为主要入选理由。
 【候选数据】字段nextUpProb/nextExpRet/nextTargetLow~nextTargetHigh表示下一交易日预测。${data}
-【模型纪律】36因子日线模型仅作辅助证据；交易动作、价格、手数、账户风险与排序只服从服务端V3结果，不得由模型说明覆盖。
+【模型纪律】36因子日线模型仅作辅助证据；交易动作、价格、手数、账户风险与排序只服从服务端系统决策，不得由模型说明覆盖。
 【龙头纪律】conceptLeadership只接受服务端确定性结果，不得重新猜测或改写龙头身份；龙头身份不等于买点，仍须服从量化与entrySignal。
 【三队列】opportunityQueue是服务端确定性分层：IMMEDIATE=立即关注，PULLBACK=回踩候选，REJECTED=淘汰。不得改变服务端队列；REJECTED不得进入picks。entrySignal.passed=false不得升级为“可执行”，必须引用failedRules。没有IMMEDIATE时仍从PULLBACK保留1~3只条件候选。
 【输出】candidates 非空时 picks 必须给1~3只；noTrade=true只表示没有立即买点，不能清空条件候选。休市或盘前的结论面向下一交易日开盘。

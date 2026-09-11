@@ -19,8 +19,8 @@ import {
   opportunityTrainingStatusStore,
 } from './_opportunity_training_status.js'
 import {
-  fetchOpportunityScores,
-} from './_opportunity_score.js'
+  fetchDecisionScores,
+} from './_action_value_client.js'
 import {
   scoreCandidatesWithDecisionModel,
 } from './_decision_candidate.js'
@@ -207,7 +207,7 @@ export function runFormulaSelection({
   mode = 'intraday',
   store = formulaSelectionStore,
   ledgerStore = opportunityRadarLedgerStore,
-  scoreOpportunities = fetchOpportunityScores,
+  scoreOpportunities = fetchDecisionScores,
   scan = scanFormulaSelectionCandidates,
   collectMarketContext = collectTailPickMarketContext,
   readTrainingStatus = () =>

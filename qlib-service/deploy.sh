@@ -18,9 +18,6 @@ else
     "$HERE/app.py" \
     "$HERE/factors_lib.py" \
     "$HERE/model_lib.py" \
-    "$HERE/opportunity_contract.py" \
-    "$HERE/opportunity_evaluation.py" \
-    "$HERE/opportunity_model.py" \
     "$HERE/opportunity_market_archive.py" \
     "$HERE/archive_public_market_day.py" \
     "$HERE/sector_contract.py" \
@@ -30,6 +27,13 @@ else
     "$HERE/meta.json" \
     "$HERE/bootstrap" \
     "$PKG/"
+  rm -rf "$PKG/decision_engine"
+  cp -R "$HERE/decision_engine" "$PKG/decision_engine"
+  find "$PKG/decision_engine" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  rm -f \
+    "$PKG/opportunity_contract.py" \
+    "$PKG/opportunity_evaluation.py" \
+    "$PKG/opportunity_model.py"
   mkdir -p "$PKG/contracts"
   cp "$HERE/contracts/opportunity-score-features.json" "$PKG/contracts/"
   for file in \

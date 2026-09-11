@@ -1,4 +1,4 @@
-"""Publish V3 and sector retraining outcomes to the existing quant inbox."""
+"""Publish decision and sector retraining outcomes to the quant inbox."""
 
 import argparse
 import json
@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 
-MODEL_LABELS = {"opportunity": "V3 机会模型", "sector": "板块模型"}
+MODEL_LABELS = {"opportunity": "多任务决策模型", "sector": "板块模型"}
 COMPONENT_LABELS = {
     "fillProbability": "成交概率",
     "winProbability": "盈利概率",

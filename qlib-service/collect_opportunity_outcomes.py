@@ -7,7 +7,9 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 from model_lib import _oss_bucket
-from opportunity_dataset import build_opportunity_dataset_file
+from decision_engine.training.datasets import (
+    build_opportunity_dataset_file,
+)
 from opportunity_history import load_opportunity_history
 
 

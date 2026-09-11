@@ -19,6 +19,9 @@ from opportunity_market_archive import (
     select_causal_universe,
 )
 from model_lib import _oss_bucket
+from decision_engine.data.fuyao import (
+    fetch_full_snapshot as fetch_fuyao_market_snapshot,
+)
 
 
 EASTMONEY_REALTIME_HOSTS = (
@@ -45,6 +48,7 @@ MARKET_FIELDS = (
 PAGE_SIZE = 100
 MAX_PAGES = 80
 CODE_PATTERN = re.compile(r"^\d{6}$")
+MARKET_ARCHIVE_SETTLE_MS = 10 * 60 * 1000
 HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Referer": "https://quote.eastmoney.com/",
@@ -110,7 +114,12 @@ def market_page_path(page):
     )
 
 
-def fetch_market_snapshot(*, fetch_page=None, workers=6):
+def fetch_market_snapshot(
+    *,
+    fetch_page=None,
+    fetch_fuyao=None,
+    workers=6,
+):
     load_page = fetch_page or (
         lambda page: _first_json(
             EASTMONEY_REALTIME_HOSTS,
@@ -214,7 +223,46 @@ def fetch_market_snapshot(*, fetch_page=None, workers=6):
             })
     if len(daily) < 800 or len(funds) < 500:
         raise ValueError("公开源日线或资金流覆盖不足")
-    return {"date": target, "daily": daily, "funds": funds}
+    fuyao_loader = fetch_fuyao or (
+        lambda: fetch_fuyao_market_snapshot(workers=workers)
+    )
+    try:
+        fuyao = fuyao_loader()
+    except Exception:
+        fuyao = None
+    fuyao_rows = (
+        fuyao.get("rows")
+        if isinstance(fuyao, dict)
+        and fuyao.get("date") == target
+        and float(fuyao.get("coverage") or 0) >= 0.85
+        else None
+    )
+    if isinstance(fuyao_rows, dict):
+        for row in daily:
+            source = fuyao_rows.get(row["code"])
+            if not source:
+                continue
+            for key in (
+                "open",
+                "high",
+                "low",
+                "close",
+                "preClose",
+                "volume",
+                "amount",
+            ):
+                if source.get(key) is not None:
+                    row[key] = source[key]
+    return {
+        "date": target,
+        "daily": daily,
+        "funds": funds,
+        "priceSource": (
+            "THS_FUYAO"
+            if isinstance(fuyao_rows, dict)
+            else "EASTMONEY"
+        ),
+    }
 
 
 def _normalize_minute_lines(lines, code, date):
@@ -291,6 +339,7 @@ def archive_latest_public(
     minute_loader=fetch_public_minute_day,
     universe_size=1000,
     workers=12,
+    now_ms=None,
 ):
     target_bucket = target_bucket or _oss_bucket()
     if target_bucket is None:
@@ -307,6 +356,22 @@ def archive_latest_public(
             "universe": existing["universe"],
         }
     previous = latest_market_day_before(target_bucket, target)
+    current_ms = int(
+        now_ms
+        if now_ms is not None
+        else dt.datetime.now(tz=dt.timezone.utc).timestamp() * 1000
+    )
+    if current_ms < market_close_ms(target) + MARKET_ARCHIVE_SETTLE_MS:
+        return {
+            "status": "market_open_skipped",
+            "date": target,
+            "latestArchiveDate": (
+                previous.get("date")
+                if isinstance(previous, dict)
+                else None
+            ),
+            "reason": "目标交易日尚未收盘，继续使用最新完整OSS归档",
+        }
     if previous is None:
         raise ValueError("公开源归档缺少前一交易日因果股票池")
     universe = select_causal_universe(
@@ -354,7 +419,11 @@ def archive_latest_public(
         daily=snapshot["daily"],
         funds=snapshot["funds"],
         minutes={"date": target, "codes": minutes},
-        source="EASTMONEY_TENCENT_DAILY_INCREMENT",
+        source=(
+            "THS_FUYAO_EASTMONEY_TENCENT_DAILY_INCREMENT"
+            if snapshot.get("priceSource") == "THS_FUYAO"
+            else "EASTMONEY_TENCENT_DAILY_INCREMENT"
+        ),
         universe_source_date=previous["date"],
         requested_codes=len(universe),
         generated_at=market_close_ms(target),

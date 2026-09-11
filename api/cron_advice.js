@@ -1623,7 +1623,7 @@ async function persistServer(nick, workingAcc) {
     }
     fdata.settings = settings;
   }
-  // 进度快照供前端门控；concurrency=当前V3主评估容量。
+  // 进度快照供前端门控；concurrency=当前系统主评估容量。
   fdata.batchProgress = jobsToProgress(wdata, Date.now(), effectiveAdviceConcurrency(wdata));
   // advice 逐条时间戳并入
   const wa = (wdata.advice && typeof wdata.advice === 'object') ? wdata.advice : {};

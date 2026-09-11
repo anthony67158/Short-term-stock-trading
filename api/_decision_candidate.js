@@ -17,7 +17,7 @@ import {
 import {
   beijingMinutes,
 } from '../shared/tradingCalendar.js'
-import { fetchOpportunityScores } from './_opportunity_score.js'
+import { fetchDecisionScores } from './_action_value_client.js'
 
 const ROUTES = new Set(['IMMEDIATE', 'PULLBACK', 'BREAKOUT'])
 
@@ -229,7 +229,7 @@ export async function scoreCandidatesWithDecisionModel(
     marketGate = null,
     marketContext = null,
     now = Date.now(),
-    scoreOpportunities = fetchOpportunityScores,
+    scoreOpportunities = fetchDecisionScores,
   } = {},
 ) {
   const context = marketContext || buildMarketOpportunityContext({
