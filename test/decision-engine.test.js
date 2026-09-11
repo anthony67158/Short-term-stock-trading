@@ -271,6 +271,19 @@ test('系统完整编译保留同一路径价格与概率，保存恢复不依�
     decision.prices.reference,
     result.result.selectedDecisionPlan.entryPlan.price,
   )
+  assert.equal(
+    result.result.decisionRationale.schemaVersion,
+    'decision-rationale.v1',
+  )
+  assert.equal(result.result.decisionRationale.context, 'ENTRY')
+  assert.equal(
+    result.result.decisionRationale.quantity.lots,
+    decision.quantity.lots,
+  )
+  assert.equal(
+    result.result.quantNote,
+    result.result.decisionRationale.summary,
+  )
   const entry = buildAdviceCacheEntry(null, { mode: result.mode, advice: result.result }, now)
   const restored = JSON.parse(JSON.stringify(entry))
   assert.deepEqual(restored.advice.decisionPlan, decision)
@@ -304,6 +317,13 @@ test('持仓初评生成加仓观察价并保留账户核定预算', async () =>
   assert.ok(result.result.decisionPlan.entryBudget.lots > 0)
   assert.ok(result.result.pullbackWatchPrice > 0)
   assert.equal(result.result.holdingAddPlan.route, 'PULLBACK')
+  assert.equal(result.result.decisionRationale.context, 'POSITION')
+  assert.equal(result.result.decisionRationale.pathComparison.length, 0)
+  assert.ok(
+    result.result.decisionRationale.actionComparison.some(
+      (item) => item.action === 'HOLD',
+    ),
+  )
 
   const data = {
     holding: result.result.decisionPlan.quantity.holdingLots

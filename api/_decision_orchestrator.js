@@ -20,6 +20,9 @@ import {
 import { buildDecisionAction } from '../shared/decisionEnginePolicy.js'
 import { compileDecisionPlan, applyCompiledDecisionPlan } from '../shared/decisionPlan.js'
 import { compileExecutionPlan } from '../shared/executionPlan.js'
+import {
+  buildDecisionRationale,
+} from '../shared/decisionRationale.js'
 import { deriveMarketRegime } from '../shared/marketRegime.js'
 import { buildStockFundNote } from '../shared/retailFundFlow.js'
 import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
@@ -469,6 +472,15 @@ export async function evaluateDecision({
       pullbackWatchPrice: null,
       breakoutWatchPrice: null,
     }
+  }
+  const decisionRationale = buildDecisionRationale({
+    advice,
+    decisionPlan,
+  })
+  advice = {
+    ...advice,
+    decisionRationale,
+    quantNote: decisionRationale.summary || advice.quantNote,
   }
   if (!['BUY', 'ADD'].includes(decisionPlan.action) && !decisionPlan.blockedReasons?.length) {
     advice.actionPlan = sourceInstruction
