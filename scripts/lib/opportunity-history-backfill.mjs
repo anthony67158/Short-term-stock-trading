@@ -89,6 +89,11 @@ function contextOf(event, batch, scoreInput) {
     marketRegimeLabel:
       String(batch.marketGate?.regimeLabel || '') || null,
     ...scoreInput.dimensions,
+    patternRecallAdded: event.recall?.patternAdded === true,
+    patternId: String(event.recall?.patternId || '') || null,
+    patternScore: Number.isFinite(Number(event.recall?.patternScore))
+      ? Number(event.recall.patternScore)
+      : null,
     amount: Number.isFinite(Number(event.quote?.amount))
       ? Number(event.quote.amount)
       : null,

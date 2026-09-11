@@ -142,6 +142,10 @@ function recallProjection(value = {}) {
     liquidityPct: finite(source.liquidityPct),
     cheapScorePct: finite(source.cheapScorePct),
     exploration: source.exploration === true,
+    patternId: text(source.patternId, 40) || null,
+    patternScore: finite(source.patternScore),
+    patternAsOfDate: text(source.patternAsOfDate, 10) || null,
+    patternAdded: source.patternAdded === true,
   }
 }
 

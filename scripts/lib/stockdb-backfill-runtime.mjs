@@ -5,6 +5,9 @@ import {
   buildMarketOpportunityContext,
 } from '../../shared/marketOpportunityContext.js'
 import {
+  buildStrategyPatternAnalysis,
+} from '../../shared/strategyPatternFeatures.js'
+import {
   buildHistoricalLedgerBatch,
   expandHistoricalLedgerBatch,
   settleHistoricalEvent,
@@ -21,6 +24,8 @@ import {
   normalizeDailyRow,
   normalizeMinuteRow,
 } from './stockdb-replay.mjs'
+
+const historicalPatternCache = new WeakMap()
 
 function displayDate(value) {
   const date = String(value || '').replaceAll('-', '')
@@ -70,6 +75,66 @@ function recentDaily(rows, tradeDate, mode, quote) {
     })
   }
   return completed
+}
+
+export function buildHistoricalPatternSnapshot(
+  dailyByCode,
+  tradeDate,
+) {
+  const target = String(tradeDate).replaceAll('-', '')
+  const cachedByDate = historicalPatternCache.get(dailyByCode)
+  if (cachedByDate?.has(target)) return cachedByDate.get(target)
+  const stocks = new Map()
+  let asOfDate = ''
+  for (const [code, rows] of dailyByCode.entries()) {
+    const completed = (Array.isArray(rows) ? rows : [])
+      .map(normalizeDailyRow)
+      .filter((row) => row && row.date < target)
+      .slice(-60)
+      .map((row) => ({
+        date: displayDate(row.date),
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume,
+        amount: row.amount,
+      }))
+    if (!completed.length) continue
+    const analysis = buildStrategyPatternAnalysis({
+      candles: completed,
+      mode: 'close',
+    })
+    const features = analysis.features
+    stocks.set(String(code), {
+      historyCoverage: features.patternHistoryCoverage,
+      platformBreakout: features.patternPlatformBreakoutScore,
+      supportPullback: features.patternSupportPullbackScore,
+      volumePriceSurge: features.patternVolumePriceSurgeScore,
+      lowerShadowReversal:
+        features.patternLowerShadowReversalScore,
+      lowVolTrend: features.patternLowVolTrendScore,
+    })
+    const latest = String(completed.at(-1)?.date || '').replaceAll('-', '')
+    if (latest > asOfDate) asOfDate = latest
+  }
+  const snapshot = {
+    schemaVersion: 'strategy-pattern-snapshot.v1',
+    asOfDate,
+    generatedAt: beijingSlotTimestamp(tradeDate, '0900'),
+    summary: {
+      stocks: stocks.size,
+      historyDays: 60,
+      fullHistoryStocks: [...stocks.values()].filter(
+        (value) => value.historyCoverage >= 1,
+      ).length,
+    },
+    stocks,
+  }
+  const nextCache = cachedByDate || new Map()
+  nextCache.set(target, snapshot)
+  historicalPatternCache.set(dailyByCode, nextCache)
+  return snapshot
 }
 
 function hasSplitLikeDiscontinuity(candles) {
@@ -229,6 +294,10 @@ export async function scanHistoricalSlot({
     tradeDate,
   )
   const now = beijingSlotTimestamp(tradeDate, slot)
+  const patternSnapshot = buildHistoricalPatternSnapshot(
+    dailyByCode,
+    tradeDate,
+  )
   const scan = await scanFormulaSelectionCandidates({
     mode,
     marketContext,
@@ -246,6 +315,8 @@ export async function scanHistoricalSlot({
       trends: trends.get(code) || [],
     }),
     fetchFund: async (code) => funds.get(code) || {},
+    fetchPatternSnapshot: async () => patternSnapshot,
+    enableStrategyPatterns: true,
     fetchTags: async (code) => ({
       name: currentDaily(dailyByCode.get(code) || [], tradeDate)?.name || code,
       industry: membershipByCode.get(code)?.sectorName || '',

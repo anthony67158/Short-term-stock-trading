@@ -28,6 +28,8 @@ def dataset(samples=40, dates_count=20):
         for _ in range(max(1, samples // dates_count))
     ])[:samples]
     X = np.zeros((len(dates), len(FEATURE_NAMES)), dtype=np.float32)
+    if "patternHistoryCoverage" in FEATURE_NAMES:
+        X[:, FEATURE_NAMES.index("patternHistoryCoverage")] = 1.0
     y_fill = np.asarray(
         [index % 2 for index in range(len(dates))],
         dtype=np.int8,
@@ -163,6 +165,21 @@ class TrainOpportunityScoreTest(unittest.TestCase):
                 "opportunity_trials.jsonl",
             )))
 
+    def test_v6_training_rejects_zero_padded_pattern_history(self):
+        value = dataset(samples=1200, dates_count=120)
+        value["X"][:, FEATURE_NAMES.index("patternHistoryCoverage")] = 0
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "dataset.npz")
+            np.savez_compressed(path, **value)
+
+            report = train_decision_model(path, directory)
+
+        self.assertEqual(report["state"], "NOT_READY")
+        self.assertIn(
+            "五策略形态历史覆盖率低于95%",
+            report["readiness"]["blockers"],
+        )
+
     def test_ready_dataset_trains_hurdle_q10_and_ranker_heads(self):
         value = dataset(samples=1200, dates_count=120)
 
@@ -231,6 +248,7 @@ class TrainOpportunityScoreTest(unittest.TestCase):
                     "liquidity",
                     "sectorStrength",
                     "limitCrowding",
+                    "strategyPatterns",
                 },
             )
             self.assertGreaterEqual(report["walkForward"]["folds"], 2)

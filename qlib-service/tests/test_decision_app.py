@@ -109,6 +109,25 @@ class DecisionAppTest(unittest.TestCase):
         self.assertEqual(response["date"], "20260909")
         archive.assert_called_once_with(universe_size=1000, workers=8)
 
+    def test_pattern_snapshot_endpoint_returns_verified_snapshot(self):
+        expected = {
+            "schemaVersion": "strategy-pattern-snapshot.v1",
+            "asOfDate": "20260910",
+            "stocks": {"600001": {"platformBreakout": 88}},
+        }
+        with patch.object(
+            app,
+            "_oss_bucket",
+            return_value=object(),
+        ), patch.object(
+            app,
+            "load_strategy_pattern_snapshot",
+            return_value=expected,
+        ):
+            response = app.strategy_pattern_snapshot(x_api_key="")
+
+        self.assertEqual(response, expected)
+
     def test_existing_stock_predict_contract_stays_36_dimensional(self):
         from factors_lib import FEATURE_NAMES as stock_features
 

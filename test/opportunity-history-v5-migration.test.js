@@ -62,7 +62,7 @@ const fundRows = [
   retailNetYi,
 }))
 
-test('V4收盘样本按历史资金升级为完整V5合同', () => {
+test('V4收盘样本按历史资金升级为当前合同', () => {
   const result = migrateOpportunityHistoryV5(
     { outcomes: [legacyOutcome()] },
     fundRows,
@@ -72,7 +72,7 @@ test('V4收盘样本按历史资金升级为完整V5合同', () => {
 
   assert.equal(
     result.outcomes[0].scoreInput.schemaVersion,
-    'opportunity-score-feature.v5',
+    'opportunity-score-feature.v6',
   )
   assert.deepEqual(Object.keys(factors), OPPORTUNITY_SCORE_FEATURE_NAMES)
   assert.equal(factors.fundCurrentAvailable, 1)

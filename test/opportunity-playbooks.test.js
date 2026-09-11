@@ -52,6 +52,60 @@ test('strong market ranks momentum for a liquid leading stock', () => {
   assert.equal(result.alternatives.length, 2)
 })
 
+test('validated pattern evidence contributes a bounded playbook lift', () => {
+  const market = buildMarketOpportunityContext({
+    marketGate: { regime: { score: 60 } },
+    market: {
+      breadth: { up: 2800, down: 1900, limitUp: 35, limitDown: 5 },
+      sentiment: { breakRatePct: 22 },
+    },
+  })
+  const baseCandidate = candidate({
+    quote: {
+      price: 10,
+      pct: 2,
+      amount: 200_000_000,
+      turnover: 3,
+      volumeRatio: 1.4,
+      mainRatio: 1,
+    },
+    fund: { mainNetYi: 0.1, retailNetYi: 0 },
+    sector: {
+      phase: 'STARTUP',
+      actionability: 'WATCH_ONLY',
+      nextScore: 55,
+    },
+    stockRole: 'unknown',
+    shadowFeatures: {
+      orderImbalanceShort: 10,
+      overheatReversalRisk: 5,
+      liquidityComposite: 55,
+      vwapDistancePct: 0.3,
+    },
+  })
+  const baseline = scoreOpportunityPlaybooks(baseCandidate, market)
+  const patterned = scoreOpportunityPlaybooks({
+    ...baseCandidate,
+    strategyPatternPolicy: 'ACTIVE',
+    shadowFeatures: {
+      ...baseCandidate.shadowFeatures,
+      patternHistoryCoverage: 1,
+      patternPlatformBreakoutScore: 100,
+      patternVolumePriceSurgeScore: 95,
+      patternSupportPullbackScore: 0,
+      patternLowerShadowReversalScore: 0,
+      patternLowVolTrendScore: 0,
+    },
+  }, market)
+
+  assert.equal(patterned.selected.key, 'MOMENTUM_BREAKOUT')
+  assert.equal(baseline.selected.key, 'LEADER_PULLBACK')
+  assert.ok(patterned.selected.score > baseline.alternatives[0].score)
+  assert.ok(patterned.selected.evidence.some((item) =>
+    item.includes('突破形态')
+  ))
+})
+
 test('rotation market favors accumulation for a quiet inflow candidate', () => {
   const market = buildMarketOpportunityContext({
     marketGate: { regime: { score: 52 } },

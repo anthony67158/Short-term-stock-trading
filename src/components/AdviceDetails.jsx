@@ -84,7 +84,19 @@ function ExecutionReview({ review }) {
 }
 
 function FullEvidence({ advice }) {
+  const strategyPattern = advice.strategyPattern
   const basis = [
+    [
+      'theory',
+      '形态',
+      strategyPattern
+        ? `${strategyPattern.label} ${Number(
+            strategyPattern.score || 0,
+          ).toFixed(0)}分：${(
+            strategyPattern.evidence || []
+          ).join('，')}`
+        : null,
+    ],
     ['news', '消息', advice.newsNote],
     ['macro', '宏观', advice.macroNote],
     ['seat', '席位', advice.seatNote],

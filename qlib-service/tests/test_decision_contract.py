@@ -83,7 +83,7 @@ class OpportunityContractTest(unittest.TestCase):
         for name in manifest["legacyDefaultZeroFeatures"]:
             self.assertEqual(normalized["factors"][name], 0.0)
 
-    def test_legacy_v4_inputs_only_fill_v5_features_with_zero(self):
+    def test_legacy_v4_inputs_fill_later_features_with_zero(self):
         with open(
             os.path.join(
                 SERVICE_ROOT,

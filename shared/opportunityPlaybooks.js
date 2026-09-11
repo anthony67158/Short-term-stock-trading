@@ -43,6 +43,12 @@ function booleanScore(value, yes = 100, no = 20) {
   return value === true ? yes : value === false ? no : 50
 }
 
+function patternBlend(base, pattern, coverage, maximumWeight) {
+  const available = clamp((finite(coverage) ?? 0) * 100) / 100
+  const weight = maximumWeight * available
+  return clamp(base * (1 - weight) + (finite(pattern) ?? 0) * weight)
+}
+
 function sectorStrength(candidate = {}) {
   const sector = candidate.sector || {}
   const phase = String(sector.phase || '')
@@ -138,8 +144,26 @@ function evidenceFor(key, factors, candidate) {
       `承接强度${Math.round(factors.flow)}分`,
     ],
   }[key] || []
+  const patternEvidence = {
+    MOMENTUM_BREAKOUT: factors.patternMomentum >= 70
+      ? `突破形态${Math.round(factors.patternMomentum)}分`
+      : null,
+    LEADER_PULLBACK: factors.patternPullback >= 70
+      ? `回踩形态${Math.round(factors.patternPullback)}分`
+      : null,
+    ACCUMULATION: factors.patternAccumulation >= 70
+      ? `量价承接${Math.round(factors.patternAccumulation)}分`
+      : null,
+    PANIC_REVERSAL: factors.patternReversal >= 70
+      ? `下影修复${Math.round(factors.patternReversal)}分`
+      : null,
+    RANGE_REVERSION: factors.patternRange >= 70
+      ? `低波动结构${Math.round(factors.patternRange)}分`
+      : null,
+  }[key]
   return [
     ...values,
+    patternEvidence,
     ...(candidate.evidence || []).slice(0, 2),
   ].filter(Boolean).slice(0, 4)
 }
@@ -200,6 +224,27 @@ export function scoreOpportunityPlaybooks(
     + liquidity * 0.12
     + booleanScore(pct < 0 && vwapDistance >= -1) * 0.1,
   )
+  const patternCoverage = candidate.strategyPatternPolicy === 'ACTIVE'
+    ? finite(shadow.patternHistoryCoverage) ?? 0
+    : 0
+  const patternMomentum = Math.max(
+    finite(shadow.patternPlatformBreakoutScore) ?? 0,
+    finite(shadow.patternVolumePriceSurgeScore) ?? 0,
+  )
+  const patternPullback = Math.max(
+    finite(shadow.patternSupportPullbackScore) ?? 0,
+    finite(shadow.patternLowVolTrendScore) ?? 0,
+  )
+  const patternAccumulation = Math.max(
+    finite(shadow.patternVolumePriceSurgeScore) ?? 0,
+    finite(shadow.patternSupportPullbackScore) ?? 0,
+  )
+  const patternReversal =
+    finite(shadow.patternLowerShadowReversalScore) ?? 0
+  const patternRange = Math.max(
+    finite(shadow.patternSupportPullbackScore) ?? 0,
+    finite(shadow.patternLowVolTrendScore) ?? 0,
+  )
   const factors = {
     momentum,
     pullback,
@@ -211,8 +256,13 @@ export function scoreOpportunityPlaybooks(
     role,
     liquidity,
     overheat: clamp(overheat),
+    patternMomentum,
+    patternPullback,
+    patternAccumulation,
+    patternReversal,
+    patternRange,
   }
-  const raw = {
+  const base = {
     MOMENTUM_BREAKOUT:
       momentum * 0.58 + sector * 0.2 + role * 0.12 + liquidity * 0.1,
     LEADER_PULLBACK:
@@ -226,6 +276,39 @@ export function scoreOpportunityPlaybooks(
     RANGE_REVERSION:
       pullback * 0.42 + flow * 0.23 + liquidity * 0.2
         + (100 - clamp(overheat)) * 0.15,
+  }
+  const raw = {
+    MOMENTUM_BREAKOUT: patternBlend(
+      base.MOMENTUM_BREAKOUT,
+      patternMomentum,
+      patternCoverage,
+      0.2,
+    ),
+    LEADER_PULLBACK: patternBlend(
+      base.LEADER_PULLBACK,
+      patternPullback,
+      patternCoverage,
+      0.2,
+    ),
+    ACCUMULATION: patternBlend(
+      base.ACCUMULATION,
+      patternAccumulation,
+      patternCoverage,
+      0.12,
+    ),
+    CATALYST: base.CATALYST,
+    PANIC_REVERSAL: patternBlend(
+      base.PANIC_REVERSAL,
+      patternReversal,
+      patternCoverage,
+      0.2,
+    ),
+    RANGE_REVERSION: patternBlend(
+      base.RANGE_REVERSION,
+      patternRange,
+      patternCoverage,
+      0.15,
+    ),
   }
   const weights = marketContext.playbookWeights || {}
   const scored = PLAYBOOKS.map((key) => {

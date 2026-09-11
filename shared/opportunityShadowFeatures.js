@@ -1,3 +1,8 @@
+import {
+  STRATEGY_PATTERN_FEATURE_NAMES,
+  buildStrategyPatternFeatures,
+} from './strategyPatternFeatures.js'
+
 export const OPPORTUNITY_SHADOW_FEATURE_NAMES = Object.freeze([
   'ret2dPct',
   'ret5dPct',
@@ -43,6 +48,7 @@ export const OPPORTUNITY_SHADOW_FEATURE_NAMES = Object.freeze([
   'dailyTechnicalAvailable',
   'intradayTechnicalAvailable',
   'sectorContextAvailable',
+  ...STRATEGY_PATTERN_FEATURE_NAMES,
 ])
 
 function finite(value) {
@@ -265,6 +271,7 @@ export function buildOpportunityShadowFeatures({
   trends = [],
   fund = {},
   sectorOpportunity = {},
+  mode = quote.live === true ? 'intraday' : 'close',
 } = {}) {
   const daily = normalizedCandles(candles)
   const current = finite(quote.price) ?? daily.at(-1)?.close
@@ -273,6 +280,11 @@ export function buildOpportunityShadowFeatures({
   const minute = minuteStructure(trends)
   const atr = atr14(daily)
   const fundFeatures = buildOpportunityFundFeatures(fund)
+  const patternFeatures = buildStrategyPatternFeatures({
+    candles,
+    quote,
+    mode,
+  })
   const mainRatio = finite(quote.mainRatio) ?? 0
   const sector = sectorOpportunity?.sector || sectorOpportunity || {}
   const sectorContextAvailable = !!(
@@ -396,6 +408,7 @@ export function buildOpportunityShadowFeatures({
     dailyTechnicalAvailable: dailyTechnicalAvailable ? 1 : 0,
     intradayTechnicalAvailable: intradayTechnicalAvailable ? 1 : 0,
     sectorContextAvailable: sectorContextAvailable ? 1 : 0,
+    ...patternFeatures,
   }
   return Object.fromEntries(
     OPPORTUNITY_SHADOW_FEATURE_NAMES.map((name) => [

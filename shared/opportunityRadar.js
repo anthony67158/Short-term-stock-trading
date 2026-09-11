@@ -434,6 +434,17 @@ function formulaOpportunity(candidate, {
   now,
 }) {
   const sector = resolveCandidateSector(candidate, maps)
+  const strategyPattern = (
+    Array.isArray(candidate.strategyPatterns)
+      ? candidate.strategyPatterns
+      : []
+  ).find((item) => item?.matched === true)
+  const strategyPatternView = strategyPattern
+    ? {
+        ...strategyPattern,
+        recallAdded: candidate.recall?.patternAdded === true,
+      }
+    : null
   const entryPlan = formulaEntryPlan(candidate, lane)
   const exitPlan = formulaExitPlan(candidate, lane, now)
   const riskReward = finite(candidate.riskReward)
@@ -502,14 +513,21 @@ function formulaOpportunity(candidate, {
     riskReward,
     opportunityScore: opportunityScore || null,
     adaptive: candidate.adaptive || null,
+    strategyPattern: strategyPatternView,
     cautions: candidate.cautions || [],
     entryPlan,
     exitPlan,
     sourceSignals: unique([
       sector?.name ? '板块前瞻' : null,
+      strategyPatternView?.recallAdded
+        ? `新增召回：${strategyPatternView.label}`
+        : strategyPatternView?.label,
       FORMULA_LABELS[candidate.formulaId] || candidate.formulaId,
     ]),
-    evidence: unique(candidate.evidence || []),
+    evidence: unique([
+      ...(strategyPattern?.evidence || []),
+      ...(candidate.evidence || []),
+    ]),
     blockers: unique(blockers),
     stale: !sourceFresh,
     _decisionPriority: 2,

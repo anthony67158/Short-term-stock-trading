@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildHistoricalFund,
+  buildHistoricalPatternSnapshot,
   groupMinuteRows,
   pendingFromBatch,
   scanHistoricalSlot,
@@ -88,6 +89,21 @@ test('历史资金不足五日时不把部分合计冒充五日资金', () => {
   assert.equal(fund.historyComplete, false)
   assert.equal(fund.main5dYi, null)
   assert.equal(fund.retail5dYi, null)
+})
+
+test('历史形态快照只使用信号日前已完成日线', () => {
+  const rows = dailyRows()
+  const snapshot = buildHistoricalPatternSnapshot(
+    new Map([['600519', rows]]),
+    '20260908',
+  )
+  const latestBeforeSignal = rows
+    .filter((row) => row.date < '20260908')
+    .at(-1)
+
+  assert.equal(snapshot.asOfDate, latestBeforeSignal.date)
+  assert.equal(snapshot.stocks.get('600519').historyCoverage, 1)
+  assert.ok(snapshot.stocks.get('600519').lowVolTrend > 0)
 })
 
 test('历史时点可复用生产扫描器生成三路径账本', async () => {

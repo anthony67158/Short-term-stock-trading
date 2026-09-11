@@ -232,7 +232,7 @@ function validateCoverage(daily, funds, plan, universeSize) {
 
 async function runPythonExporter(arguments_, label) {
   await new Promise((resolve, reject) => {
-    const child = spawn('python3', arguments_, {
+    const child = spawn(process.env.PYTHON_BIN || 'python3', arguments_, {
       cwd: ROOT,
       stdio: ['ignore', 'inherit', 'inherit'],
     })

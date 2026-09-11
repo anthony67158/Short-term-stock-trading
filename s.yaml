@@ -52,6 +52,8 @@ resources:
         SEARXNG_BASE_URL: ${env('SEARXNG_BASE_URL')}
         QUANT_URL: ${env('QUANT_URL')}
         QUANT_KEY: ${env('QUANT_KEY')}
+        # 五策略形态只有 v6 整包通过门禁后才可改为 ACTIVE。
+        STRATEGY_PATTERN_POLICY: "RESEARCH"
         AUTHORIZED_ACCOUNT_HASHES: ${env('AUTHORIZED_ACCOUNT_HASHES')}
         RUNTIME_CONFIG_ADMIN_HASHES: ${env('RUNTIME_CONFIG_ADMIN_HASHES')}
         # ---- OSS 存储（替代 Vercel Blob）----

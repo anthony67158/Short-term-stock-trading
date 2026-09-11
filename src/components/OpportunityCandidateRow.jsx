@@ -145,6 +145,16 @@ export default function OpportunityCandidateRow({
         <span>
           {(opportunity.sourceSignals || []).join(' · ')}
         </span>
+        {opportunity.strategyPattern && (
+          <div className="opportunity-pattern-signal">
+            <Icon name="activity" size={12} />
+            <b>{opportunity.strategyPattern.label}</b>
+            <span>{Number(opportunity.strategyPattern.score || 0).toFixed(0)}分</span>
+            <span>
+              {(opportunity.strategyPattern.evidence || []).join(' · ')}
+            </span>
+          </div>
+        )}
         {preCatalyst && (
           <div className="opportunity-pre-catalyst-signal">
             <Icon name="radar" size={12} />

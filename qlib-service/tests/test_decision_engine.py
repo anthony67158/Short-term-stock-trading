@@ -427,7 +427,8 @@ class OpportunityModelTest(unittest.TestCase):
 
     def test_out_of_distribution_is_diagnostic_without_blocking_direct_use(self):
         value = item()
-        for name in FEATURE_NAMES[:13]:
+        violation_count = int(len(FEATURE_NAMES) * 0.1) + 1
+        for name in FEATURE_NAMES[:violation_count]:
             value["factors"][name] = 100.0
 
         result = predict_decision_items(

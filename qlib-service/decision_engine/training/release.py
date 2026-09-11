@@ -11,6 +11,7 @@ import time
 
 import numpy as np
 
+from ..contracts import FEATURE_NAMES
 from .evaluation import (
     binary_metrics,
     block_bootstrap_lower_bound,
@@ -786,6 +787,27 @@ def _candidate_score(evaluation):
     )
 
 
+def _project_dataset_for_metadata(data, metadata):
+    source_names = tuple(
+        np.asarray(
+            data.get("feature_names", FEATURE_NAMES),
+        ).astype(str).tolist()
+    )
+    target_names = tuple(metadata.get("featureNames") or ())
+    indexes = []
+    for name in target_names:
+        if name not in source_names:
+            raise ValueError(
+                f"评测数据缺少模型特征: {name}"
+            )
+        indexes.append(source_names.index(name))
+    return {
+        **data,
+        "X": np.asarray(data["X"])[:, indexes],
+        "feature_names": np.asarray(target_names, dtype="<U80"),
+    }
+
+
 def select_release(
     dataset_path,
     champion_directory,
@@ -811,79 +833,112 @@ def select_release(
         challenger_metadata,
         challenger_artifact,
     ) = _load_bundle(challenger_directory)
+    champion_data = _project_dataset_for_metadata(
+        data,
+        champion_metadata,
+    )
+    challenger_data = _project_dataset_for_metadata(
+        data,
+        challenger_metadata,
+    )
     champion_evaluation = evaluate_release(
         champion_models,
         champion_metadata,
-        data,
+        champion_data,
         holdout,
     )
     challenger_evaluation = evaluate_release(
         challenger_models,
         challenger_metadata,
-        data,
+        challenger_data,
         holdout,
     )
-    component_decisions = []
-    individual_evaluations = {}
-    for component in COMPONENTS:
-        models, metadata = compose_release(
-            champion_models,
-            champion_metadata,
-            challenger_models,
-            challenger_metadata,
-            (component,),
-        )
-        evaluation = evaluate_release(
-            models,
-            metadata,
-            data,
-            holdout,
-            benchmark_repeats=0,
-        )
-        individual_evaluations[component] = evaluation
-        component_decisions.append(component_decision(
+    schema_changed = (
+        champion_metadata.get("featureSchemaVersion")
+        != challenger_metadata.get("featureSchemaVersion")
+        or tuple(champion_metadata.get("featureNames") or ())
+        != tuple(challenger_metadata.get("featureNames") or ())
+    )
+    component_decisions = [
+        component_decision(
             component,
             champion_evaluation,
-            evaluation,
-        ))
-    improved = [
-        item["component"]
-        for item in component_decisions
-        if item["improved"]
+            challenger_evaluation,
+        )
+        for component in COMPONENTS
     ]
     candidates = []
-    combinations = (
-        itertools.combinations(improved, size)
-        for size in range(1, len(improved) + 1)
-    )
-    for group in combinations:
-        for components in group:
-            if len(components) == 1:
-                evaluation = individual_evaluations[components[0]]
-            else:
-                models, metadata = compose_release(
-                    champion_models,
-                    champion_metadata,
-                    challenger_models,
-                    challenger_metadata,
-                    components,
-                )
-                evaluation = evaluate_release(
-                    models,
-                    metadata,
-                    data,
-                    holdout,
-                    benchmark_repeats=0,
-                )
-            compatibility = compatibility_gate(
-                champion_evaluation,
-                evaluation,
+    if schema_changed:
+        compatibility = compatibility_gate(
+            champion_evaluation,
+            challenger_evaluation,
+        )
+        if not any(item["improved"] for item in component_decisions):
+            compatibility["passed"] = False
+            compatibility["blockers"].append(
+                "新特征合同没有任何模型组成部分达到独立改善门槛"
             )
-            candidates.append({
-                "components": list(components),
-                "evaluation": evaluation,
-                "compatibility": compatibility,
-            })
+        candidates.append({
+            "components": list(COMPONENTS),
+            "evaluation": challenger_evaluation,
+            "compatibility": compatibility,
+            "fullBundle": True,
+        })
+    else:
+        improved = [
+            item["component"]
+            for item in component_decisions
+            if item["improved"]
+        ]
+        individual_evaluations = {}
+        for component in improved:
+            models, metadata = compose_release(
+                champion_models,
+                champion_metadata,
+                challenger_models,
+                challenger_metadata,
+                (component,),
+            )
+            individual_evaluations[component] = evaluate_release(
+                models,
+                metadata,
+                data,
+                holdout,
+                benchmark_repeats=0,
+            )
+        combinations = (
+            itertools.combinations(improved, size)
+            for size in range(1, len(improved) + 1)
+        )
+        for group in combinations:
+            for components in group:
+                if len(components) == 1:
+                    evaluation = individual_evaluations[components[0]]
+                else:
+                    models, metadata = compose_release(
+                        champion_models,
+                        champion_metadata,
+                        challenger_models,
+                        challenger_metadata,
+                        components,
+                    )
+                    evaluation = evaluate_release(
+                        models,
+                        metadata,
+                        data,
+                        holdout,
+                        benchmark_repeats=0,
+                    )
+                compatibility = compatibility_gate(
+                    champion_evaluation,
+                    evaluation,
+                )
+                candidates.append({
+                    "components": list(components),
+                    "evaluation": evaluation,
+                    "compatibility": compatibility,
+                    "fullBundle": False,
+                })
     accepted = [
         item
         for item in candidates
@@ -899,17 +954,23 @@ def select_release(
     )
     final_validation_blockers = []
     if selected:
-        models, metadata = compose_release(
-            champion_models,
-            champion_metadata,
-            challenger_models,
-            challenger_metadata,
-            selected["components"],
-        )
+        if selected.get("fullBundle"):
+            models = challenger_models
+            metadata = copy.deepcopy(challenger_metadata)
+            evaluation_data = challenger_data
+        else:
+            models, metadata = compose_release(
+                champion_models,
+                champion_metadata,
+                challenger_models,
+                challenger_metadata,
+                selected["components"],
+            )
+            evaluation_data = data
         selected["evaluation"] = evaluate_release(
             models,
             metadata,
-            data,
+            evaluation_data,
             holdout,
         )
         selected["compatibility"] = compatibility_gate(
@@ -996,14 +1057,24 @@ def select_release(
         "compatibleCombinations": len(accepted),
     }
     if selected:
-        models, metadata = compose_release(
-            champion_models,
-            champion_metadata,
-            challenger_models,
-            challenger_metadata,
-            selected_components,
-        )
-        del models
+        if selected.get("fullBundle"):
+            metadata = copy.deepcopy(challenger_metadata)
+            artifact = copy.deepcopy(challenger_artifact)
+        else:
+            models, metadata = compose_release(
+                champion_models,
+                champion_metadata,
+                challenger_models,
+                challenger_metadata,
+                selected_components,
+            )
+            del models
+            artifact = _compose_artifact(
+                champion_artifact,
+                challenger_artifact,
+                champion_metadata,
+                selected_components,
+            )
         metadata.update({
             "modelVersion": selected_version,
             "shadowOnly": False,
@@ -1026,12 +1097,6 @@ def select_release(
         if os.path.exists(output_directory):
             shutil.rmtree(output_directory)
         os.makedirs(output_directory, exist_ok=True)
-        artifact = _compose_artifact(
-            champion_artifact,
-            challenger_artifact,
-            champion_metadata,
-            selected_components,
-        )
         _write_json(
             os.path.join(
                 output_directory,

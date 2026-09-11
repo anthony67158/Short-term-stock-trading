@@ -39,6 +39,12 @@ import {
 import {
   chooseAdaptivePricePlan,
 } from '../shared/adaptivePricePlans.js'
+import {
+  buildStrategyPatternAnalysis,
+} from '../shared/strategyPatternFeatures.js'
+import {
+  fetchStrategyPatternSnapshot,
+} from './_strategy_pattern_snapshot.js'
 
 function finite(value) {
   if (value == null || value === '' || value === '-') return null
@@ -174,9 +180,52 @@ function assignPercentiles(items, key, score) {
   }
 }
 
-function withRecallMetadata(items, mode) {
+function snapshotPattern(snapshot, code) {
+  if (!snapshot?.stocks) return null
+  return snapshot.stocks instanceof Map
+    ? snapshot.stocks.get(String(code)) || null
+    : snapshot.stocks[String(code)] || null
+}
+
+function strongestSnapshotPattern(value = {}) {
+  const sourceValue = value && typeof value === 'object' ? value : {}
+  const ranked = [
+    ['PLATFORM_BREAKOUT', 'MOMENTUM', sourceValue.platformBreakout],
+    ['VOLUME_PRICE_SURGE', 'MOMENTUM', sourceValue.volumePriceSurge],
+    ['SUPPORT_PULLBACK', 'ACCUMULATION', sourceValue.supportPullback],
+    ['LOWER_SHADOW_REVERSAL', 'REVERSAL', sourceValue.lowerShadowReversal],
+    ['LOW_VOL_TREND', 'LIQUIDITY', sourceValue.lowVolTrend],
+  ].map(([id, source, score]) => ({
+    id,
+    source,
+    score: Number(score) || 0,
+  })).sort((left, right) => right.score - left.score)
+  return ranked[0] || null
+}
+
+function usablePatternSnapshot(snapshot, expectedTradeDate) {
+  if (!snapshot?.stocks || !/^\d{8}$/.test(String(snapshot.asOfDate || ''))) {
+    return null
+  }
+  const target = Date.parse(`${expectedTradeDate}T00:00:00+08:00`)
+  const asOf = Date.parse(
+    `${String(snapshot.asOfDate).replace(
+      /^(\d{4})(\d{2})(\d{2})$/,
+      '$1-$2-$3',
+    )}T00:00:00+08:00`,
+  )
+  return (
+    Number.isFinite(target)
+    && Number.isFinite(asOf)
+    && asOf <= target
+    && target - asOf <= 7 * 86400000
+  ) ? snapshot : null
+}
+
+function withRecallMetadata(items, mode, patternSnapshot = null) {
   const values = items.map((item) => ({
     ...item,
+    pattern: snapshotPattern(patternSnapshot, item.quote.code),
     recall: {
       primarySource: 'UNKNOWN',
       sources: [],
@@ -186,6 +235,10 @@ function withRecallMetadata(items, mode) {
       liquidityPct: 0,
       cheapScorePct: 0,
       exploration: false,
+      patternId: null,
+      patternScore: 0,
+      patternAsOfDate: patternSnapshot?.asOfDate || null,
+      patternAdded: false,
     },
   }))
   assignPercentiles(values, 'momentumPct', (item) =>
@@ -208,6 +261,11 @@ function withRecallMetadata(items, mode) {
   assignPercentiles(values, 'cheapScorePct', (item) =>
     cheapRank(item.quote, mode)
   )
+  for (const item of values) {
+    const strongest = strongestSnapshotPattern(item.pattern)
+    item.recall.patternId = strongest?.id || null
+    item.recall.patternScore = +(strongest?.score || 0).toFixed(3)
+  }
   return values
 }
 
@@ -243,8 +301,14 @@ export function selectAdaptiveDeepCandidates(
     mode = 'intraday',
     expectedTradeDate = beijingDayKey(),
     limit = 96,
+    patternLimit = 16,
+    patternSnapshot = null,
   } = {},
 ) {
+  const usablePatterns = usablePatternSnapshot(
+    patternSnapshot,
+    expectedTradeDate,
+  )
   const eligible = (Array.isArray(quotes) ? quotes : [])
     .filter((quote) =>
       passesAdaptiveRealtimePrefilter(quote, expectedTradeDate)
@@ -253,7 +317,11 @@ export function selectAdaptiveDeepCandidates(
       quote,
       cheapScore: cheapRank(quote, mode),
     }))
-  const rankedEligible = withRecallMetadata(eligible, mode)
+  const rankedEligible = withRecallMetadata(
+    eligible,
+    mode,
+    usablePatterns,
+  )
   const quota = Math.max(1, Math.floor(limit / 4))
   const momentum = rankedEligible.slice().sort((left, right) =>
     Number(right.quote.pct || 0) - Number(left.quote.pct || 0)
@@ -281,7 +349,6 @@ export function selectAdaptiveDeepCandidates(
     ],
     limit,
   )
-  if (firstPass.length >= limit) return firstPass
   const selectedCodes = new Set(firstPass.map((item) => item.quote.code))
   const explorationSeed = Number(
     String(expectedTradeDate).replace(/\D/g, ''),
@@ -302,7 +369,37 @@ export function selectAdaptiveDeepCandidates(
         exploration: true,
       },
     }))
-  return [...firstPass, ...exploration].slice(0, limit)
+  const base = [...firstPass, ...exploration].slice(0, limit)
+  const baseCodes = new Set(base.map((item) => item.quote.code))
+  const patternExtras = usablePatterns
+    ? rankedEligible
+        .filter((item) =>
+          !baseCodes.has(item.quote.code)
+          && Number(item.pattern?.historyCoverage) >= 0.9
+          && Number(item.recall.patternScore) >= 70
+        )
+        .sort((left, right) =>
+          right.recall.patternScore - left.recall.patternScore
+          || String(left.quote.code).localeCompare(String(right.quote.code))
+        )
+        .slice(0, Math.max(0, Number(patternLimit) || 0))
+        .map((item) => {
+          const strongest = strongestSnapshotPattern(item.pattern)
+          return {
+            ...item,
+            recall: {
+              ...item.recall,
+              primarySource: strongest.source,
+              sources: [...new Set([
+                ...item.recall.sources,
+                strongest.source,
+              ])],
+              patternAdded: true,
+            },
+          }
+        })
+    : []
+  return [...base, ...patternExtras]
 }
 
 function uniqueReasons(values = []) {
@@ -324,6 +421,7 @@ function candidateEvent(quote, cheapScore, recall = {}) {
     recall,
     formulaEvaluations: [],
     shadowFeatures: {},
+    strategyPatterns: [],
     decision: null,
     counterfactualPlans: [],
     sector: null,
@@ -359,6 +457,7 @@ function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
     riskReward: selectedPlan.riskReward,
     validUntil: selectedPlan.entryPlan.validUntil,
     timeStopTradingDays: selectedPlan.exitPlan.timeStopTradingDays,
+    patternContext: selectedPlan.patternContext || null,
     priceContractValid: true,
     dataComplete: true,
     dataFresh: true,
@@ -379,6 +478,7 @@ function publicCandidate(item, rank) {
     name: item.name,
     rank,
     score: item.score,
+    recall: item.recall || null,
     formulaId: item.decision.formulaId,
     validationState: 'DECISION_PENDING',
     action: item.decision.action,
@@ -406,6 +506,8 @@ function publicCandidate(item, rank) {
     adaptive: item.adaptive || null,
     cautions: item.adaptive?.cautions || [],
     shadowFeatures: item.shadowFeatures || {},
+    strategyPatternPolicy: item.strategyPatternPolicy || 'RESEARCH',
+    strategyPatterns: item.strategyPatterns || [],
     actionAlternatives: item.counterfactualPlans || [],
   }
 }
@@ -418,6 +520,9 @@ export async function scanFormulaSelectionCandidates({
   fetchTrends = fetchTrendsTx,
   fetchFund = fetchResilientStockFund,
   fetchTags = fetchStockTagProfile,
+  fetchPatternSnapshot = fetchStrategyPatternSnapshot,
+  enableStrategyPatterns =
+    process.env.STRATEGY_PATTERN_POLICY === 'ACTIVE',
   matchSector = sectorOpportunityFromTags,
   onProgress = null,
   now = Date.now(),
@@ -431,7 +536,12 @@ export async function scanFormulaSelectionCandidates({
     percent: 12,
     message: '正在读取完整A股行情',
   })
-  const universe = await fetchUniverse({ now })
+  const [universe, rawPatternSnapshot] = await Promise.all([
+    fetchUniverse({ now }),
+    enableStrategyPatterns
+      ? fetchPatternSnapshot({ now }).catch(() => null)
+      : Promise.resolve(null),
+  ])
   const allQuotes = assertCompleteFormulaUniverse(universe)
   const latestQuoteDate = allQuotes
     .map((item) => String(item?.tradeDate || ''))
@@ -441,6 +551,10 @@ export async function scanFormulaSelectionCandidates({
   const expectedDate = normalizedMode === 'close'
     ? latestQuoteDate || beijingDayKey(now)
     : beijingDayKey(now)
+  const patternSnapshot = usablePatternSnapshot(
+    rawPatternSnapshot,
+    expectedDate,
+  )
   const eligibleQuotes = allQuotes.filter((quote) =>
     passesAdaptiveRealtimePrefilter(quote, expectedDate)
   )
@@ -450,11 +564,14 @@ export async function scanFormulaSelectionCandidates({
       cheapScore: cheapRank(quote, normalizedMode),
     })),
     normalizedMode,
+    patternSnapshot,
   )
   const prefiltered = selectAdaptiveDeepCandidates(allQuotes, {
     mode: normalizedMode,
     expectedTradeDate: expectedDate,
     limit: 96,
+    patternLimit: 16,
+    patternSnapshot,
   })
   const candidateEvents = new Map(
     eligibleWithRecall.map((item) => [
@@ -525,7 +642,15 @@ export async function scanFormulaSelectionCandidates({
         event.shadowFeatures = buildOpportunityShadowFeatures({
           quote,
           candles: kline.candles,
+          mode: normalizedMode,
         })
+        event.strategyPatterns = enableStrategyPatterns
+          ? buildStrategyPatternAnalysis({
+              quote,
+              candles: kline.candles,
+              mode: normalizedMode,
+            }).patterns
+          : []
         candidate = {
           quote,
           kline,
@@ -615,6 +740,7 @@ export async function scanFormulaSelectionCandidates({
           trends: trendData?.trends || [],
           fund,
           sectorOpportunity,
+          mode: normalizedMode,
         })
         const shadowFeatures = buildOpportunityShadowFeatures({
           quote,
@@ -622,7 +748,15 @@ export async function scanFormulaSelectionCandidates({
           trends: trendData?.trends || [],
           fund,
           sectorOpportunity,
+          mode: normalizedMode,
         })
+        const strategyPatterns = enableStrategyPatterns
+          ? buildStrategyPatternAnalysis({
+              quote,
+              candles: kline.candles,
+              mode: normalizedMode,
+            }).patterns
+          : []
         const opportunityContext = buildMarketOpportunityContext({
           marketGate: marketContext?.marketGate,
         })
@@ -636,6 +770,9 @@ export async function scanFormulaSelectionCandidates({
             sectorOpportunity,
             formulaId: formula.matches[0]?.formulaId || 'UNKNOWN',
             shadowFeatures,
+            strategyPatternPolicy: enableStrategyPatterns
+              ? 'ACTIVE'
+              : 'RESEARCH',
           },
           candles: kline.candles,
           trends: trendData?.trends || [],
@@ -662,6 +799,7 @@ export async function scanFormulaSelectionCandidates({
           adaptiveDecisionFromPlan(quote.code, formula, item)
         )
         event.shadowFeatures = shadowFeatures
+        event.strategyPatterns = strategyPatterns
         event.rejectionReasons = uniqueReasons(decision.blockers || [])
         return {
           code: quote.code,
@@ -676,6 +814,10 @@ export async function scanFormulaSelectionCandidates({
           decision,
           adaptive,
           shadowFeatures,
+          strategyPatterns,
+          strategyPatternPolicy: enableStrategyPatterns
+            ? 'ACTIVE'
+            : 'RESEARCH',
           counterfactualPlans: event.counterfactualPlans,
           score: Number(adaptive.playbook?.score || 0),
         }
@@ -746,6 +888,13 @@ export async function scanFormulaSelectionCandidates({
       technicalCandidateCount: technicalCandidates.length,
       formulaMatchCount: validEvaluated.length,
       displayedCount: ranked.length,
+      patternSnapshot: patternSnapshot
+        ? {
+            asOfDate: patternSnapshot.asOfDate,
+            stocks: patternSnapshot.summary?.stocks
+              ?? patternSnapshot.stocks.size,
+          }
+        : null,
     },
     formulas: FORMULA_REGISTRY
       .filter((item) => item.mode === normalizedMode.toUpperCase())
@@ -837,6 +986,14 @@ export async function buildStockFormulaSelection({
     fund,
     sectorOpportunity,
   })
+  const strategyPatterns =
+    process.env.STRATEGY_PATTERN_POLICY === 'ACTIVE'
+      ? buildStrategyPatternAnalysis({
+          candles: kline.candles,
+          quote,
+          mode,
+        }).patterns
+      : []
   const tech = computeTech(kline.candles)
   const klineStale = kline.stale === true
   const decision = buildFormulaPriceDecision({
@@ -872,6 +1029,7 @@ export async function buildStockFormulaSelection({
     stale: klineStale,
     quote,
     formula,
+    strategyPatterns,
     decision,
     advisorReference,
   }

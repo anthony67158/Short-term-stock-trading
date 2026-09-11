@@ -116,6 +116,51 @@ test('深度探索样本按交易日轮换而不是永久固定低代码', () =>
   ))
 })
 
+test('全市场形态快照在原深查池之外增加独立候选', () => {
+  const rows = Array.from({ length: 30 }, (_, index) =>
+    quote({
+      code: String(600001 + index),
+      tradeDate: '2026-09-08',
+      pct: 1,
+      amount: 100_000_000,
+      turnover: 2,
+      mainRatio: 1,
+    })
+  )
+  const baseline = selectAdaptiveDeepCandidates(rows, {
+    expectedTradeDate: '2026-09-08',
+    limit: 8,
+    patternLimit: 0,
+  })
+  const baselineCodes = new Set(baseline.map((item) => item.quote.code))
+  const extra = rows.find((item) => !baselineCodes.has(item.code))
+  const enhanced = selectAdaptiveDeepCandidates(rows, {
+    expectedTradeDate: '2026-09-08',
+    limit: 8,
+    patternLimit: 1,
+    patternSnapshot: {
+      schemaVersion: 'strategy-pattern-snapshot.v1',
+      asOfDate: '20260907',
+      stocks: new Map([[
+        extra.code,
+        {
+          historyCoverage: 1,
+          platformBreakout: 96,
+          supportPullback: 10,
+          volumePriceSurge: 80,
+          lowerShadowReversal: 5,
+          lowVolTrend: 20,
+        },
+      ]]),
+    },
+  })
+
+  assert.equal(enhanced.length, 9)
+  assert.equal(enhanced.at(-1).quote.code, extra.code)
+  assert.equal(enhanced.at(-1).recall.patternId, 'PLATFORM_BREAKOUT')
+  assert.equal(enhanced.at(-1).recall.primarySource, 'MOMENTUM')
+})
+
 test('公式价位不会向界面泄露上游HTTP 501', () => {
   assert.deepEqual(
     formulaSelectionPublicError(new Error('HTTP 501')),
@@ -702,11 +747,11 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
   )
   assert.equal(
     savedLedger.events[0].scoreInput.schemaVersion,
-    'opportunity-score-feature.v5',
+    'opportunity-score-feature.v6',
   )
   assert.deepEqual(result.decisionScoring, {
     usagePolicy: 'DIRECT',
-    inputContextVersion: 'opportunity-score-input-context.v2',
+    inputContextVersion: 'opportunity-score-input-context.v3',
     modelVersion: 'v3-production',
     requested: 2,
     direct: 2,
@@ -722,7 +767,7 @@ test('生产模型或评分输入口径换版后同日公式结果必须重算',
   let saved = null
   let existingScoring = {
     usagePolicy: 'DIRECT',
-    inputContextVersion: 'opportunity-score-input-context.v2',
+    inputContextVersion: 'opportunity-score-input-context.v3',
     modelVersion: 'old-model',
   }
   const store = {

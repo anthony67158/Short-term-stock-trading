@@ -53,6 +53,11 @@ function plan({
     },
     sourceSignals: ['板块前瞻', formula],
     evidence: ['趋势与板块方向一致', '资金承接得到确认'],
+    strategyPattern: {
+      label: '缩量回踩',
+      score: 86,
+      evidence: ['距MA20 -0.6%', '量能0.7倍', '20日动量+5.2%'],
+    },
     blockers,
   }
 }

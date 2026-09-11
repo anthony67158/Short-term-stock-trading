@@ -96,7 +96,37 @@ SHADOW_FEATURE_GROUPS = {
         "failedLimitCount5d",
         "signalLimitCrowding",
     ),
+    "strategyPatterns": (
+        "patternHistoryCoverage",
+        "patternPlatformRange10Pct",
+        "patternBreakoutDistance10Pct",
+        "patternMa20DistancePct",
+        "patternMa60DistancePct",
+        "patternDailyVolumeRatio5",
+        "patternMomentum20Pct",
+        "patternMa20CrossUp",
+        "patternLowerShadowPct",
+        "patternCloseLocationPct",
+        "patternAnnualVol20Pct",
+        "patternPlatformBreakoutScore",
+        "patternSupportPullbackScore",
+        "patternVolumePriceSurgeScore",
+        "patternLowerShadowReversalScore",
+        "patternLowVolTrendScore",
+    ),
 }
+
+
+def _strategy_pattern_readiness(data, minimum_coverage=0.95):
+    if "patternHistoryCoverage" not in FEATURE_NAMES:
+        return {"coverage": None, "ready": True}
+    index = FEATURE_NAMES.index("patternHistoryCoverage")
+    values = np.asarray(data["X"])[:, index]
+    coverage = float(np.mean(values >= 0.9)) if len(values) else 0.0
+    return {
+        "coverage": round(coverage, 6),
+        "ready": coverage >= float(minimum_coverage),
+    }
 
 
 def load_decision_dataset(path):
@@ -1246,6 +1276,13 @@ def train_decision_model(
         minimum_filled_samples=minimum_filled_samples,
         minimum_dates=minimum_dates,
     )
+    pattern_readiness = _strategy_pattern_readiness(data)
+    readiness["strategyPatternCoverage"] = pattern_readiness["coverage"]
+    if not pattern_readiness["ready"]:
+        readiness["ready"] = False
+        readiness["blockers"].append(
+            "五策略形态历史覆盖率低于95%"
+        )
     if not readiness["ready"]:
         report = _not_ready_report(timestamp, readiness)
         _append_trial(trial_path, report)

@@ -54,6 +54,7 @@ function planFromDecision(value = {}) {
       entryPlan: value.entryPlan,
       exitPlan: value.exitPlan,
       riskReward: finite(value.riskReward),
+      patternContext: value.patternContext || null,
     }
   }
   const route = routeOf(value)
@@ -80,6 +81,7 @@ function planFromDecision(value = {}) {
       timeStopTradingDays: finite(value.timeStopTradingDays),
     },
     riskReward: finite(value.riskReward),
+    patternContext: value.patternContext || null,
   }
 }
 

@@ -74,6 +74,56 @@ function tradingDaysFor(playbook) {
   }[playbook] || 3
 }
 
+function strongestPattern(shadow = {}) {
+  return [
+    ['PLATFORM_BREAKOUT', '平台整理突破', shadow.patternPlatformBreakoutScore],
+    ['SUPPORT_PULLBACK', '缩量回踩', shadow.patternSupportPullbackScore],
+    ['VOLUME_PRICE_SURGE', '量价齐升', shadow.patternVolumePriceSurgeScore],
+    [
+      'LOWER_SHADOW_REVERSAL',
+      '长下影反击',
+      shadow.patternLowerShadowReversalScore,
+    ],
+    ['LOW_VOL_TREND', '低波动趋势', shadow.patternLowVolTrendScore],
+  ].map(([id, label, score]) => ({
+    id,
+    label,
+    score: finite(score) ?? 0,
+  })).sort((left, right) => right.score - left.score)[0]
+}
+
+function patternTrigger(route, pattern, fallback) {
+  if (!(pattern?.score >= 70)) return fallback
+  const values = {
+    PLATFORM_BREAKOUT: {
+      IMMEDIATE: '现价站稳近10日平台上沿且量能延续',
+      PULLBACK: '回踩平台上沿后重新站稳，量能未失速',
+      BREAKOUT: '放量突破近10日平台上沿并保持承接',
+    },
+    SUPPORT_PULLBACK: {
+      IMMEDIATE: '现价守住MA20附近支撑且缩量结构未破坏',
+      PULLBACK: '回踩MA20或结构支撑后重新站稳，资金未转弱',
+      BREAKOUT: '回踩企稳后突破近期高点并保持承接',
+    },
+    VOLUME_PRICE_SURGE: {
+      IMMEDIATE: '现价保持MA20上方且量价同步',
+      PULLBACK: '回踩MA20后重新放量站稳',
+      BREAKOUT: '放量突破近期高点且量能延续',
+    },
+    LOWER_SHADOW_REVERSAL: {
+      IMMEDIATE: '长下影低点未失守且价格保持在分时均价上方',
+      PULLBACK: '回踩下影承接区后重新站稳',
+      BREAKOUT: '反击后突破当日高点并保持承接',
+    },
+    LOW_VOL_TREND: {
+      IMMEDIATE: '低波动上行结构保持且现价未明显加速',
+      PULLBACK: '回踩均线支撑后企稳，波动未异常放大',
+      BREAKOUT: '低波动整理后突破近期高点',
+    },
+  }
+  return values[pattern.id]?.[route] || fallback
+}
+
 function rewardMultiple(playbook, marketContext = {}) {
   const base = {
     MOMENTUM_BREAKOUT: 1.35,
@@ -94,6 +144,7 @@ function plan({
   target,
   trigger,
   playbook,
+  patternContext,
   now,
 }) {
   const normalizedEntry = price(entry)
@@ -130,6 +181,9 @@ function plan({
       t1Constraint: '当日买入不可卖出，下一可卖时段优先处理风险',
     },
     riskReward: +(reward / risk).toFixed(2),
+    patternContext: patternContext?.score >= 70
+      ? patternContext
+      : null,
   }
 }
 
@@ -152,6 +206,7 @@ export function buildAdaptivePricePlans({
   ) || current * 0.025
   const ma5 = average(rows.slice(-5).map((item) => item.close))
   const ma10 = average(rows.slice(-10).map((item) => item.close))
+  const ma20 = average(rows.slice(-20).map((item) => item.close))
   const support = finite(
     candidate.technical?.support
     ?? candidate.tech?.sr?.support
@@ -172,13 +227,23 @@ export function buildAdaptivePricePlans({
   const vwap = finite(trendRows.at(-1)?.avg ?? trendRows.at(-1)?.vwap)
   const playbooks = scoreOpportunityPlaybooks(candidate, marketContext)
   const playbook = playbooks.selected?.key
+  const pattern = candidate.strategyPatternPolicy === 'ACTIVE'
+    ? strongestPattern(candidate.shadowFeatures)
+    : null
   const rewardR = rewardMultiple(playbook, marketContext)
   const routeRisk = {
     IMMEDIATE: Math.max(atr * 0.9, current * 0.018),
     PULLBACK: Math.max(atr * 0.75, current * 0.015),
     BREAKOUT: Math.max(atr * 1.05, current * 0.022),
   }
-  const pullbackAnchors = [vwap, ma5, ma10, support, current - atr * 0.45]
+  const pullbackAnchors = [
+    vwap,
+    ma5,
+    ma10,
+    ma20,
+    support,
+    current - atr * 0.45,
+  ]
     .map(price)
     .filter((value) => value > 0 && value < current)
     .sort((left, right) => right - left)
@@ -207,8 +272,13 @@ export function buildAdaptivePricePlans({
       entry: current,
       stop: immediateStop,
       target: immediateTarget,
-      trigger: '现价保持在分时均价上方且主逻辑未失效',
+      trigger: patternTrigger(
+        'IMMEDIATE',
+        pattern,
+        '现价保持在分时均价上方且主逻辑未失效',
+      ),
       playbook,
+      patternContext: pattern,
       now,
     }),
   ]
@@ -222,8 +292,13 @@ export function buildAdaptivePricePlans({
       target: price(
         Math.max(pullbackEntry + risk * rewardR, resistance || 0),
       ),
-      trigger: `回踩${pullbackEntry.toFixed(2)}元后重新站稳，资金未继续转弱`,
+      trigger: patternTrigger(
+        'PULLBACK',
+        pattern,
+        `回踩${pullbackEntry.toFixed(2)}元后重新站稳，资金未继续转弱`,
+      ),
       playbook,
+      patternContext: pattern,
       now,
     }))
   }
@@ -237,8 +312,13 @@ export function buildAdaptivePricePlans({
       entry: breakoutEntry,
       stop: legalPrice(breakoutEntry - risk, quote),
       target: price(breakoutEntry + risk * rewardR),
-      trigger: `放量突破${breakoutEntry.toFixed(2)}元并保持承接`,
+      trigger: patternTrigger(
+        'BREAKOUT',
+        pattern,
+        `放量突破${breakoutEntry.toFixed(2)}元并保持承接`,
+      ),
       playbook,
+      patternContext: pattern,
       now,
     }))
   }

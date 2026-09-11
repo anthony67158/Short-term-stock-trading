@@ -135,6 +135,7 @@ function scoredDecision(base = {}, candidate = {}) {
     targetPrice:
       Number(candidate.exitPlan?.takeProfitPrice) || base.targetPrice,
     riskReward: Number(candidate.riskReward) || base.riskReward,
+    patternContext: candidate.patternContext || base.patternContext || null,
     validUntil:
       Number(candidate.entryPlan?.validUntil) || base.validUntil,
     priceContractValid: true,

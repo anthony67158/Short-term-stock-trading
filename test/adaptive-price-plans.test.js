@@ -107,3 +107,28 @@ test('keeps multi-day targets above todays limit while entry remains legal', () 
   }
   assert.ok(plans.some((plan) => plan.exitPlan.takeProfitPrice > 11))
 })
+
+test('uses the strongest validated pattern in route confirmation text', () => {
+  const plans = buildAdaptivePricePlans({
+    candidate: {
+      ...candidate,
+      strategyPatternPolicy: 'ACTIVE',
+      shadowFeatures: {
+        ...candidate.shadowFeatures,
+        patternHistoryCoverage: 1,
+        patternSupportPullbackScore: 92,
+        patternPlatformBreakoutScore: 20,
+        patternVolumePriceSurgeScore: 30,
+        patternLowerShadowReversalScore: 10,
+        patternLowVolTrendScore: 70,
+      },
+    },
+    candles,
+    trends: [{ price: 10.1, avg: 10.03 }],
+    marketContext,
+  })
+  const pullback = plans.find((item) => item.route === 'PULLBACK')
+
+  assert.equal(pullback.patternContext.id, 'SUPPORT_PULLBACK')
+  assert.match(pullback.entryPlan.trigger, /MA20|结构支撑/)
+})

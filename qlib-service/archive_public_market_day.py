@@ -18,6 +18,7 @@ from opportunity_market_archive import (
     publish_market_days,
     select_causal_universe,
 )
+from opportunity_pattern_snapshot import refresh_strategy_pattern_snapshot
 from model_lib import _oss_bucket
 from decision_engine.data.fuyao import (
     fetch_full_snapshot as fetch_fuyao_market_snapshot,
@@ -348,12 +349,14 @@ def archive_latest_public(
     target = snapshot["date"]
     existing = load_market_day(target_bucket, target)
     if existing is not None:
+        pattern_manifest = refresh_strategy_pattern_snapshot(target_bucket)
         return {
             "status": "already_archived",
             "date": target,
             "source": existing.get("source"),
             "summary": existing["summary"],
             "universe": existing["universe"],
+            "patternSnapshot": pattern_manifest["summary"],
         }
     previous = latest_market_day_before(target_bucket, target)
     current_ms = int(
@@ -429,12 +432,17 @@ def archive_latest_public(
         generated_at=market_close_ms(target),
     )
     published = publish_market_days(target_bucket, [artifact])
+    pattern_manifest = refresh_strategy_pattern_snapshot(
+        target_bucket,
+        published["manifest"],
+    )
     return {
         "status": "published",
         "date": target,
         "source": artifact["source"],
         "entry": published["published"][0],
         "manifestSummary": published["manifest"]["summary"],
+        "patternSnapshot": pattern_manifest["summary"],
     }
 
 

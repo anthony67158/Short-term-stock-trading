@@ -2,6 +2,8 @@ import os
 import sys
 import unittest
 
+import numpy as np
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE_ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -12,6 +14,7 @@ from decision_engine.contracts import (  # noqa: E402
     FEATURE_SCHEMA_VERSION,
 )
 from decision_engine.training.release import (  # noqa: E402
+    _project_dataset_for_metadata,
     component_decision,
     compatibility_gate,
     compose_release,
@@ -123,6 +126,28 @@ def models(prefix):
 
 
 class SelectOpportunityReleaseTest(unittest.TestCase):
+    def test_projects_newer_dataset_to_an_older_model_contract(self):
+        source_names = list(FEATURE_NAMES)
+        data = {
+            "X": np.arange(
+                len(source_names) * 2,
+                dtype=float,
+            ).reshape(2, len(source_names)),
+            "feature_names": np.asarray(source_names),
+        }
+        target_names = source_names[:-16]
+
+        projected = _project_dataset_for_metadata(
+            data,
+            {"featureNames": target_names},
+        )
+
+        self.assertEqual(projected["X"].shape, (2, len(target_names)))
+        self.assertEqual(
+            projected["feature_names"].astype(str).tolist(),
+            target_names,
+        )
+
     def test_probability_component_requires_real_gain_without_calibration_regression(self):
         champion = evaluation()
         challenger = evaluation()

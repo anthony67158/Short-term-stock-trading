@@ -3,11 +3,11 @@ import {
 } from './opportunityShadowFeatures.js'
 
 export const OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION =
-  'opportunity-score-feature.v5'
+  'opportunity-score-feature.v6'
 export const OPPORTUNITY_SCORE_SCHEMA_VERSION =
   'opportunity-score.v1'
 export const OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION =
-  'opportunity-score-input-context.v2'
+  'opportunity-score-input-context.v3'
 
 const CATEGORIES = Object.freeze({
   formula: [
@@ -331,6 +331,12 @@ export function buildOpportunityScoreInput({
       rounded(shadow.intradayTechnicalAvailable),
     sectorContextAvailable:
       rounded(shadow.sectorContextAvailable),
+    ...Object.fromEntries(
+      OPPORTUNITY_SHADOW_FEATURE_NAMES.map((name) => [
+        name,
+        rounded(shadow[name]),
+      ]),
+    ),
   }
   for (const [prefix, values] of Object.entries(CATEGORIES)) {
     oneHot(factors, prefix, values, selected[prefix])

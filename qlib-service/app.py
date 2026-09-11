@@ -15,13 +15,21 @@ from fastapi.middleware.cors import CORSMiddleware
 import numpy as np
 
 from factors_lib import compute_factors, feature_vector, FEATURE_NAMES
-from model_lib import model_score, garch_sigma, get_model, signal_prob, event_tag_for
+from model_lib import (
+    _oss_bucket,
+    event_tag_for,
+    garch_sigma,
+    get_model,
+    model_score,
+    signal_prob,
+)
 from decision_engine import (
     get_decision_models,
     predict_decision_items,
 )
 from sector_model import get_sector_models, predict_sector_items
 from archive_public_market_day import archive_latest_public
+from opportunity_pattern_snapshot import load_strategy_pattern_snapshot
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -315,6 +323,21 @@ def decision_score(
         raise HTTPException(status_code=400, detail=str(error)[:120])
 
 
+@app.get("/strategy-pattern-snapshot")
+def strategy_pattern_snapshot(x_api_key: str = Header(default="")):
+    _check_key(x_api_key)
+    bucket = _oss_bucket()
+    if bucket is None:
+        raise HTTPException(status_code=503, detail="形态快照OSS未配置")
+    try:
+        snapshot = load_strategy_pattern_snapshot(bucket)
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail=str(error)[:120])
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="形态快照尚未生成")
+    return snapshot
+
+
 @app.post("/archive-market-day")
 def archive_market_day(
     payload: Optional[dict] = Body(default=None),
@@ -468,6 +491,11 @@ def model_info(x_api_key: str = Header(default="")):
                 (decision_meta or {}).get("modelVersion"),
             "predictionContract":
                 (decision_meta or {}).get("predictionContract"),
+            "featureSchemaVersion":
+                (decision_meta or {}).get("featureSchemaVersion"),
+            "featureCount": len(
+                (decision_meta or {}).get("featureNames") or []
+            ),
             "modelHeads": sorted((decision_models or {}).keys()),
             "baselineSelected": bool(
                 (decision_meta or {}).get("baselineSelected")
