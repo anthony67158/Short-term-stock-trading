@@ -14,7 +14,13 @@ test('每日归档只使用QUANT_KEY调用杭州量化FC', () => {
   assert.match(job, /timeout-minutes: 35/)
   assert.match(job, /QUANT_KEY: \$\{\{ secrets\.QUANT_KEY \}\}/)
   assert.match(job, /X-API-Key: \$QUANT_KEY/)
-  assert.match(job, /REUSED_EXISTING_ARCHIVE/)
+  assert.match(job, /validate_market_archive_report\.py/)
+  assert.match(job, /--event "\$\{\{ github\.event_name \}\}"/)
+  assert.doesNotMatch(job, /REUSED_EXISTING_ARCHIVE/)
+  assert.doesNotMatch(
+    job,
+    /id: public-archive\s*\n\s*continue-on-error: true/,
+  )
   assert.doesNotMatch(job, /TUSHARE_TOKEN|archive_tushare/)
   assert.doesNotMatch(job, /token=[a-f0-9]{20,}/i)
 })
@@ -34,6 +40,7 @@ test('机会训练先合并并压实增量样本再训练', () => {
 test('市场归档合同进入每日重训验证门禁', () => {
   assert.match(workflow, /tests\/test_opportunity_market_archive\.py/)
   assert.match(workflow, /tests\/test_archive_tushare_market_day\.py/)
+  assert.match(workflow, /tests\/test_validate_market_archive_report\.py/)
 })
 
 test('V3训练等待市场归档且每日流程不依赖Tushare', () => {
@@ -42,7 +49,7 @@ test('V3训练等待市场归档且每日流程不依赖Tushare', () => {
 
   assert.match(
     job,
-    /if: \$\{\{ always\(\) && needs\.verify\.result == 'success' \}\}/,
+    /needs\.market-data-archive\.result == 'success'/,
   )
   assert.match(job, /needs:\s*\n\s+- verify\s*\n\s+- market-data-archive/)
   assert.doesNotMatch(workflow, /^\s{2}sector-retrain:/m)

@@ -75,7 +75,9 @@ test('市场归档强制使用QUANT_KEY且不再依赖Tushare', () => {
     archive,
     /for name in \\\s*QUANT_KEY \\\s*OSS_ACCESS_KEY_ID/,
   )
-  assert.match(archive, /继续使用现有OSS市场归档/)
+  assert.match(archive, /validate_market_archive_report\.py/)
+  assert.match(archive, /market-archive-validation\.json/)
+  assert.doesNotMatch(archive, /REUSED_EXISTING_ARCHIVE/)
   assert.match(archive, /X-API-Key: \$QUANT_KEY/)
   assert.doesNotMatch(archive, /archive_tushare_market_day/)
   assert.doesNotMatch(archive, /TUSHARE_TOKEN/)

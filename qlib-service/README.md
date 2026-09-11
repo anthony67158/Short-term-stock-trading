@@ -84,7 +84,10 @@ python3 upload_opportunity_model.py \
 `QUANT_KEY` 调用杭州量化 FC 的 `POST /archive-market-day`，由 FC 使用
 东方财富全市场/历史 5 分钟接口并以腾讯 5 分钟接口兜底，完整性通过后写入
 OSS。`daily-retrain.yml` 不读取 `TUSHARE_TOKEN`；Tushare 只保留为人工历史
-回填工具。归档端点短暂不可用时，本轮明确记录降级并复用现有 OSS 历史。
+回填工具。夜间定时任务必须获得最新完整交易日分片，并读回校验 OSS 日线、
+资金流、1,000 股分钟池及至少 85% 覆盖率；端点失败、分片缺失或覆盖不足
+会直接阻断 V3 训练。盘中手动任务收到 `market_open_skipped` 时可使用已
+校验的最近完整分片，不会把未收盘数据写入 OSS。
 
 ## 生产架构
 

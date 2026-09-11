@@ -75,6 +75,7 @@ jobs:
             tests/test_opportunity_history.py \
             tests/test_opportunity_market_archive.py \
             tests/test_archive_public_market_day.py \
+            tests/test_validate_market_archive_report.py \
             tests/test_opportunity_sector_archive.py \
             tests/test_archive_tushare_market_day.py \
             tests/test_download_opportunity_release.py \
@@ -269,7 +270,12 @@ jobs:
     needs:
       - verify
       - market-data-archive
-    if: ${{ always() && needs.verify.result == 'success' }}
+    if: >-
+      ${{
+        always()
+        && needs.verify.result == 'success'
+        && needs.market-data-archive.result == 'success'
+      }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -501,7 +507,6 @@ jobs:
 
       - name: Archive latest completed market day from public sources
         id: public-archive
-        continue-on-error: true
         run: |
           curl --fail --silent --show-error \
             --retry 2 --retry-all-errors --max-time 590 \
@@ -512,30 +517,12 @@ jobs:
             https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run/archive-market-day \
             > market-archive-report.json
 
-      - name: Reuse existing OSS history when archive endpoint is unavailable
-        if: steps.public-archive.outcome != 'success'
+      - name: Validate archive status and OSS artifact
         run: |
-          python - <<'PY'
-          import json
-          import time
-          with open(
-              "market-archive-report.json",
-              "w",
-              encoding="utf-8",
-          ) as handle:
-              json.dump({
-                  "status": "REUSED_EXISTING_ARCHIVE",
-                  "generatedAt": int(time.time()),
-                  "reason": (
-                      "杭州量化FC归档端点暂时不可用；"
-                      "本轮训练继续使用现有OSS历史"
-                  ),
-              }, handle, ensure_ascii=False, indent=2)
-          print(
-              "::warning title=Market archive reused::"
-              "本轮没有新增市场归档，V3继续使用现有OSS市场归档训练"
-          )
-          PY
+          python validate_market_archive_report.py \
+            --report market-archive-report.json \
+            --event "${{ github.event_name }}" \
+            --output market-archive-validation.json
 
       - name: Refresh online five-day fund history
         continue-on-error: true
@@ -553,11 +540,23 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+          if [ -f market-archive-validation.json ]; then
+            {
+              echo
+              echo "### OSS 完整性校验"
+              echo
+              echo '```json'
+              cat market-archive-validation.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload archive diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: market-data-archive-${{ github.run_id }}
-          path: qlib-service/market-archive-report.json
+          path: |
+            qlib-service/market-archive-report.json
+            qlib-service/market-archive-validation.json
           if-no-files-found: warn
