@@ -179,7 +179,6 @@ test('未持仓观望仍展示候选价格路径而不是持仓动作', () => {
       mode: 'buy_advice',
       action: 'WATCH',
       actionability: 'WATCH',
-      blockedReasons: ['当前路径费后价值不为正'],
       prices: {
         current: 55.39,
         reference: 56.1,
@@ -198,5 +197,8 @@ test('未持仓观望仍展示候选价格路径而不是持仓动作', () => {
   assert.equal(result.actionComparison.length, 0)
   assert.match(result.summary, /突破确认候选价56\.10元/)
   assert.match(result.quantity.explanation, /当前为0手/)
-  assert.match(result.quantity.explanation, /当前路径费后价值不为正/)
+  assert.match(
+    result.quantity.explanation,
+    /该价格路径扣除费用后的平均结果不为正/,
+  )
 })

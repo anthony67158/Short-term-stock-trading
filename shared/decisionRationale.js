@@ -104,7 +104,7 @@ function actionComparison(value = {}, selectedAction = '') {
   }
 }
 
-function entryQuantity(decisionPlan = {}) {
+function entryQuantity(decisionPlan = {}, selectedPlan = {}) {
   const quantity = decisionPlan.quantity || {}
   const budget = decisionPlan.entryBudget || {}
   const executableLots = Math.max(
@@ -140,6 +140,16 @@ function entryQuantity(decisionPlan = {}) {
   }
   if (lots <= 0 && blockedReasons.length) {
     parts.push(`当前为0手，因为${blockedReasons.join('；')}`)
+  } else if (
+    lots <= 0
+    && finite(selectedPlan.opportunityScore?.expectedNetR) <= 0
+  ) {
+    parts.push('当前为0手，因为该价格路径扣除费用后的平均结果不为正')
+  } else if (
+    lots <= 0
+    && decisionPlan.actionability === 'WATCH'
+  ) {
+    parts.push('当前为0手，因为价格触发条件尚未成立')
   } else {
     parts.push(
       `${executableLots > 0 ? '最终核定' : '当前预案'}${lots}手`
@@ -241,7 +251,7 @@ export function buildDecisionRationale({
       .map((value) => actionComparison(value, action))
     : []
   const quantity = entryContext
-    ? entryQuantity(decisionPlan)
+    ? entryQuantity(decisionPlan, selected)
     : positionQuantity(decisionPlan)
   const selectedAction = actionComparisons.find((item) => item.selected)
   const modelBoundary = entryContext
