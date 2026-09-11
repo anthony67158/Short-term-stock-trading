@@ -334,7 +334,12 @@ export function buildOpportunityScoreInput({
     ...Object.fromEntries(
       OPPORTUNITY_SHADOW_FEATURE_NAMES.map((name) => [
         name,
-        rounded(shadow[name]),
+        rounded(
+          event.strategyPatternModelFeatures === false
+            && name.startsWith('pattern')
+            ? 0
+            : shadow[name],
+        ),
       ]),
     ),
   }

@@ -158,7 +158,8 @@ test('全市场形态快照在原深查池之外增加独立候选', () => {
   assert.equal(enhanced.length, 9)
   assert.equal(enhanced.at(-1).quote.code, extra.code)
   assert.equal(enhanced.at(-1).recall.patternId, 'PLATFORM_BREAKOUT')
-  assert.equal(enhanced.at(-1).recall.primarySource, 'MOMENTUM')
+  assert.equal(enhanced.at(-1).recall.primarySource, 'EXPLORATION')
+  assert.equal(enhanced.at(-1).recall.exploration, true)
 })
 
 test('公式价位不会向界面泄露上游HTTP 501', () => {

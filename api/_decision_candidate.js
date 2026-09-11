@@ -170,6 +170,10 @@ function scoreInput(candidate, plan, {
         || candidate.formula?.evaluations
         || [],
       shadowFeatures: candidate.shadowFeatures,
+      strategyPatternModelFeatures:
+        candidate.strategyPatternCapabilities
+          ? candidate.strategyPatternCapabilities.modelFeatures === true
+          : undefined,
       decision: {
         formulaId,
         playbookId: playbook?.key,

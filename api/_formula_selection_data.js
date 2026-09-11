@@ -386,21 +386,19 @@ export function selectAdaptiveDeepCandidates(
           || String(left.quote.code).localeCompare(String(right.quote.code))
         )
         .slice(0, Math.max(0, Number(patternLimit) || 0))
-        .map((item) => {
-          const strongest = strongestSnapshotPattern(item.pattern)
-          return {
+        .map((item) => ({
             ...item,
             recall: {
               ...item.recall,
-              primarySource: strongest.source,
+              primarySource: 'EXPLORATION',
               sources: [...new Set([
                 ...item.recall.sources,
-                strongest.source,
+                'EXPLORATION',
               ])],
+              exploration: true,
               patternAdded: true,
             },
-          }
-        })
+          }))
     : []
   return [...base, ...patternExtras]
 }

@@ -162,6 +162,26 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   }), false)
 })
 
+test('直接产品能力不会把形态字段送入生产模型', () => {
+  const input = buildOpportunityScoreInput({
+    event: event({
+      strategyPatternModelFeatures: false,
+      shadowFeatures: {
+        ...event().shadowFeatures,
+        patternHistoryCoverage: 1,
+        patternPlatformBreakoutScore: 96,
+        patternSupportPullbackScore: 88,
+      },
+    }),
+    batch: batch(),
+  })
+
+  assert.equal(input.factors.patternHistoryCoverage, 0)
+  assert.equal(input.factors.patternPlatformBreakoutScore, 0)
+  assert.equal(input.factors.patternSupportPullbackScore, 0)
+  assert.equal(input.factors.ret2dPct, 3.2)
+})
+
 test('未知公式保留最高接近度而不是把公式分清零', () => {
   const input = buildOpportunityScoreInput({
     event: event({

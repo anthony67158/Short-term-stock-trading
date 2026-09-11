@@ -335,7 +335,12 @@ export async function evaluateDecision({
         },
       },
       event: {
-        code, asOf: now, quote: payload.todayQuote, shadowFeatures,
+        code,
+        asOf: now,
+        quote: payload.todayQuote,
+        shadowFeatures,
+        strategyPatternModelFeatures:
+          strategyPatternCapabilities.modelFeatures === true,
         decision: {
           formulaId: 'UNKNOWN', priceContractValid: true,
           playbookId: playbook?.key, playbookScore: playbook?.score,
