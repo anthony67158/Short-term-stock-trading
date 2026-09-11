@@ -3,6 +3,7 @@ import {
   decisionPresentation,
   decisionPrices,
 } from '../../shared/decisionPresentation.js'
+import { decisionScoreLanguage } from '../../shared/decisionScoreLanguage.js'
 import { fmtRaw } from '../format.js'
 import { loadDecisionExplanation } from '../decisionExplanation.js'
 import Icon from './Icon'
@@ -39,8 +40,7 @@ export default function DecisionSummary({
     priceItems.map((item) => item.key),
   )
   const score = advice?.selectedDecisionPlan?.opportunityScore
-  const probability = (value) => value != null && Number.isFinite(Number(value))
-    ? `${(Number(value) * 100).toFixed(1)}%` : '暂无'
+  const scoreLanguage = decisionScoreLanguage(score)
   const requestExplanation = async () => {
     if (!code || !decisionId || explanationLoading) return
     setExplanationLoading(true)
@@ -98,9 +98,28 @@ export default function DecisionSummary({
                     ?.strategyPatternConfirmation
                 }
               />
-              <p>成交概率 {probability(score?.pFill)} · 成交后盈利概率 {probability(score?.pWinGivenFill)}</p>
-              {score?.expectedNetR != null && <p>费后期望 {score.expectedNetR}R · 尾部损失参考 {score.expectedShortfall10}R</p>}
-              <p>{advice?.quantNote || '尚无决策模型结果。'}</p>
+              {scoreLanguage.items.length > 0 ? (
+                <>
+                  <dl
+                    className="decision-score-evidence"
+                    aria-label="量化结果白话说明"
+                  >
+                    {scoreLanguage.items.map((item) => (
+                      <div key={item.key}>
+                        <dt>{item.label}</dt>
+                        <dd>{item.text}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {scoreLanguage.riskUnitNote && (
+                    <p className="decision-score-risk-note">
+                      {scoreLanguage.riskUnitNote}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <p>{advice?.quantNote || '尚无决策模型结果。'}</p>
+              )}
               <p>{advice?.fundNote || '资金数据暂不可用。'}</p>
               {score?.outOfDistribution && <p>部分行情特征超出训练范围，当前预测仍取自生产决策模型。</p>}
               {advice?.decisionSource?.modelVersion && <p>模型版本 {advice.decisionSource.modelVersion}</p>}

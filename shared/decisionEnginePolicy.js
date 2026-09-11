@@ -3,6 +3,7 @@ import { buildDecisionState } from './decisionStateContract.js'
 import {
   isExecutableOpportunityScore,
 } from './opportunityScoreContract.js'
+import { decisionScoreLanguage } from './decisionScoreLanguage.js'
 import { isTriggeredReviewEvent } from './triggeredReviewDecision.js'
 
 export const DECISION_ENGINE_POLICY_VERSION =
@@ -146,6 +147,7 @@ export function buildDecisionAction({
                     ? '预测费后净期望不为正，放弃本次买入'
                     : `模型选定${selected.route === 'PULLBACK' ? '回踩' : selected.route === 'BREAKOUT' ? '突破' : '下一交易时段'}路径，待条件成立后重新评估`
   const score = selected?.opportunityScore
+  const scoreLanguage = decisionScoreLanguage(score)
   return {
     action: actionLabel,
     title: instruction,
@@ -184,7 +186,7 @@ export function buildDecisionAction({
     futurePlan:
       '持续按账本止损和当前模型状态管理，不按固定天数机械退出',
     quantNote: score
-      ? `成交概率${(score.pFill * 100).toFixed(1)}%，成交后费后盈利率${(score.pWinGivenFill * 100).toFixed(1)}%，费后期望${score.expectedNetR}R`
+      ? scoreLanguage.summary
       : '模型未返回有效预测；未使用旧模型或手写概率替代',
     techNote: price > 0 ? `行情参考价${priceText(price)}元` : '行情暂不可用',
     decisionSource: {

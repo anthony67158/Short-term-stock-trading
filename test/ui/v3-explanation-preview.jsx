@@ -11,7 +11,8 @@ const decisionId = 'decision-explanation-preview'
 const advice = {
   action: '持有',
   actionPlan: '继续持有1手，价格或账户事实变化后重新评估。',
-  quantNote: '模型成交概率68.0%，成交后盈利概率59.0%。',
+  quantNote:
+    '成交概率15.9%，成交后费后盈利率31.9%，费后期望-0.475505R',
   fundNote: '主力与小单资金方向存在分歧。',
   invalidation: '价格或账户事实变化后重新运行决策模型。',
   decisionSource: {
@@ -31,11 +32,11 @@ const advice = {
   },
   selectedDecisionPlan: {
     opportunityScore: {
-      pFill: 0.68,
-      pWinGivenFill: 0.59,
-      expectedNetR: 0.16,
+      pFill: 0.159,
+      pWinGivenFill: 0.319,
+      expectedNetR: -0.475505,
       netRLowerBound: -0.21,
-      expectedShortfall10: -0.74,
+      expectedShortfall10: -2.367365,
     },
   },
   decisionExplanation: {
