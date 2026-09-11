@@ -120,6 +120,11 @@ function entryQuantity(decisionPlan = {}) {
   const affordableLots = finite(quantity.affordableLots)
   const lossPerLot = finite(decisionPlan.risk?.estimatedLossPerLot)
   const maxLossAmount = finite(decisionPlan.risk?.maxLossAmount)
+  const blockedReasons = Array.isArray(decisionPlan.blockedReasons)
+    ? decisionPlan.blockedReasons
+      .map((value) => text(value, 160))
+      .filter(Boolean)
+    : []
   const parts = []
   if (riskLimitedLots != null) {
     parts.push(`风险预算最多${Math.max(0, Math.trunc(riskLimitedLots))}手`)
@@ -133,10 +138,14 @@ function entryQuantity(decisionPlan = {}) {
   if (maxLossAmount != null) {
     parts.push(`本笔风险上限${Math.round(maxLossAmount)}元`)
   }
-  parts.push(
-    `${executableLots > 0 ? '最终核定' : '当前预案'}${lots}手`
-    + '，取风险、现金和仓位上限中的较小值',
-  )
+  if (lots <= 0 && blockedReasons.length) {
+    parts.push(`当前为0手，因为${blockedReasons.join('；')}`)
+  } else {
+    parts.push(
+      `${executableLots > 0 ? '最终核定' : '当前预案'}${lots}手`
+      + '，取风险、现金和仓位上限中的较小值',
+    )
+  }
   return {
     lots,
     executableLots,
@@ -145,6 +154,7 @@ function entryQuantity(decisionPlan = {}) {
     affordableLots: rounded(affordableLots, 0),
     estimatedLossPerLot: rounded(lossPerLot, 0),
     maxLossAmount: rounded(maxLossAmount, 0),
+    blockedReasons,
     estimatedAmount: rounded(
       decisionPlan.costs?.estimatedNetAmount
       ?? budget.costs?.estimatedNetAmount,
@@ -200,8 +210,9 @@ export function buildDecisionRationale({
   const selectedRoute = text(selected.route, 24).toUpperCase()
   const currentPrice = rounded(decisionPlan.prices?.current)
   const referencePrice = rounded(
-    decisionPlan.prices?.reference
-    ?? selected.entryPlan?.price,
+    entryContext
+      ? selected.entryPlan?.price ?? decisionPlan.prices?.reference
+      : decisionPlan.prices?.reference,
   )
   const distancePct = (
     currentPrice > 0 && referencePrice > 0
@@ -249,8 +260,18 @@ export function buildDecisionRationale({
       routeLabel: routeLabel(selectedRoute),
       currentPrice,
       referencePrice,
-      stopPrice: rounded(decisionPlan.prices?.stop),
-      targetPrice: rounded(decisionPlan.prices?.target),
+      stopPrice: rounded(
+        entryContext
+          ? selected.exitPlan?.hardStopPrice
+            ?? decisionPlan.prices?.stop
+          : decisionPlan.prices?.stop,
+      ),
+      targetPrice: rounded(
+        entryContext
+          ? selected.exitPlan?.takeProfitPrice
+            ?? decisionPlan.prices?.target
+          : decisionPlan.prices?.target,
+      ),
       distancePct,
       trigger,
       explanation: priceExplanation,
