@@ -105,8 +105,9 @@ def _sma(values, period, offset=0):
 
 
 def strategy_pattern_scores(rows):
+    normalized = [bar for bar in (_valid_bar(row) for row in rows) if bar]
     bars = sorted(
-        (bar for bar in (_valid_bar(row) for row in rows) if bar),
+        {bar["date"].replace("-", "") or i: bar for i, bar in enumerate(normalized)}.values(),
         key=lambda row: row["date"],
     )[-MAX_HISTORY_DAYS:]
     if not bars:
@@ -141,7 +142,13 @@ def strategy_pattern_scores(rows):
         if prior_high is not None and prior_high > 0
         else None
     )
-    prior_volume5 = _sma(volumes, 5, 1)
+    prior_volumes = volumes[-6:-1]
+    prior_volume5 = (
+        _average(prior_volumes)
+        if len(prior_volumes) == 5
+        and all(value is not None and value > 0 for value in prior_volumes)
+        else None
+    )
     volume_ratio = (
         current["volume"] / prior_volume5
         if current["volume"] is not None
@@ -206,7 +213,7 @@ def strategy_pattern_scores(rows):
     above_ma20 = _ascending(ma20_distance, -1, 3)
     bullish = 100.0 if current["close"] > current["open"] else 0.0
 
-    return {
+    result = {
         "historyCoverage": round(_clamp(len(bars) / 60.0, 0.0, 1.0), 6),
         "platformBreakout": round(
             compression * 0.45 + breakout * 0.35
@@ -234,6 +241,18 @@ def strategy_pattern_scores(rows):
             6,
         ),
     }
+    tradable = current["volume"] != 0
+    has_volume = volume_ratio is not None and volume_ratio > 0
+    for name, minimum in (
+        ("platformBreakout", 11), ("supportPullback", 60),
+        ("volumePriceSurge", 21), ("lowerShadowReversal", 6),
+        ("lowVolTrend", 21),
+    ):
+        if not tradable or len(bars) < minimum or (
+            name != "lowVolTrend" and not has_volume
+        ):
+            result[name] = 0.0
+    return result
 
 
 def build_strategy_pattern_snapshot(artifacts, *, generated_at=None):

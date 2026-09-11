@@ -447,6 +447,8 @@ function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
     positionMode: 'UNOWNED',
     action: planningBlockers.length ? 'AVOID' : 'WATCH_BUY',
     primaryPrice: selectedPlan.entryPlan.price,
+    entryPlan: selectedPlan.entryPlan,
+    exitPlan: selectedPlan.exitPlan,
     priceType: selectedPlan.entryPlan.type === 'BREAKOUT'
       ? 'BREAKOUT_WATCH'
       : selectedPlan.entryPlan.type === 'IMMEDIATE'
@@ -486,6 +488,9 @@ function publicCandidate(item, rank) {
     marketAllowsRisk: item.decision.marketAllowsRisk,
     priceContractValid: item.decision.priceContractValid,
     primaryPrice: item.decision.primaryPrice,
+    entryPlan: item.decision.entryPlan,
+    exitPlan: item.decision.exitPlan,
+    patternContext: item.decision.patternContext,
     priceType: item.decision.priceType,
     stopPrice: item.decision.stopPrice,
     targetPrice: item.decision.targetPrice,
@@ -904,6 +909,7 @@ export async function scanFormulaSelectionCandidates({
           (candidate) => candidate.formulaId === item.formulaId,
         ).length,
       })),
+    deepCandidates: validEvaluated.map(publicCandidate),
     candidates: ranked,
     candidateEvents: [...candidateEvents.values()],
   }

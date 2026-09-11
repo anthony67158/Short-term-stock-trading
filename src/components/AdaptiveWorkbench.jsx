@@ -29,6 +29,7 @@ import {
 } from '../../shared/selectionOrigin.js'
 import { openStockDetail } from '../detailStore.js'
 import Icon from './Icon.jsx'
+import StrategyPatternEvidence from './StrategyPatternEvidence.jsx'
 
 const PHASE_LABELS = Object.freeze({
   TREND_EXPANSION: '趋势扩张',
@@ -172,7 +173,7 @@ function ActionQueue({ commands, onOpen }) {
   )
 }
 
-function OpportunityRow({
+export function OpportunityRow({
   opportunity,
   rank,
   held,
@@ -267,6 +268,7 @@ function OpportunityRow({
           />
         </button>
       </div>
+      <StrategyPatternEvidence pattern={opportunity.strategyPattern} />
       {(adaptive.cautions || []).length > 0 && (
         <p className="aw-caution">
           {adaptive.cautions.slice(0, 2).join('；')}

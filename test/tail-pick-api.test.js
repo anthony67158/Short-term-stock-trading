@@ -504,7 +504,7 @@ test('尾盘候选保存前统一使用生产决策评分', async () => {
   )
   assert.equal(
     result.result.decisionScoring.inputContextVersion,
-    'opportunity-score-input-context.v3',
+    'opportunity-score-input-context.v4',
   )
   assert.equal(result.result.candidates[0].entryPlan.price, 10)
 })

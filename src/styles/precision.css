@@ -17019,6 +17019,21 @@ html[data-theme="light"] .plan-cand.starred {
   color: var(--color-up);
 }
 
+.strategy-pattern-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-xs);
+  min-width: 0;
+  color: var(--color-ink-2);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.aw-opportunity > .strategy-pattern-evidence {
+  grid-column: 1 / -1;
+}
+
 .aw-caution {
   grid-column: 2 / -1;
   margin: calc(var(--space-2xs) * -1) 0 0;

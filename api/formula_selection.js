@@ -315,7 +315,8 @@ export function runFormulaSelection({
       )
       const scoreMap = await scoreOpportunities(scoreInputs)
         .catch(() => new Map())
-      const initiallyScoredCandidates = scanned.candidates.map((candidate) => {
+      const deepCandidates = scanned.deepCandidates || scanned.candidates
+      const initiallyScoredCandidates = deepCandidates.map((candidate) => {
         const score = verifiedScore(
           scoreMap.get(candidate.code),
           candidate,
@@ -339,7 +340,7 @@ export function runFormulaSelection({
           scoreOpportunities,
         },
       )
-      const scoredCandidates = selectedCandidates.map((candidate) => ({
+      const allScoredCandidates = selectedCandidates.map((candidate) => ({
         ...candidate,
         primaryPrice:
           candidate.entryPlan?.price ?? candidate.primaryPrice,
@@ -364,8 +365,12 @@ export function runFormulaSelection({
         || Number(right.score || 0) - Number(left.score || 0)
         || String(left.code).localeCompare(String(right.code))
       )
+      const scoredCandidates = allScoredCandidates.slice(0, 12)
+      const displayedRanks = new Map(
+        scoredCandidates.map((candidate, index) => [candidate.code, index + 1]),
+      )
       const candidateByCode = new Map(
-        scoredCandidates.map((candidate) => [candidate.code, candidate]),
+        allScoredCandidates.map((candidate) => [candidate.code, candidate]),
       )
       ledgerBatch.events = ledgerBatch.events.map((event) => {
         const candidate = candidateByCode.get(event.code)
@@ -383,6 +388,8 @@ export function runFormulaSelection({
         const scoredEvent = {
           ...event,
           decision,
+          stageReached: displayedRanks.has(event.code) ? 'DISPLAYED' : 'EVIDENCE',
+          displayedRank: displayedRanks.get(event.code) ?? null,
         }
         let input = null
         try {
@@ -397,22 +404,22 @@ export function runFormulaSelection({
           opportunityScore: candidate.opportunityScore,
         }
       })
-      const readyScores = scoredCandidates.filter((candidate) =>
+      const readyScores = allScoredCandidates.filter((candidate) =>
         directDecisionScore(
           candidate.opportunityScore,
           activeModelVersion,
         )
       ).length
       const scoreVersions = new Set(
-        scoredCandidates
+        allScoredCandidates
           .map((candidate) =>
             String(candidate?.opportunityScore?.modelVersion || '')
           )
           .filter(Boolean),
       )
-      const validationState = !scoredCandidates.length
+      const validationState = !allScoredCandidates.length
         ? 'NO_CANDIDATE'
-        : readyScores === scoredCandidates.length
+        : readyScores === allScoredCandidates.length
           ? 'DECISION_DIRECT'
           : readyScores > 0
             ? 'DECISION_PARTIAL'
@@ -438,10 +445,10 @@ export function runFormulaSelection({
             || (scoreVersions.size === 1
               ? [...scoreVersions][0]
               : null),
-          requested: scoredCandidates.length,
+          requested: allScoredCandidates.length,
           direct: readyScores,
           unavailable:
-            Math.max(0, scoredCandidates.length - readyScores),
+            Math.max(0, allScoredCandidates.length - readyScores),
           appliedToOrder: true,
         },
         ledger: {

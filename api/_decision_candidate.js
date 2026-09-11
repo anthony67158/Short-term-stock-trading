@@ -316,6 +316,7 @@ export async function scoreCandidatesWithDecisionModel(
       route: selected.route,
       entryPlan: selected.entryPlan,
       exitPlan: selected.exitPlan,
+      patternContext: selected.patternContext || null,
       riskReward: selected.riskReward,
       opportunityScore: selected.opportunityScore,
       adaptive: selected.adaptive,

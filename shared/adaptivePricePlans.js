@@ -230,6 +230,22 @@ export function buildAdaptivePricePlans({
   const pattern = candidate.strategyPatternPolicy === 'ACTIVE'
     ? strongestPattern(candidate.shadowFeatures)
     : null
+  const patternFeatures = candidate.shadowFeatures || {}
+  const patternActive = pattern?.score >= 70
+    && Number(patternFeatures.patternHistoryCoverage) >= 0.35
+  const anchoredPrice = (distance) => finite(distance) != null
+    && 1 + Number(distance) / 100 > 0
+    ? price(current / (1 + Number(distance) / 100)) : null
+  const platformHigh = patternActive
+    ? anchoredPrice(patternFeatures.patternBreakoutDistance10Pct) : null
+  const patternMa20 = patternActive
+    ? anchoredPrice(patternFeatures.patternMa20DistancePct) : null
+  const patternSupport = patternActive
+    ? pattern.id === 'PLATFORM_BREAKOUT' ? platformHigh
+      : ['SUPPORT_PULLBACK', 'VOLUME_PRICE_SURGE', 'LOW_VOL_TREND'].includes(pattern.id)
+        ? patternMa20
+        : pattern.id === 'LOWER_SHADOW_REVERSAL' ? price(quote.low) : null
+    : null
   const rewardR = rewardMultiple(playbook, marketContext)
   const routeRisk = {
     IMMEDIATE: Math.max(atr * 0.9, current * 0.018),
@@ -240,15 +256,17 @@ export function buildAdaptivePricePlans({
     vwap,
     ma5,
     ma10,
-    ma20,
+    ...(pattern?.score >= 70 ? [ma20] : []),
     support,
     current - atr * 0.45,
   ]
     .map(price)
     .filter((value) => value > 0 && value < current)
     .sort((left, right) => right - left)
+  const breakoutReference = patternActive && pattern.id === 'PLATFORM_BREAKOUT'
+    ? platformHigh || recentHigh : recentHigh
   const breakoutEntry = legalPrice(
-    Math.max(current * 1.003, (recentHigh || current) * 1.001),
+    Math.max(current * 1.003, (breakoutReference || current) * 1.001),
     quote,
   )
   const immediateStop = legalPrice(
@@ -282,7 +300,11 @@ export function buildAdaptivePricePlans({
       now,
     }),
   ]
-  const pullbackEntry = pullbackAnchors[0]
+  const reachablePatternSupport = legalPrice(patternSupport, quote)
+  const pullbackEntry = reachablePatternSupport > 0
+    && reachablePatternSupport < current
+    && current - reachablePatternSupport <= atr * 1.8
+    ? reachablePatternSupport : pullbackAnchors[0]
   if (pullbackEntry > 0 && current - pullbackEntry <= atr * 1.8) {
     const risk = routeRisk.PULLBACK
     values.push(plan({

@@ -120,7 +120,7 @@ test('机会评分特征只使用决策时点数据并保持固定顺序', () =>
   )
   assert.equal(
     input.inputContextVersion,
-    'opportunity-score-input-context.v3',
+    'opportunity-score-input-context.v4',
   )
   assert.equal(input.code, '600001')
   assert.equal(input.formulaId, 'INTRADAY_VWAP_PULLBACK')

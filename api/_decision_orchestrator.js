@@ -194,7 +194,15 @@ export async function evaluateDecision({
   reviewEvent = null,
 }) {
   const quoteMap = Object.fromEntries(quotes.map((item) => [item.code, item]))
-  const quote = quoteMap[code]
+  const rawQuote = quoteMap[code]
+  const quote = {
+    ...rawQuote,
+    volumeRatio: rawQuote?.volumeRatio ?? rawQuote?.volRatio,
+    preClose: rawQuote?.preClose ?? rawQuote?.prevClose,
+    live: rawQuote?.isLivePrice === true
+      && rawQuote?.tradeDate === beijingDayKey(now)
+      && isContinuousTrading(now),
+  }
   if (!(Number(quote?.price) > 0)) throw new Error('行情不可用，未发布新决策')
   const name = quote.name || code
   const trendRows = Array.isArray(trends)
@@ -228,7 +236,7 @@ export async function evaluateDecision({
     quote,
     fund,
     sectorOpportunity: sector,
-    shadowFeatures,
+    ...(strategyPatternPolicyActive ? { shadowFeatures } : {}),
     strategyPatternPolicy: strategyPatternPolicyActive
       ? 'ACTIVE'
       : 'RESEARCH',

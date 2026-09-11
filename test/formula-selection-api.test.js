@@ -751,7 +751,7 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
   )
   assert.deepEqual(result.decisionScoring, {
     usagePolicy: 'DIRECT',
-    inputContextVersion: 'opportunity-score-input-context.v3',
+    inputContextVersion: 'opportunity-score-input-context.v4',
     modelVersion: 'v3-production',
     requested: 2,
     direct: 2,
@@ -767,7 +767,7 @@ test('生产模型或评分输入口径换版后同日公式结果必须重算',
   let saved = null
   let existingScoring = {
     usagePolicy: 'DIRECT',
-    inputContextVersion: 'opportunity-score-input-context.v3',
+    inputContextVersion: 'opportunity-score-input-context.v4',
     modelVersion: 'old-model',
   }
   const store = {

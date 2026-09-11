@@ -58,7 +58,7 @@ const PATTERN_DEFINITIONS = Object.freeze([
 ])
 
 function finite(value) {
-  if (value == null || value === '') return null
+  if (value == null || value === '' || typeof value === 'boolean') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
 }
@@ -109,6 +109,7 @@ function standardDeviation(values) {
 }
 
 function normalizeBar(value = {}) {
+  if (!value || typeof value !== 'object') return null
   const open = finite(value.open)
   const high = finite(value.high)
   const low = finite(value.low)
@@ -122,7 +123,7 @@ function normalizeBar(value = {}) {
     || low > Math.min(open, close)
   ) return null
   return {
-    date: String(value.date || value.tradeDate || ''),
+    date: dayKey(value.date || value.tradeDate),
     open,
     high,
     low,
@@ -131,10 +132,18 @@ function normalizeBar(value = {}) {
   }
 }
 
+function dayKey(value) {
+  const match = String(value || '').match(/^(\d{4})-?(\d{2})-?(\d{2})(?:$|[ T])/)
+  return match ? `${match[1]}-${match[2]}-${match[3]}` : ''
+}
+
 function normalizedBars(candles, quote) {
-  const bars = (Array.isArray(candles) ? candles : [])
+  const cutoff = dayKey(quote?.tradeDate)
+  const source = (Array.isArray(candles) ? candles : [])
     .map(normalizeBar)
     .filter(Boolean)
+    .filter((bar) => !cutoff || !bar.date || bar.date <= cutoff)
+  const bars = [...new Map(source.map((bar, i) => [bar.date || i, bar])).values()]
     .sort((left, right) => left.date.localeCompare(right.date))
   const current = normalizeBar({
     date: quote?.tradeDate,
@@ -144,7 +153,7 @@ function normalizedBars(candles, quote) {
     close: quote?.price ?? quote?.close,
     volume: quote?.volume,
   })
-  if (!current) return bars
+  if (!current || !current.date) return bars
   const last = bars.at(-1)
   if (last?.date && current.date && last.date === current.date) {
     return [...bars.slice(0, -1), current]
@@ -188,21 +197,24 @@ function annualVolatility20(closes) {
 
 function evidence(features) {
   const number = (value, suffix = '%') =>
-    `${Number(value).toFixed(1)}${suffix}`
+    finite(value) == null ? '数据缺失' : `${Number(value).toFixed(1)}${suffix}`
+  const volume = features.patternDailyVolumeRatio5 > 0
+    ? `量能${number(features.patternDailyVolumeRatio5, '倍')}`
+    : '量能数据缺失'
   return {
     PLATFORM_BREAKOUT: [
       `平台振幅${number(features.patternPlatformRange10Pct)}`,
       `距平台上沿${number(features.patternBreakoutDistance10Pct)}`,
-      `量能${number(features.patternDailyVolumeRatio5, '倍')}`,
+      volume,
     ],
     SUPPORT_PULLBACK: [
       `距MA20 ${number(features.patternMa20DistancePct)}`,
-      `量能${number(features.patternDailyVolumeRatio5, '倍')}`,
+      volume,
       `20日动量${number(features.patternMomentum20Pct)}`,
     ],
     VOLUME_PRICE_SURGE: [
       features.patternMa20CrossUp >= 1 ? '本时点上穿MA20' : '尚未上穿MA20',
-      `量能${number(features.patternDailyVolumeRatio5, '倍')}`,
+      volume,
     ],
     LOWER_SHADOW_REVERSAL: [
       `下影${number(features.patternLowerShadowPct)}`,
@@ -239,13 +251,15 @@ export function buildStrategyPatternAnalysis({
   const platform = current
     ? platformMetrics(bars, current)
     : { rangePct: null, breakoutDistancePct: null }
-  const priorVolume5 = sma(volumes, 5, 1)
+  const priorVolumes = volumes.slice(-6, -1)
+  const priorVolume5 = priorVolumes.length === 5
+    && priorVolumes.every((value) => value > 0) ? average(priorVolumes) : null
   const closeVolumeRatio = current?.volume != null && priorVolume5 > 0
     ? current.volume / priorVolume5
     : null
   const volumeRatio = String(mode).toLowerCase() === 'close'
     ? closeVolumeRatio
-    : finite(quote?.volumeRatio) ?? closeVolumeRatio
+    : finite(quote?.volumeRatio ?? quote?.volRatio)
   const lowerShadowPct = current && previousClose > 0
     ? (Math.min(current.open, current.close) - current.low)
       / previousClose * 100
@@ -306,6 +320,17 @@ export function buildStrategyPatternAnalysis({
       positiveMomentum * 0.35 + lowVolatility * 0.35
       + aboveMa20 * 0.3,
   }
+  const tradable = !!current && current.volume !== 0 && quote?.isSuspended !== true
+  const availability = {
+    patternPlatformBreakoutScore: tradable && bars.length >= 11 && volumeRatio > 0,
+    patternSupportPullbackScore: tradable && bars.length >= 60 && volumeRatio > 0,
+    patternVolumePriceSurgeScore: tradable && bars.length >= 21 && volumeRatio > 0,
+    patternLowerShadowReversalScore: tradable && bars.length >= 6 && volumeRatio > 0,
+    patternLowVolTrendScore: tradable && bars.length >= 21,
+  }
+  for (const [name, available] of Object.entries(availability)) {
+    if (!available) raw[name] = 0
+  }
   const features = Object.fromEntries(
     STRATEGY_PATTERN_FEATURE_NAMES.map((name) => [
       name,
@@ -319,6 +344,7 @@ export function buildStrategyPatternAnalysis({
   return {
     schemaVersion: STRATEGY_PATTERN_VERSION,
     features,
+    availability,
     ...summary,
   }
 }
