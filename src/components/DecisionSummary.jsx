@@ -6,6 +6,7 @@ import {
 import { decisionScoreLanguage } from '../../shared/decisionScoreLanguage.js'
 import { fmtRaw } from '../format.js'
 import { loadDecisionExplanation } from '../decisionExplanation.js'
+import DecisionRationaleEvidence from './DecisionRationaleEvidence'
 import Icon from './Icon'
 import StrategyPatternEvidence from './StrategyPatternEvidence'
 
@@ -41,6 +42,10 @@ export default function DecisionSummary({
   )
   const score = advice?.selectedDecisionPlan?.opportunityScore
   const scoreLanguage = decisionScoreLanguage(score)
+  const decisionRationale = advice?.decisionRationale
+    ?.schemaVersion === 'decision-rationale.v1'
+    ? advice.decisionRationale
+    : null
   const requestExplanation = async () => {
     if (!code || !decisionId || explanationLoading) return
     setExplanationLoading(true)
@@ -98,7 +103,11 @@ export default function DecisionSummary({
                     ?.strategyPatternConfirmation
                 }
               />
-              {scoreLanguage.items.length > 0 ? (
+              {decisionRationale ? (
+                <DecisionRationaleEvidence
+                  rationale={decisionRationale}
+                />
+              ) : scoreLanguage.items.length > 0 ? (
                 <>
                   <dl
                     className="decision-score-evidence"

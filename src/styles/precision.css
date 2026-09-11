@@ -20055,6 +20055,94 @@ html[data-theme="light"] .nav {
   font-size: 12px;
 }
 
+.decision-rationale {
+  display: grid;
+  gap: var(--space-md);
+}
+
+.decision-rationale-facts {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0;
+}
+
+.decision-rationale-facts div {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: var(--space-sm);
+}
+
+.decision-rationale-facts dt {
+  color: var(--color-muted);
+}
+
+.decision-rationale-facts dd {
+  margin: 0;
+}
+
+.decision-rationale-comparison {
+  display: grid;
+}
+
+.decision-rationale-heading {
+  padding-block-end: var(--space-xs);
+  color: var(--color-ink);
+}
+
+.decision-rationale-row {
+  display: grid;
+  gap: 2px;
+  padding-block: var(--space-sm);
+  border-block-start: 1px solid var(--color-rule-2);
+}
+
+.decision-rationale-row[data-selected] {
+  border-inline-start: 2px solid var(--color-accent);
+  padding-inline-start: var(--space-sm);
+}
+
+.decision-rationale-row-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+.decision-rationale-row-title span {
+  color: var(--color-accent);
+  font-size: 12px;
+}
+
+.decision-rationale-row-title strong {
+  margin-inline-start: auto;
+  color: var(--color-ink);
+}
+
+.decision-rationale-row p {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.decision-rationale-row p[data-tone='positive'] {
+  color: var(--color-positive);
+}
+
+.decision-rationale-row p[data-tone='negative'] {
+  color: var(--color-danger);
+}
+
+.decision-rationale-boundary {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: var(--space-sm);
+  padding-block-start: var(--space-sm);
+  border-block-start: 1px solid var(--color-rule-2);
+  color: var(--color-muted);
+}
+
+.decision-rationale-boundary b {
+  color: var(--color-ink);
+}
+
 .decision-explain-btn {
   display: inline-flex;
   align-items: center;

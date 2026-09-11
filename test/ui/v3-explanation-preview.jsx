@@ -2,15 +2,16 @@ import ReactDOM from 'react-dom/client'
 import '../../tokens.css'
 import '../../src/styles.css'
 import '../../src/styles/precision.css'
+import { buildDecisionRationale } from '../../shared/decisionRationale.js'
 import DecisionSummary from '../../src/components/DecisionSummary.jsx'
 
 if (!import.meta.env.DEV) throw new Error('Local fixture only')
 
 const now = Date.now()
 const decisionId = 'decision-explanation-preview'
-const advice = {
-  action: '持有',
-  actionPlan: '继续持有1手，价格或账户事实变化后重新评估。',
+const adviceBase = {
+  action: '清仓',
+  actionPlan: '先观察约60秒；复核仍不划算时退出1手。',
   quantNote:
     '成交概率15.9%，成交后费后盈利率31.9%，费后期望-0.475505R',
   fundNote: '主力与小单资金方向存在分歧。',
@@ -24,13 +25,33 @@ const advice = {
   decisionPlan: {
     schemaVersion: 'decision-plan.v2',
     decisionId,
-    action: 'HOLD',
-    actionability: 'HOLD',
-    quantity: { lots: 0 },
-    prices: { reference: 53.9, stop: 48.85, target: 58.2 },
+    mode: 'hold_advice',
+    action: 'EXIT',
+    actionability: 'CONDITIONAL',
+    quantity: {
+      lots: 1,
+      holdingLots: 1,
+      remainingLots: 0,
+      sellableLots: 1,
+    },
+    prices: {
+      current: 53.9,
+      reference: 53.9,
+      stop: 48.85,
+      target: 58.2,
+    },
     validUntil: new Date(now + 3600000).toISOString(),
   },
   selectedDecisionPlan: {
+    route: 'IMMEDIATE',
+    entryPlan: {
+      price: 53.9,
+      trigger: '现价保持在分时均价上方且主逻辑未失效',
+    },
+    exitPlan: {
+      hardStopPrice: 48.85,
+      takeProfitPrice: 58.2,
+    },
     opportunityScore: {
       pFill: 0.159,
       pWinGivenFill: 0.319,
@@ -38,6 +59,28 @@ const advice = {
       netRLowerBound: -0.21,
       expectedShortfall10: -2.367365,
     },
+  },
+  actionValues: {
+    actions: [
+      {
+        action: 'HOLD',
+        route: 'IMMEDIATE',
+        feasible: true,
+        actionUtilityR: -0.475505,
+      },
+      {
+        action: 'REDUCE',
+        route: 'IMMEDIATE',
+        feasible: true,
+        actionUtilityR: 0.34,
+      },
+      {
+        action: 'EXIT',
+        route: 'IMMEDIATE',
+        feasible: true,
+        actionUtilityR: 0.82,
+      },
+    ],
   },
   decisionExplanation: {
     schemaVersion: 'decision-explanation.v1',
@@ -50,6 +93,17 @@ const advice = {
     invalidation: '跌破既定风险边界后重新运行决策模型。',
     evidenceGap: '缺少真实逐笔成交。',
   },
+}
+const advice = {
+  ...adviceBase,
+  decisionPaths: [adviceBase.selectedDecisionPlan],
+  decisionRationale: buildDecisionRationale({
+    advice: {
+      ...adviceBase,
+      decisionPaths: [adviceBase.selectedDecisionPlan],
+    },
+    decisionPlan: adviceBase.decisionPlan,
+  }),
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(
