@@ -104,6 +104,24 @@ export function opportunityRadarHasStaleModelSource(
   })
 }
 
+export function opportunityRadarLaneSummary(rows = []) {
+  const normalized = Array.isArray(rows) ? rows : []
+  const actionable = normalized.filter(
+    (item) => item?.state !== 'AVOID',
+  )
+  const expectedValues = normalized
+    .map((item) => Number(item?.adaptive?.estimate?.expectedNetR))
+    .filter(Number.isFinite)
+  return {
+    total: normalized.length,
+    actionable: actionable.length,
+    rejected: normalized.length - actionable.length,
+    bestExpectedNetR: expectedValues.length
+      ? Math.max(...expectedValues)
+      : null,
+  }
+}
+
 function staleModelSources(
   snapshot,
   lane = snapshot?.defaultLane || 'intraday',

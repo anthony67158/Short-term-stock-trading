@@ -5,6 +5,7 @@ import {
   opportunityRadarAutoRefreshDelay,
   opportunityRadarClientError,
   opportunityRadarHasStaleModelSource,
+  opportunityRadarLaneSummary,
   refreshOpportunityRadar,
   refreshTailOpportunity,
 } from '../src/opportunityRadarClient.js'
@@ -141,6 +142,29 @@ test('自适应作战台提示上一模型版本结果需要重新扫描', () =>
     opportunityRadarHasStaleModelSource(snapshot, 'next'),
     false,
   )
+})
+
+test('重算无正期望机会时展示扫描总数和最高净期望', () => {
+  const summary = opportunityRadarLaneSummary([
+    {
+      state: 'AVOID',
+      adaptive: { estimate: { expectedNetR: -0.4 } },
+    },
+    {
+      state: 'AVOID',
+      adaptive: { estimate: { expectedNetR: -0.2 } },
+    },
+  ])
+  assert.deepEqual(summary, {
+    total: 2,
+    actionable: 0,
+    rejected: 2,
+    bestExpectedNetR: -0.2,
+  })
+  assert.match(adaptive, /已重算/)
+  assert.match(adaptive, /当前最高/)
+  assert.match(adaptive, /laneSummary\.actionable/)
+  assert.match(adaptive, /laneSummary\.total/)
 })
 
 test('统一客户端使用聚合接口并保留独立来源刷新', () => {

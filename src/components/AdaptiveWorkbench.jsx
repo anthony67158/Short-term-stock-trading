@@ -8,6 +8,7 @@ import {
   loadOpportunityRadar,
   opportunityRadarAutoRefreshDelay,
   opportunityRadarHasStaleModelSource,
+  opportunityRadarLaneSummary,
   refreshOpportunityRadar,
 } from '../opportunityRadarClient.js'
 import {
@@ -353,7 +354,9 @@ function OpportunityBoard({
   }
 
   const currentLane = lane || snapshot?.defaultLane || 'intraday'
-  const rows = (snapshot?.lanes?.[currentLane] || [])
+  const laneRows = snapshot?.lanes?.[currentLane] || []
+  const laneSummary = opportunityRadarLaneSummary(laneRows)
+  const rows = laneRows
     .filter((item) => item.state !== 'AVOID')
     .slice(0, 5)
   const modelVersionStale = opportunityRadarHasStaleModelSource(
@@ -483,14 +486,23 @@ function OpportunityBoard({
       ) : (
         <div className="aw-empty">
           <Icon name="radar" size={18} />
-          <span>当前没有费后期望为正且价格可执行的机会</span>
+          <span>
+            {laneSummary.total > 0
+              ? `已重算${laneSummary.total}只，全部未达到费后正期望或价格执行条件`
+                + (
+                  laneSummary.bestExpectedNetR != null
+                    ? `；当前最高 ${signed(laneSummary.bestExpectedNetR, 'R')}`
+                    : ''
+                )
+              : '当前没有费后期望为正且价格可执行的机会'}
+          </span>
         </div>
       )}
       {snapshot?.opportunityContext && (
         <footer className="aw-board-footer">
           <span>{PHASE_LABELS[snapshot.opportunityContext.phase] || '市场状态待确认'}</span>
           <span>基础单笔风险 {number(snapshot.opportunityContext.baseRiskPct, 2)}%</span>
-          <span>候选 {rows.length}</span>
+          <span>通过 {laneSummary.actionable}/{laneSummary.total}</span>
           {snapshot.trainingStatus?.enabled === true ? (
             <span>V3当前模型已启用</span>
           ) : snapshot.trainingStatus?.readiness ? (
