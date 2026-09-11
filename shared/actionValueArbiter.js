@@ -172,12 +172,11 @@ export function arbitrateActionValues({
     }
   }
   if (!state.eligibility.held) {
-    const selected = bestCandidate(
-      candidates.filter((candidate) => candidate.value.feasible),
-    )
+    const selected = bestCandidate(candidates)
     const selectedPlan = selected?.plan || null
     const executable = (
-      Number(selected?.value?.actionUtilityR) > 0
+      selected?.value?.feasible === true
+      && Number(selected?.value?.actionUtilityR) > 0
       && selectedPlan.route === 'IMMEDIATE'
       && state.quote.live === true
       && state.eligibility.actions.includes('BUY')
@@ -187,7 +186,11 @@ export function arbitrateActionValues({
       selectedPlan,
       conditionalAddPlan: null,
       vector,
-      reason: selectedPlan ? 'ENTRY_VALUE' : 'MODEL_UNAVAILABLE',
+      reason: !selectedPlan
+        ? 'MODEL_UNAVAILABLE'
+        : selected?.value?.feasible === true
+          ? 'ENTRY_VALUE'
+          : 'ENTRY_INELIGIBLE',
     }
   }
   if (!immediate) {

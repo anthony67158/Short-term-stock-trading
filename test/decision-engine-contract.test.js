@@ -175,6 +175,32 @@ test('动作价值合同拒绝路由到非法动作', () => {
   assert.equal(action.feasible, false)
 })
 
+test('账户风控阻止买入时仍保留已就绪的模型计划', () => {
+  const state = buildDecisionState({
+    code: '600001',
+    asOf: 1,
+    quote: { price: 10, live: true },
+    position: { totalLots: 0 },
+    account: {
+      complete: true,
+      riskIncreaseAllowed: false,
+    },
+    evidence: { complete: true },
+    model: { ready: true },
+    paths: [path()],
+  })
+  const result = arbitrateActionValues({
+    state,
+    plans: [{ ...path(), opportunityScore: score() }],
+  })
+
+  assert.equal(result.action, 'WAIT')
+  assert.equal(result.reason, 'ENTRY_INELIGIBLE')
+  assert.equal(result.selectedPlan.route, 'IMMEDIATE')
+  assert.equal(result.vector.actions[0].ready, true)
+  assert.equal(result.vector.actions[0].feasible, false)
+})
+
 test('统一仲裁器按账户状态选择买入加仓与退出', () => {
   const openState = buildDecisionState({
     code: '600001',
