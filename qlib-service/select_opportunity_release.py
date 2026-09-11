@@ -126,13 +126,16 @@ def evaluate_release(
 ):
     """Evaluate one complete model combination on the same untouched holdout."""
     matrix = data["X"][holdout_index]
+    started = time.perf_counter()
     predictions = _ensemble_prediction_arrays(
         models,
         metadata,
         matrix,
     )
-    durations = []
-    for _ in range(max(1, int(benchmark_repeats))):
+    initial_duration = (time.perf_counter() - started) * 1000
+    repeats = max(0, int(benchmark_repeats))
+    durations = [initial_duration] if repeats == 0 else []
+    for _ in range(repeats):
         started = time.perf_counter()
         _ensemble_prediction_arrays(models, metadata, matrix)
         durations.append((time.perf_counter() - started) * 1000)
@@ -202,7 +205,7 @@ def evaluate_release(
                 median_ms * 1000 / max(1, len(matrix)),
                 6,
             ),
-            "repeats": max(1, int(benchmark_repeats)),
+            "repeats": repeats,
         },
     }
 
@@ -825,6 +828,7 @@ def select_release(
             metadata,
             data,
             holdout,
+            benchmark_repeats=0,
         )
         individual_evaluations[component] = evaluation
         component_decisions.append(component_decision(
@@ -859,6 +863,7 @@ def select_release(
                     metadata,
                     data,
                     holdout,
+                    benchmark_repeats=0,
                 )
             compatibility = compatibility_gate(
                 champion_evaluation,
@@ -882,6 +887,30 @@ def select_release(
         ),
         default=None,
     )
+    final_validation_blockers = []
+    if selected:
+        models, metadata = compose_release(
+            champion_models,
+            champion_metadata,
+            challenger_models,
+            challenger_metadata,
+            selected["components"],
+        )
+        selected["evaluation"] = evaluate_release(
+            models,
+            metadata,
+            data,
+            holdout,
+        )
+        selected["compatibility"] = compatibility_gate(
+            champion_evaluation,
+            selected["evaluation"],
+        )
+        if not selected["compatibility"]["passed"]:
+            final_validation_blockers = selected[
+                "compatibility"
+            ]["blockers"]
+            selected = None
     action = "PUBLISH" if selected else "KEEP_CURRENT"
     selected_components = (
         selected["components"]
@@ -941,9 +970,15 @@ def select_release(
             else {
                 "passed": False,
                 "blockers": list(dict.fromkeys(
-                    blocker
-                    for item in candidates
-                    for blocker in item["compatibility"]["blockers"]
+                    [
+                        *final_validation_blockers,
+                        *(
+                            blocker
+                            for item in candidates
+                            for blocker
+                            in item["compatibility"]["blockers"]
+                        ),
+                    ]
                 ))[:12],
             }
         ),
