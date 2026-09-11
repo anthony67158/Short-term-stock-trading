@@ -45,6 +45,7 @@ MARKET_FIELDS = (
 PAGE_SIZE = 100
 MAX_PAGES = 80
 CODE_PATTERN = re.compile(r"^\d{6}$")
+MARKET_ARCHIVE_SETTLE_MS = 10 * 60 * 1000
 HEADERS = {
     "Accept": "application/json, text/javascript, */*; q=0.01",
     "Referer": "https://quote.eastmoney.com/",
@@ -291,6 +292,7 @@ def archive_latest_public(
     minute_loader=fetch_public_minute_day,
     universe_size=1000,
     workers=12,
+    now_ms=None,
 ):
     target_bucket = target_bucket or _oss_bucket()
     if target_bucket is None:
@@ -307,6 +309,22 @@ def archive_latest_public(
             "universe": existing["universe"],
         }
     previous = latest_market_day_before(target_bucket, target)
+    current_ms = int(
+        now_ms
+        if now_ms is not None
+        else dt.datetime.now(tz=dt.timezone.utc).timestamp() * 1000
+    )
+    if current_ms < market_close_ms(target) + MARKET_ARCHIVE_SETTLE_MS:
+        return {
+            "status": "market_open_skipped",
+            "date": target,
+            "latestArchiveDate": (
+                previous.get("date")
+                if isinstance(previous, dict)
+                else None
+            ),
+            "reason": "目标交易日尚未收盘，继续使用最新完整OSS归档",
+        }
     if previous is None:
         raise ValueError("公开源归档缺少前一交易日因果股票池")
     universe = select_causal_universe(

@@ -8,12 +8,14 @@ SERVICE_ROOT = os.path.abspath(os.path.join(HERE, ".."))
 sys.path.insert(0, SERVICE_ROOT)
 
 from archive_public_market_day import (  # noqa: E402
+    MARKET_ARCHIVE_SETTLE_MS,
     archive_latest_public,
     fetch_market_snapshot,
     fetch_public_minute_day,
 )
 from opportunity_market_archive import (  # noqa: E402
     build_market_day_artifact,
+    market_close_ms,
     publish_market_days,
 )
 
@@ -98,6 +100,48 @@ def minute_bars(code, date):
 
 
 class ArchivePublicMarketDayTest(unittest.TestCase):
+    def test_archive_skips_intraday_snapshot_until_market_closes(self):
+        target_bucket = FakeBucket()
+        previous = build_market_day_artifact(
+            date="20260908",
+            daily=daily_rows("20260908"),
+            funds=fund_rows("20260908"),
+            minutes={
+                "date": "20260908",
+                "codes": {
+                    "000001": minute_bars("000001", "20260908"),
+                },
+            },
+            universe_source_date="20260905",
+            requested_codes=1,
+        )
+        publish_market_days(target_bucket, [previous])
+        minute_calls = []
+
+        result = archive_latest_public(
+            target_bucket=target_bucket,
+            snapshot_loader=lambda: {
+                "date": "20260909",
+                "daily": daily_rows("20260909"),
+                "funds": fund_rows("20260909"),
+            },
+            minute_loader=lambda code, date: minute_calls.append(
+                (code, date)
+            ),
+            universe_size=100,
+            workers=2,
+            now_ms=(
+                market_close_ms("20260909")
+                + MARKET_ARCHIVE_SETTLE_MS
+                - 1
+            ),
+        )
+
+        self.assertEqual(result["status"], "market_open_skipped")
+        self.assertEqual(result["date"], "20260909")
+        self.assertEqual(result["latestArchiveDate"], "20260908")
+        self.assertEqual(minute_calls, [])
+
     def test_market_snapshot_requires_complete_pagination(self):
         timestamp = 1_788_940_800
 
