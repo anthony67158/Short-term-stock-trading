@@ -34,7 +34,7 @@ test('LLM配置用解释角色承载组合诊断说明', () => {
       'REVIEW_MODEL',
     ],
     def: 'DeepSeek-V4-Pro',
-    label: 'V3决策与组合解释',
+    label: '决策与组合解释',
   })
 })
 

@@ -1,5 +1,8 @@
 import { useSyncExternalStore } from 'react'
 import { normalizeSelectionOrigin } from '../shared/selectionOrigin.js'
+import {
+  isDecisionEngineAdvice,
+} from '../shared/decisionEngineSource.js'
 import { getAdvice, getAllAdvice, setAllAdvice, mergeAdvice, registerAdviceSync } from './adviceCache.js'
 import { computeSellAllowance } from '../shared/decisionGuards.js'
 import { appendExecution, createRecommendation, decisionLedgerStats, removeExecutions } from '../shared/decisionLedger.js'
@@ -178,7 +181,7 @@ export function advicePlan(code) {
       : 'buy_advice'
     const a = getAdvice(code, expectedMode)
     const adv = a && a.advice
-    if (adv?.decisionSource?.engine !== 'V3') return null
+    if (!isDecisionEngineAdvice(adv)) return null
     if (adv.decisionSource.state !== 'READY') return null
     if (Date.parse(adv.decisionPlan?.validUntil) <= Date.now()) return null
     const priceContract = sanitizedAdvicePriceContract(adv)

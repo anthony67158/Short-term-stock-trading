@@ -99,7 +99,7 @@ export default function OpportunityCandidateRow({
   const displayBlockers = modelReady
     ? opportunity.blockers
     : [
-        '生产V3评分不可用，当前不执行',
+        '生产决策评分不可用，当前不执行',
         ...(opportunity.blockers || []),
       ]
   const blockerExplanation = explainOpportunityBlockers(
@@ -108,7 +108,7 @@ export default function OpportunityCandidateRow({
   const blockerDetails = opportunityBlockerDetails(displayBlockers)
   const canAdd = !added
   // 组合层只读提示：仅在候选被同板块集中或预算上限降级时展示，
-  // 它不改变个股主状态；缺少生产 V3 时由上方统一降级。
+  // 它不改变个股主状态；缺少生产决策评分时由上方统一降级。
   const portfolioNote = portfolio
     && PORTFOLIO_VIEW[portfolio.portfolioState]
     ? {
@@ -164,7 +164,7 @@ export default function OpportunityCandidateRow({
                 ).toFixed(1)}
               </span>
               <span>
-                {modelReady ? '生产V3已评分' : 'V3评分不可用'}
+                {modelReady ? '生产决策已评分' : '决策评分不可用'}
               </span>
             </span>
           </div>
@@ -177,7 +177,7 @@ export default function OpportunityCandidateRow({
             {modelReady ? (
               <>
                 <Icon name="chart" size={12} />
-                <span>生产V3估计</span>
+                <span>生产决策估计</span>
                 <span>可成交率 {probabilityPct(modelScore.pFill)}</span>
                 <span>
                   净盈利率 {probabilityPct(modelScore.pWinGivenFill)}
@@ -187,7 +187,7 @@ export default function OpportunityCandidateRow({
             ) : (
               <span className="opportunity-model-pending">
                 <Icon name="clock" size={12} />
-                <span>生产V3评分不可用，本次不执行</span>
+                <span>生产决策评分不可用，本次不执行</span>
               </span>
             )}
           </div>

@@ -28,7 +28,7 @@ export const ROLES = {
       'REVIEW_MODEL',
     ],
     def: 'DeepSeek-V4-Pro',
-    label: 'V3决策与组合解释',
+    label: '决策与组合解释',
   },
   assistant: {
     envs: ['ASSISTANT_MODEL', 'AGENT_MODEL'],

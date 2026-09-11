@@ -60,7 +60,7 @@ book.advice['002475'] = {
     fundNote: '当前主力净流入0.5亿元，未触发资金退出条件。',
     techNote: '现价54.5元位于分时均价54.3元上方。',
     decisionSource: {
-      engine: 'V3',
+      engine: 'MULTI_TASK',
       state: 'READY',
       evaluatedAt: now,
       modelVersion: 'LOCAL_TEST_DOUBLE',
@@ -141,7 +141,7 @@ book.advice['000001'] = {
     nextAction: '清仓10手，按当前可卖数量人工执行并记录成交。',
     opQty: '清仓10手',
     decisionSource: {
-      engine: 'V3',
+      engine: 'MULTI_TASK',
       state: 'READY',
       evaluatedAt: now,
       modelVersion: 'LOCAL_TEST_DOUBLE',
@@ -218,7 +218,7 @@ book.advice['002594'].advice = {
   stopPrice: 80,
   targetPrice: 92,
   decisionSource: {
-    engine: 'V3',
+    engine: 'MULTI_TASK',
     state: 'READY',
     evaluatedAt: now,
     modelVersion: 'LOCAL_TEST_DOUBLE',
@@ -251,8 +251,8 @@ book.advice['002594'].advice = {
       },
     },
   },
-  v3Explanation: {
-    schemaVersion: 'v3-explanation.v2',
+  decisionExplanation: {
+    schemaVersion: 'decision-explanation.v1',
     status: 'ready',
     decisionId: 'decision-demo-watch',
     model: 'LOCAL_EXPLAIN_DOUBLE',
@@ -278,7 +278,7 @@ book.advice['688981'].advice.decisionPlan = {
   validUntil: new Date(now + 86400000).toISOString(),
 }
 book.advice['688981'].advice.decisionSource = {
-  engine: 'V3',
+  engine: 'MULTI_TASK',
   state: 'READY',
   evaluatedAt: now,
   modelVersion: 'LOCAL_TEST_DOUBLE',

@@ -11,7 +11,7 @@ import { quantReportStore, useQuantReportStore } from '../quantReportStore'
 import { userFacingAlertMessage } from '../../shared/alertNotification.js'
 import { applyT1ToAlert } from '../../shared/t1AdvicePolicy.js'
 
-// ============ 预警中心：站内通知流 + 预警规则管理 + V3训练发布记录 ============
+// ============ 预警中心：站内通知流 + 预警规则管理 + 决策模型训练发布记录 ============
 export default function AlertCenter({ onClose }) {
   const [tab, setTab] = useState('notif') // notif 通知 | rules 规则 | quant 量化
   const { notifications, permission } = useAlertStore()
@@ -21,7 +21,7 @@ export default function AlertCenter({ onClose }) {
 
   // 打开即标记已读
   useState(() => { alertStore.markAllRead(); return 0 })
-  // 切到V3页时拉取每日训练与发布记录（后台定时任务写入 OSS）
+  // 切到模型页时拉取每日训练与发布记录（后台定时任务写入 OSS）
   useEffect(() => { if (tab === 'quant') quantReportStore.load() }, [tab])
 
   // 规则页:轮询相关个股实时报价,用于「距触发」可视化
@@ -46,7 +46,7 @@ export default function AlertCenter({ onClose }) {
         <div className="tabs" style={{ margin: '4px 16px 0' }}>
           <button type="button" className={'tab' + (tab === 'notif' ? ' active' : '')} aria-pressed={tab === 'notif'} onClick={() => setTab('notif')}>通知 {notifications.length > 0 && `(${notifications.length})`}</button>
           <button type="button" className={'tab' + (tab === 'rules' ? ' active' : '')} aria-pressed={tab === 'rules'} onClick={() => setTab('rules')}>规则 {alerts.length > 0 && `(${alerts.length})`}</button>
-          <button type="button" className={'tab' + (tab === 'quant' ? ' active' : '')} aria-pressed={tab === 'quant'} onClick={() => setTab('quant')}>V3训练 {reports.length > 0 && `(${reports.length})`}</button>
+          <button type="button" className={'tab' + (tab === 'quant' ? ' active' : '')} aria-pressed={tab === 'quant'} onClick={() => setTab('quant')}>模型训练 {reports.length > 0 && `(${reports.length})`}</button>
         </div>
 
         {/* 通知授权提示 */}
@@ -191,7 +191,7 @@ export default function AlertCenter({ onClose }) {
             ) : reports.length === 0 ? (
               <div className="empty-state">
                 <span className="es-icon"><Icon name="chart" size={20} /></span>
-                <div className="es-title">暂无V3训练记录</div>
+                <div className="es-title">暂无决策模型训练记录</div>
                 <div className="es-desc">工作日凌晨训练结束后，这里会记录生产对照、组成部分晋级、整体风险验证与部署结果。</div>
               </div>
             ) : (

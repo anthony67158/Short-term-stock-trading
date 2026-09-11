@@ -67,14 +67,14 @@ function completedState(status) {
   return 'unknown'
 }
 
-export function v3WorkflowRun(workflow, reports = []) {
+export function decisionWorkflowRun(workflow, reports = []) {
   const current = workflow?.current
   const normalizedReports = Array.isArray(reports) ? reports : []
   const reportFor = (run) => normalizedReports.find((item) => (
     quantReportModel(item) === 'opportunity'
     && positiveInteger(item?.meta?.runId) === run?.runId
   ))
-  const completedV3 = (run) => {
+  const completedDecisionRun = (run) => {
     const state = completedState(reportFor(run)?.meta?.workflowStatus)
     return state === 'unknown'
       ? null
@@ -86,14 +86,15 @@ export function v3WorkflowRun(workflow, reports = []) {
           scope: 'opportunity-retrain',
         }
   }
-  const currentV3 = completedV3(current)
-  if (currentV3) return currentV3
+  const currentDecisionRun = completedDecisionRun(current)
+  if (currentDecisionRun) return currentDecisionRun
   if (current?.state === 'running' || current?.state === 'queued') {
     return { ...current, scope: 'daily-retrain' }
   }
   const latest = workflow?.latest
   if (!latest) return null
-  return completedV3(latest) || { ...latest, scope: 'daily-retrain' }
+  return completedDecisionRun(latest)
+    || { ...latest, scope: 'daily-retrain' }
 }
 
 function legacySignature(report) {
@@ -105,7 +106,7 @@ function legacySignature(report) {
 }
 
 export const QUANT_REPORT_MODELS = Object.freeze({
-  opportunity: 'V3 机会模型',
+  opportunity: '决策机会模型',
   stock: '个股模型',
   sector: '板块模型',
 })

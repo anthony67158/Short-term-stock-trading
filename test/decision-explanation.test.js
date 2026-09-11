@@ -24,11 +24,11 @@ const decisionPlan = {
 
 const advice = {
   decisionSource: {
-    engine: 'V3',
+    engine: 'MULTI_TASK',
     modelVersion: 'opportunity-score.direct',
   },
   decisionPlan,
-  selectedV3Plan: {
+  selectedDecisionPlan: {
     opportunityScore: {
       pFill: 0.7,
       pWinGivenFill: 0.6,
@@ -40,7 +40,7 @@ const advice = {
   actionPlan: '买入2手',
   invalidation: '跌破9元后重新评估',
   decisionEvidence: {
-    schemaVersion: 'v3-decision-evidence.v1',
+    schemaVersion: 'decision-evidence.v1',
     asOf: 1,
     availability: {
       dailyTechnical: true,
@@ -87,7 +87,7 @@ const advice = {
   },
 }
 
-test('解释包只投影V3已核定事实', () => {
+test('解释包只投影系统已核定事实', () => {
   const packet = buildDecisionExplanationPacket(advice)
   assert.deepEqual(packet.prices, {
     reference: 10,
@@ -137,7 +137,7 @@ test('缓存和权威建议必须绑定当前decisionId', () => {
       '600001': {
         advice: {
           ...advice,
-          v3Explanation: {
+          decisionExplanation: {
             schemaVersion: DECISION_EXPLANATION_SCHEMA_VERSION,
             status: 'ready',
             decisionId: 'decision.v3',

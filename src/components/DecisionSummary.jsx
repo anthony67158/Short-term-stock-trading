@@ -1,18 +1,22 @@
 import { useEffect, useState } from 'react'
-import { v3DecisionPresentation } from '../../shared/v3DecisionPresentation.js'
-import { loadV3Explanation } from '../v3Explanation.js'
+import {
+  decisionPresentation,
+  decisionPrices,
+} from '../../shared/decisionPresentation.js'
+import { fmtRaw } from '../format.js'
+import { loadDecisionExplanation } from '../decisionExplanation.js'
 import Icon from './Icon'
 
-export default function V3DecisionSummary({
+export default function DecisionSummary({
   advice, holdingLots = 0, stopPrice = null, managed = true,
   loading = false, detailed = false, view: preparedView, currentPrice,
   sellableLots = null, code = '',
 }) {
   const [expanded, setExpanded] = useState(false)
   const decisionId = advice?.decisionPlan?.decisionId || ''
-  const savedExplanation = advice?.v3Explanation?.decisionId === decisionId
-    ? advice.v3Explanation
-    : null
+  const storedExplanation = advice?.decisionExplanation
+  const savedExplanation = storedExplanation?.decisionId === decisionId
+    ? storedExplanation : null
   const savedExplanationKey = [
     decisionId,
     savedExplanation?.status,
@@ -26,10 +30,14 @@ export default function V3DecisionSummary({
     setExplanationError('')
     setExplanationLoading(false)
   }, [savedExplanationKey])
-  const view = preparedView || v3DecisionPresentation({
+  const view = preparedView || decisionPresentation({
     advice, holdingLots, stopPrice, managed, loading, currentPrice, sellableLots,
   })
-  const score = advice?.selectedV3Plan?.opportunityScore
+  const priceItems = decisionPrices(advice)
+  const displayedPriceKeys = new Set(
+    priceItems.map((item) => item.key),
+  )
+  const score = advice?.selectedDecisionPlan?.opportunityScore
   const probability = (value) => value != null && Number.isFinite(Number(value))
     ? `${(Number(value) * 100).toFixed(1)}%` : '暂无'
   const requestExplanation = async () => {
@@ -37,7 +45,7 @@ export default function V3DecisionSummary({
     setExplanationLoading(true)
     setExplanationError('')
     try {
-      setExplanation(await loadV3Explanation(code, decisionId))
+      setExplanation(await loadDecisionExplanation(code, decisionId))
     } catch (error) {
       setExplanationError(error?.message || '模型解读暂不可用')
     } finally {
@@ -45,37 +53,51 @@ export default function V3DecisionSummary({
     }
   }
   return (
-    <section className={`v3-decision-summary ${view.tone}`} aria-label="V3操作决策">
-      <div className="v3-decision-eyebrow">
-        <span>{view.hardStop ? '账本止损' : view.isV3 ? 'V3 决策' : managed ? '等待评估' : '普通收藏'}</span>
+    <section className={`decision-summary ${view.tone}`} aria-label="操作决策">
+      <div className="decision-eyebrow">
+        <span>{view.hardStop ? '账本止损' : view.isDecisionEngine ? '系统决策' : managed ? '等待评估' : '普通收藏'}</span>
         {loading && <Icon name="refresh" className="spin" size={14} />}
       </div>
-      <div className="v3-decision-headline">
+      <div className="decision-headline">
         <Icon name={view.icon} size={21} />
         <strong>{view.headline}</strong>
       </div>
-      <p className="v3-decision-reason">{view.reason}</p>
-      <dl className="v3-execution-facts">
+      <p className="decision-reason">{view.reason}</p>
+      {priceItems.length > 0 && (
+        <dl className="decision-price-strip" aria-label="复核与执行价位">
+          {priceItems.map((item) => (
+            <div key={item.key} data-tone={item.tone}>
+              <dt>{item.label}</dt>
+              <dd>{fmtRaw(item.value)}<small>元</small></dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <dl className="decision-execution-facts">
         <div><dt>何时操作</dt><dd>{view.timing}</dd></div>
-        {view.executable && <div><dt>参考价格</dt><dd>{view.reference}</dd></div>}
-        <div><dt>风险边界</dt><dd>{view.protection}</dd></div>
+        {view.executable
+          && (detailed || !displayedPriceKeys.has('reference'))
+          && <div><dt>参考价格</dt><dd>{view.reference}</dd></div>}
+        {(detailed || !displayedPriceKeys.has('stop')) && (
+          <div><dt>风险边界</dt><dd>{view.protection}</dd></div>
+        )}
       </dl>
       {detailed && (
         <>
-          <button type="button" className="v3-evidence-toggle" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
+          <button type="button" className="decision-evidence-toggle" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
             <Icon name={expanded ? 'chevronDown' : 'chevronRight'} size={14} />
             决策依据
           </button>
           {expanded && (
-            <div className="v3-decision-evidence">
+            <div className="decision-evidence">
               <p>成交概率 {probability(score?.pFill)} · 成交后盈利概率 {probability(score?.pWinGivenFill)}</p>
               {score?.expectedNetR != null && <p>费后期望 {score.expectedNetR}R · 尾部损失参考 {score.expectedShortfall10}R</p>}
-              <p>{advice?.quantNote || '尚无V3结果。'}</p>
+              <p>{advice?.quantNote || '尚无决策模型结果。'}</p>
               <p>{advice?.fundNote || '资金数据暂不可用。'}</p>
-              {score?.outOfDistribution && <p>部分行情特征超出训练范围，当前预测仍取自V3模型。</p>}
+              {score?.outOfDistribution && <p>部分行情特征超出训练范围，当前预测仍取自生产决策模型。</p>}
               {advice?.decisionSource?.modelVersion && <p>模型版本 {advice.decisionSource.modelVersion}</p>}
               {explanation?.status === 'ready' ? (
-                <div className="v3-ai-explanation" aria-label="白话解读">
+                <div className="decision-ai-explanation" aria-label="白话解读">
                   <p><b>为什么</b>{explanation.summary}</p>
                   <p><b>最强反方</b>{explanation.counterCase}</p>
                   <p><b>何时失效</b>{explanation.invalidation}</p>
@@ -84,7 +106,7 @@ export default function V3DecisionSummary({
               ) : (
                 <button
                   type="button"
-                  className="v3-explain-btn"
+                  className="decision-explain-btn"
                   disabled={!code || !decisionId || explanationLoading}
                   aria-busy={explanationLoading}
                   onClick={requestExplanation}
@@ -98,7 +120,7 @@ export default function V3DecisionSummary({
                 </button>
               )}
               {(explanationError || explanation?.status === 'failed') && (
-                <p className="v3-explanation-error" role="status">
+                <p className="decision-explanation-error" role="status">
                   {explanationError || explanation.error}
                 </p>
               )}

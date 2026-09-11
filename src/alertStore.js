@@ -5,6 +5,9 @@ import {
   decisionActionAlertMessage,
   isCurrentDecisionAlert,
 } from '../shared/adviceAlerts.js'
+import {
+  DECISION_ENGINE_ID,
+} from '../shared/decisionEngineSource.js'
 import { api } from './apiBase.js'
 import { accountRequestHeaders } from './quantModel.js'
 import {
@@ -168,7 +171,7 @@ function hit(a, q, now = Date.now()) {
     return price > 0 ? `现价 ${price}，开始退出前复核` : null
   }
   if (
-    ['MULTI_TASK', 'V3'].includes(a.decisionEngine)
+    a.decisionEngine === DECISION_ENGINE_ID
     && !a.reviewOnly
     && a.type === 'price'
   ) return decisionActionAlertMessage(a, q)

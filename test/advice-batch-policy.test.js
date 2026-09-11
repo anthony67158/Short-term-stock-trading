@@ -157,7 +157,7 @@ test('深度模式使用有界预算且不整轮自动重试', () => {
   })
 })
 
-test('持仓页复用现有任务链批量更新V3决策', () => {
+test('持仓页复用现有任务链批量更新系统决策', () => {
   assert.doesNotMatch(planTab, /普通生成（\{selCount\}）/)
   assert.doesNotMatch(planTab, /深度生成（2路并行）/)
   assert.doesNotMatch(planTab, /className="batch-bar"/)

@@ -25,14 +25,25 @@ import { planStore, usePlanStore, calcBuyFee, calcSellFee, computeTFlows, comput
 import { openStockDetail, useDetailStore } from '../detailStore'
 import { getAdvice, subscribeAdvice } from '../adviceCache'
 import {
+  cancelBatch,
+  getBatchState,
+  regenerateFailed,
+  subscribeBatch,
+} from '../adviceBatch'
+import {
   buildHoldSpec,
   buildWatchSpec,
 } from '../adviceDaily'
 import { tryStartAdvice } from '../adviceGate'
-import V3DecisionSummary from './V3DecisionSummary'
-import { v3DecisionPresentation } from '../../shared/v3DecisionPresentation.js'
+import DecisionSummary from './DecisionSummary'
+import { decisionPresentation } from '../../shared/decisionPresentation.js'
+import {
+  isDecisionEngineAdvice,
+} from '../../shared/decisionEngineSource.js'
 import {
   getAutoConfig,
+  getManualAdviceRefreshCodes,
+  runManualAdviceRefresh,
   setAutoConfigSetting,
   setAutoSelectedCodes,
   K_HOLD_ENABLED,
@@ -76,6 +87,9 @@ import {
 } from '../../shared/stockGroupFilter.js'
 import { adviceRecency } from '../../shared/adviceRecency.js'
 import { selectAutoRefreshCodes } from '../../shared/adviceAutoRefreshPolicy.js'
+import {
+  batchProgressVisibility,
+} from '../../shared/batchProgressVisibility.js'
 import { stockNoteText } from '../../shared/stockNotes.js'
 import { quoteDisplayState } from '../../shared/quoteDisplay.js'
 import { monitoringPlanOf, monitoringView } from '../../shared/monitoringPlan.js'
@@ -574,13 +588,11 @@ function AdviceUpdatedAt({ entry }) {
   const recency = adviceRecency(entry && entry.at)
   if (!label || !recency) return null
   return (
-    <div className="advice-updated-at" data-recency={recency.tone} title={`V3决策更新于 ${new Date(entry.at).toLocaleString('zh-CN')}`}>
+    <div className="advice-updated-at" data-recency={recency.tone} title={`系统决策更新于 ${new Date(entry.at).toLocaleString('zh-CN')}`}>
       <Icon name="history" size={11} />
-      <span>最近更新</span>
-      <strong>{recency.label}</strong>
-      {recency.tone === 'fresh' && (
-        <time dateTime={new Date(entry.at).toISOString()}>{label}</time>
-      )}
+      <span>决策更新</span>
+      <strong>{label}</strong>
+      <time dateTime={new Date(entry.at).toISOString()}>{recency.label}</time>
     </div>
   )
 }
@@ -1059,11 +1071,11 @@ function CandDecision({ p, q, managed }) {
   useEffect(() => subscribeAdvice(() => force((n) => n + 1)), [])
   const generation = useAdviceGeneration(p.code)
   const entry = getAdvice(p.code, 'buy_advice')
-  const advice = entry?.advice?.decisionSource?.engine === 'V3'
+  const advice = isDecisionEngineAdvice(entry?.advice)
     ? entry.advice : null
   const hasAdvice = !!advice
   const livePrice = quoteDisplayState(q).livePrice
-  const baseView = v3DecisionPresentation({
+  const baseView = decisionPresentation({
     advice, currentPrice: livePrice, managed, loading: generation?.active,
     executionPlans: planStore.get().executionPlans || [],
   })
@@ -1117,14 +1129,14 @@ function CandDecision({ p, q, managed }) {
   if (!managed) {
     return (
       <div className="card-decision-slot">
-        <V3DecisionSummary managed={false} />
+        <DecisionSummary managed={false} />
       </div>
     )
   }
 
   return (
     <div className="card-decision-slot">
-      <V3DecisionSummary advice={advice} view={baseView} loading={generation?.active} />
+      <DecisionSummary advice={advice} view={baseView} loading={generation?.active} />
       <div className="card-decision-meta">
         {advice && <AdviceUpdatedAt
           entry={entry}
@@ -1152,7 +1164,7 @@ function CandidateActions({
   const generation = useAdviceGeneration(p.code)
   const entry = getAdvice(p.code, 'buy_advice')
   const livePrice = quoteDisplayState(q).livePrice
-  const view = v3DecisionPresentation({
+  const view = decisionPresentation({
     advice: entry?.advice, currentPrice: livePrice, managed,
     loading: generation?.active || enrolling,
     executionPlans: planStore.get().executionPlans || [],
@@ -1201,7 +1213,7 @@ function CandidateActions({
           onClick={() => onEnroll(p, { confirm: false })}
         >
           <Icon name="refresh" size={12} />
-          更新 V3 决策
+          更新决策
         </button>
       ) : (
         <button
@@ -1216,7 +1228,6 @@ function CandidateActions({
       <details className="card-more-actions">
         <summary aria-label={`${q?.name || p.name}更多操作`} title="更多操作">
           <Icon name="edit" size={13} />
-          更多
         </summary>
         <div className="card-more-menu">
           {!systemExecutable && (
@@ -1366,7 +1377,7 @@ function PlanList({ book, quote, stockTags }) {
       ? getAdvice(p.code, 'buy_advice')?.advice || null
       : null
     return (
-      <div className={'trade-card plan-cand stock-detail-card-hitarea v3-card' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '')}
+      <div className={'trade-card plan-cand stock-detail-card-hitarea decision-card' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '')}
         key={p.code}
         data-code={p.code}
         role="button"
@@ -1537,7 +1548,9 @@ function PlanList({ book, quote, stockTags }) {
     () => Object.fromEntries(filteredCandidates.map((candidate) => [
       candidate.code,
       managedWatchCodes.has(candidate.code)
-        && getAdvice(candidate.code, 'buy_advice')?.advice?.decisionSource?.engine === 'V3'
+        && isDecisionEngineAdvice(
+          getAdvice(candidate.code, 'buy_advice')?.advice,
+        )
         ? getAdvice(candidate.code, 'buy_advice')
         : null,
     ])),
@@ -2244,6 +2257,182 @@ function AutoRefreshControl({ quote, stockTags }) {
   )
 }
 
+function useDecisionBatchState() {
+  const [batch, setBatch] = useState(getBatchState)
+  useEffect(
+    () => subscribeBatch(() => setBatch(getBatchState())),
+    [],
+  )
+  return batch
+}
+
+function DecisionBatchControl({ quote }) {
+  const batch = useDecisionBatchState()
+  const [notice, setNotice] = useState('')
+  const count = getManualAdviceRefreshCodes('both').length
+
+  const run = async () => {
+    setNotice('正在提交 决策批量更新')
+    const result = await runManualAdviceRefresh('both', quote || {})
+    if (result?.status === 'started') {
+      setNotice(`已提交 ${result.selectedCount || count} 只股票`)
+      return
+    }
+    if (result?.status === 'running') {
+      setNotice('已有批量决策任务正在运行')
+      return
+    }
+    if (result?.status === 'full') {
+      setNotice(`决策评估容量已满，当前 ${result.busy?.length || 0} 只正在运行`)
+      return
+    }
+    setNotice(result?.error || '当前没有已授权的股票')
+  }
+
+  return (
+    <div className="decision-batch-control">
+      <button
+        type="button"
+        className="mini-btn batch-entry"
+        onClick={() => { void run() }}
+        disabled={batch.running || count === 0}
+        aria-busy={batch.running}
+        title="更新系统盯盘已选股票的决策"
+      >
+        <Icon
+          name="refresh"
+          size={13}
+          className={batch.running ? 'spin' : ''}
+        />
+        {batch.running
+          ? `批量更新 ${batch.done}/${batch.total}`
+          : `批量更新决策 · ${count}只`}
+      </button>
+      {notice && !batch.running && (
+        <span className="decision-batch-notice" role="status">{notice}</span>
+      )}
+    </div>
+  )
+}
+
+const BATCH_STATUS_LABEL = Object.freeze({
+  pending: '待提交',
+  queued: '排队中',
+  running: '评估中',
+  publishing: '保存中',
+  canceling: '停止中',
+  ok: '已更新',
+  fail: '失败',
+  skipped: '已停止',
+})
+
+function DecisionBatchProgress({ quote }) {
+  const batch = useDecisionBatchState()
+  const [visibilityNow, setVisibilityNow] = useState(Date.now)
+  const visibility = batchProgressVisibility(batch, visibilityNow)
+  useEffect(() => {
+    if (visibility.hideAfterMs == null) return undefined
+    const timer = window.setTimeout(
+      () => setVisibilityNow(Date.now()),
+      visibility.hideAfterMs + 20,
+    )
+    return () => window.clearTimeout(timer)
+  }, [
+    batch.running,
+    batch.finishedAt,
+    batch.at,
+    visibility.hideAfterMs,
+  ])
+  if (!visibility.visible) return null
+  const finished = !batch.running && batch.done >= batch.total
+
+  return (
+    <section
+      className={'batch-prog decision-batch-progress ' + (batch.running ? 'on' : 'done')}
+      aria-label="批量决策更新进度"
+      aria-live="polite"
+    >
+      <div className="bp-head">
+        <span className="bp-title">
+          <Icon
+            name={batch.running ? 'refresh' : 'check'}
+            size={13}
+            className={batch.running ? 'spin' : ''}
+          />
+          {batch.running ? '正在批量更新决策' : '决策批量更新完成'}
+          {batch.serverMode && batch.running && (
+            <span className="sub-name">云端继续运行</span>
+          )}
+        </span>
+        <span className="bp-stat">
+          {batch.done}/{batch.total}
+          {batch.ok > 0 && <span className="bp-ok"> · 成功 {batch.ok}</span>}
+          {batch.fail > 0 && <span className="bp-fail"> · 失败 {batch.fail}</span>}
+          {batch.skipped > 0 && <span className="sub-name"> · 停止 {batch.skipped}</span>}
+        </span>
+        {batch.running ? (
+          <button
+            type="button"
+            className="chip-btn ghost bp-cancel"
+            onClick={() => { void cancelBatch() }}
+            disabled={batch.cancelRequested}
+            aria-busy={batch.cancelRequested}
+          >
+            {batch.cancelRequested ? '停止中' : '全部停止'}
+          </button>
+        ) : batch.fail > 0 ? (
+          <button
+            type="button"
+            className="chip-btn ghost bp-regen"
+            onClick={() => regenerateFailed(quote)}
+          >
+            <Icon name="refresh" size={12} />
+            重试失败项
+          </button>
+        ) : null}
+      </div>
+      <div
+        className="bp-track"
+        role="progressbar"
+        aria-valuemin="0"
+        aria-valuemax={batch.total}
+        aria-valuenow={batch.done}
+        aria-label={`已完成${batch.done}只，共${batch.total}只`}
+      >
+        <div className="bp-fill" style={{ width: `${batch.pct}%` }} />
+      </div>
+      <details className="decision-batch-items" open={!finished}>
+        <summary>查看每只股票状态</summary>
+        <div className="bp-items">
+          {batch.items.map((item) => {
+            const jumpable = ['running', 'publishing', 'ok', 'fail']
+              .includes(item.status)
+            return (
+              <button
+                type="button"
+                key={`${item.jobId || batch.batchId}:${item.code}`}
+                className={`bp-chip bp-${item.status}`}
+                disabled={!jumpable}
+                onClick={() => openStockDetail(item.code, item.name)}
+                title={item.error || item.phase || BATCH_STATUS_LABEL[item.status]}
+              >
+                {['running', 'publishing'].includes(item.status) && (
+                  <Icon name="refresh" size={10} className="spin" />
+                )}
+                {item.status === 'ok' && <Icon name="check" size={10} />}
+                <b className="bp-chip-name">{item.name}</b>
+                <span className="bp-chip-st">
+                  {BATCH_STATUS_LABEL[item.status] || item.status}
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </details>
+    </section>
+  )
+}
+
 // ---------- 当前持仓 ----------
 function HoldingList({ book, quote, stockTags }) {
   // 卡片按实时浮盈金额降序。排序口径复用账户估值，包含手续费和未结算做T净头寸。
@@ -2301,7 +2490,9 @@ function HoldingList({ book, quote, stockTags }) {
         <HoldOverview book={book} quote={quote} />
         <div className="portfolio-command-actions">
           <AutoRefreshControl quote={quote} stockTags={stockTags} />
+          <DecisionBatchControl quote={quote} />
         </div>
+        <DecisionBatchProgress quote={quote} />
       </div>
 
       <div className="plan-section-hold-sticky">
@@ -2365,7 +2556,7 @@ function HoldingItem({ h, quote: q }) {
   const [tSide, setTSide] = useState('buy') // buy 低吸/买回 | sell 高抛/卖出
   const [tPrice, setTPrice] = useState('')
   const [tQty, setTQty] = useState('1')
-  const [tAdvice, setTAdvice] = useState(null) // 当前V3决策对做T记账的边界说明
+  const [tAdvice, setTAdvice] = useState(null) // 当前系统决策对做T记账的边界说明
   const [openDays, setOpenDays] = useState({}) // 做T流水按天折叠，key→是否展开
   const [planDetailOpen, setPlanDetailOpen] = useState(false)
   const [tradeErr, setTradeErr] = useState('')
@@ -2535,7 +2726,7 @@ function HoldingItem({ h, quote: q }) {
   }
 
   const adviceEntry = getAdvice(h.code, 'hold_advice')
-  const holdAdvice = adviceEntry?.advice?.decisionSource?.engine === 'V3'
+  const holdAdvice = isDecisionEngineAdvice(adviceEntry?.advice)
     ? adviceEntry.advice : null
   useEffect(() => {
     if (holdAdvice) planStore.syncActionAlerts(h.code)
@@ -2576,7 +2767,7 @@ function HoldingItem({ h, quote: q }) {
     )
     return () => window.clearInterval(timer)
   }, [monitoringPlanId, observingRuleCount])
-  const decisionView = v3DecisionPresentation({
+  const decisionView = decisionPresentation({
     advice: holdAdvice, holdingLots: liveQty,
     stopPrice: effectivePlanStop,
     currentPrice: validPx, sellableLots: currentT1.sellableToday,
@@ -2673,9 +2864,9 @@ function HoldingItem({ h, quote: q }) {
     setTQty('1')
   }
 
-  // 做T不再另行生成交易方向，只读取当前V3决策与已有第一腿。
+  // 做T不再另行生成交易方向，只读取当前系统决策与已有第一腿。
   const askTAdvice = async () => {
-    setTAdvice({ loading: true, phase: '正在读取当前V3决策…', sources: [], reasoning: '', quant: null })
+    setTAdvice({ loading: true, phase: '正在读取当前系统决策…', sources: [], reasoning: '', quant: null })
     const onPhase = (p) => setTAdvice((s) => (s && s.loading ? { ...s, phase: p.text } : s))
     // 细粒度事件:数据源勾选清单 + 军师思维链增量,实时展示"发生了什么"
     const onEvent = (event, data) => {
@@ -2814,7 +3005,7 @@ function HoldingItem({ h, quote: q }) {
       }
     }
     return {
-      label: generation?.active ? '正在更新决策' : '更新 V3 决策',
+      label: generation?.active ? '正在更新决策' : '更新决策',
       icon: 'refresh',
       className: 'ghost',
       run: refreshDecision,
@@ -2934,7 +3125,7 @@ function HoldingItem({ h, quote: q }) {
       {swipe.swiping && isTouch && swipe.dx > 0 && (
         <div className={'hsw-hint hsw-right' + (swipe.dx >= 64 ? ' armed' : '')}><Icon name="chart" size={16} /><span>详情</span></div>
       )}
-      <div className={'trade-card hold-item stock-detail-card-hitarea v3-card' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
+      <div className={'trade-card hold-item stock-detail-card-hitarea decision-card' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
         data-code={h.code}
         role="button"
         tabIndex={0}
@@ -2991,7 +3182,7 @@ function HoldingItem({ h, quote: q }) {
 
       {/* 当前动作永远先于持仓快照与盘面证据。 */}
       <div className="card-decision-slot">
-        <V3DecisionSummary
+        <DecisionSummary
           advice={holdAdvice}
           holdingLots={liveQty}
           stopPrice={h.sl}
@@ -3284,14 +3475,14 @@ function HoldingItem({ h, quote: q }) {
                 </div>
               )}
         <div className="t-panel">
-          {/* 当前V3做T边界 */}
+          {/* 当前决策边界 */}
           <div className="t-ai">
             {!tAdvice && (
-              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="target" size={14} />查看当前V3做T边界</button>
+              <button className="t-ai-btn" onClick={() => askTAdvice()}><Icon name="target" size={14} />查看当前决策边界</button>
             )}
             {tAdvice && tAdvice.loading && (
               <div className="t-ai-loading-wrap">
-                <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || '正在读取当前V3决策…'}</div>
+                <div className="t-ai-loading"><Icon name="refresh" size={13} className="spin" />{tAdvice.phase || '正在读取当前系统决策…'}</div>
                 {visibleAiSources(searchConfig.enabled, tAdvice.sources).length > 0 && (
                   <div className="adv-sources">
                     {visibleAiSources(searchConfig.enabled, tAdvice.sources).map((s, i) => (
@@ -3337,7 +3528,7 @@ function HoldingItem({ h, quote: q }) {
                   <Reasoning text={tAdvice.result.reasoning} />
                 )}
                 {tAdvice.result.actionPlan && (
-                  <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">V3边界</span><HL text={tAdvice.result.actionPlan} /></div>
+                  <div className="t-ai-plan"><Icon name="target" size={13} /><span className="t-ai-plan-k">决策边界</span><HL text={tAdvice.result.actionPlan} /></div>
                 )}
                 {tAdvice.result.histPattern && (
                   <div className="t-ai-hist"><Icon name="history" size={12} /><span>历史规律</span><HL text={tAdvice.result.histPattern} /></div>

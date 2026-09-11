@@ -3,18 +3,18 @@ import {
   QUICK_ADVICE_TARGET_MS,
 } from './adviceGenerationPolicy.js'
 
-export const DEFAULT_V3_DECISION_CONCURRENCY = 4
-export const MAX_V3_DECISION_CONCURRENCY = 8
+export const DEFAULT_DECISION_CONCURRENCY = 4
+export const MAX_DECISION_CONCURRENCY = 8
 export const QUICK_ADVICE_BUDGET_MS = QUICK_ADVICE_TARGET_MS
 export const DEEP_ADVICE_BUDGET_MS = DEEP_ADVICE_TARGET_MS
 
-export function resolveV3DecisionConcurrency(value) {
+export function resolveDecisionConcurrency(value) {
   const parsed = Number(value)
   if (!Number.isFinite(parsed) || parsed < 1) {
-    return DEFAULT_V3_DECISION_CONCURRENCY
+    return DEFAULT_DECISION_CONCURRENCY
   }
   return Math.min(
-    MAX_V3_DECISION_CONCURRENCY,
+    MAX_DECISION_CONCURRENCY,
     Math.max(1, Math.floor(parsed)),
   )
 }
@@ -27,7 +27,7 @@ export function validateBatchMode(codes = [], deepMode = false) {
 
 export function batchConcurrency(endpointCount, deepMode = false) {
   void deepMode
-  return resolveV3DecisionConcurrency(endpointCount)
+  return resolveDecisionConcurrency(endpointCount)
 }
 
 export function adviceConcurrency(

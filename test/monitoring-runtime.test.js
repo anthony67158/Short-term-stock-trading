@@ -20,14 +20,14 @@ function account() {
       closed: [], plan: [], pushSubs: [{ endpoint: 'test' }],
       settings: { aiAutoAlert: true },
       advice: { '002475': { mode: 'hold_advice', advice: {
-        monitoringPlan: plan, decisionSource: { engine: 'V3' },
+        monitoringPlan: plan, decisionSource: { engine: 'MULTI_TASK' },
         decisionPlan: { decisionId: plan.planId },
       } } },
       alerts: [{
         id: 'monitor:decision-1:rule-1', code: '002475', name: '立讯精密',
         type: 'plan-condition', actCode: '002475', actKind: 'reduce',
         enabled: true, phase: 'armed', monitoringPlanId: plan.planId,
-        decisionEngine: 'V3', decisionId: plan.planId,
+        decisionEngine: 'MULTI_TASK', decisionId: plan.planId,
         validUntil: plan.validUntil, planRule: rule,
       }],
     },

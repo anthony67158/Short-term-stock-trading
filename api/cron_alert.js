@@ -30,6 +30,9 @@ import {
   projectAdviceAlerts,
 } from '../shared/adviceAlerts.js';
 import {
+  DECISION_ENGINE_ID,
+} from '../shared/decisionEngineSource.js';
+import {
   positionGateForAlert,
   requiresPositionCheck,
   retirePositionAlert,
@@ -133,7 +136,7 @@ function hit(a, q, now = Date.now()) {
     return price > 0 ? `现价 ${price}，开始退出前复核` : null;
   }
   if (
-    ['MULTI_TASK', 'V3'].includes(a.decisionEngine)
+    a.decisionEngine === DECISION_ENGINE_ID
     && !a.reviewOnly
     && a.type === 'price'
   ) return decisionActionAlertMessage(a, q);
@@ -327,7 +330,7 @@ function alertStamp(alert) {
   );
 }
 
-export function migrateV3ExitReviewAlerts(
+export function migrateDecisionExitReviewAlerts(
   data,
   now = Date.now(),
 ) {
@@ -457,7 +460,7 @@ async function processAccount(
     await evaluateAccountMonitoring(acc);
   }
   const data = acc.data || {};
-  const migratedExitReview = migrateV3ExitReviewAlerts(data);
+  const migratedExitReview = migrateDecisionExitReviewAlerts(data);
   const alerts = Array.isArray(data.alerts) ? data.alerts : [];
   const subs = Array.isArray(data.pushSubs) ? data.pushSubs : [];
   const adviceMap = (data.advice && typeof data.advice === 'object') ? data.advice : {};
@@ -1059,7 +1062,7 @@ export const __test = {
   describeAlert,
   hasJudgeBudget,
   hit,
-  migrateV3ExitReviewAlerts,
+  migrateDecisionExitReviewAlerts,
   persistProcessedAccount,
   positionContextOf,
   reviewPriceTriggerOutcome,

@@ -120,7 +120,7 @@ export default function AIAssistant({ snapshot }) {
   useEffect(() => {
     if (!intent) return
     if (intent === 'diagnose' && stock) {
-      ask(`分析一下${stock.name}(${stock.code})的资金、量价和消息证据，并说明哪些变化会影响当前V3判断`)
+      ask(`分析一下${stock.name}(${stock.code})的资金、量价和消息证据，并说明哪些变化会影响当前系统判断`)
     }
     aiStore.consumeIntent()
     // eslint-disable-next-line
@@ -319,7 +319,7 @@ export default function AIAssistant({ snapshot }) {
           {/* 快捷能力：都是自然语言问题，点了直接问 */}
           <div className="ai-quick">
             <button className="ai-chip" onClick={() => ask('复盘今日盘面：总结市场情绪、主线板块、证据分歧和明日风险')} disabled={loading}><Icon name="brain" size={13} /> 盘面复盘</button>
-            <button className="ai-chip" onClick={() => ask('解释今日大盘情绪、量能和资金环境，以及它们对当前V3决策的影响')} disabled={loading}><Icon name="gauge" size={13} /> 市场环境</button>
+            <button className="ai-chip" onClick={() => ask('解释今日大盘情绪、量能和资金环境，以及它们对当前系统决策的影响')} disabled={loading}><Icon name="gauge" size={13} /> 市场环境</button>
             <button className="ai-chip" onClick={() => ask('综合资金、涨停和异动，列出今日主要方向、代表股与证据缺口，不生成交易指令')} disabled={loading}><Icon name="target" size={13} /> 市场研究</button>
             <button className="ai-chip" onClick={() => ask('现在主力资金主要流向哪些方向？说明持续性证据和最强反方')} disabled={loading}><Icon name="fire" size={13} /> 资金方向</button>
             <button className="ai-chip" onClick={() => ask('今天哪些板块最强？说明龙头、扩散程度和退潮风险')} disabled={loading}><Icon name="layers" size={13} /> 板块研究</button>
@@ -330,7 +330,7 @@ export default function AIAssistant({ snapshot }) {
             {msgs.length === 0 && !loading && (
               <div className="ai-welcome">
                 <div className="ai-welcome-title">研究助手</div>
-                <div className="ai-welcome-sub">我会查询行情、资金、板块和新闻来解释证据；实际动作、价格和手数以页面当前V3决策为准。</div>
+                <div className="ai-welcome-sub">我会查询行情、资金、板块和新闻来解释证据；实际动作、价格和手数以页面当前系统决策为准。</div>
                 <div className="qa-presets qa-presets-welcome">
                   <button type="button" className="qa-preset" onClick={() => ask('分析一下寒武纪，资金面、基本面、消息面都看看')}>分析寒武纪</button>
                   <button type="button" className="qa-preset" onClick={() => ask('研究涨幅5%以内、量比大于2、主力净流入靠前的股票，并说明证据局限')}>条件研究</button>

@@ -29,7 +29,7 @@ export function isCurrentDecisionAlert(alert, entry, now = Date.now()) {
   const advice = entry?.advice || entry
   if (
     !isDecisionEngineAdvice(advice)
-    || ![DECISION_ENGINE_ID, 'V3'].includes(alert.decisionEngine)
+    || alert.decisionEngine !== DECISION_ENGINE_ID
   ) return false
   return alert.decisionId === advice.decisionPlan?.decisionId
     && Date.parse(alert.validUntil) > now
@@ -52,7 +52,7 @@ function decisionAlert(alert, advice) {
     validUntil: advice.decisionPlan.validUntil,
     actionSide: ['BUY', 'ADD'].includes(advice.decisionPlan.action) ? 'BUY' : 'SELL',
     timing: advice.actionPlan,
-    // An approved V3 action is a notification, not a second LLM decision.
+    // An approved decision action is a notification, not a second LLM decision.
     phase: alert.reviewOnly ? alert.phase : null,
   }
 }

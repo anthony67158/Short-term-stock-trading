@@ -89,5 +89,5 @@ test('开放助手不再生成新的交易提案', () => {
   assert.match(backend, /不得替代V3/)
   assert.doesNotMatch(frontend, /applyAssistantProposal/)
   assert.doesNotMatch(frontend, /交易提案/)
-  assert.match(frontend, /实际动作、价格和手数以页面当前V3决策为准/)
+  assert.match(frontend, /实际动作、价格和手数以页面当前系统决策为准/)
 })

@@ -58,10 +58,12 @@ test('移动端筛选保持单行横滑且胶囊不会穿到维度开关下方',
   )
 })
 
-test('持仓页删除一次性生成并保留持仓与待买机会筛选', () => {
+test('持仓页移除旧一次性生成并提供统一批量决策更新', () => {
   assert.doesNotMatch(planTab, /className="batch-scope-options"/)
   assert.doesNotMatch(planTab, /className="batch-filter-stack"/)
   assert.doesNotMatch(planTab, /一次性生成/)
+  assert.match(planTab, /function DecisionBatchControl/)
+  assert.match(planTab, /批量更新决策/)
   assert.match(planTab, /function HoldingList/)
   assert.match(planTab, /function PlanList/)
   assert.match(groupFilter, /pinnedOption = null/)
@@ -82,7 +84,8 @@ test('共享分组组件继续支持系统盯盘的概念和行业多选', () =>
 test('卡片最近生成时间展示相对新鲜度并按三档状态突出', () => {
   assert.match(planTab, /adviceRecency\(entry && entry\.at\)/)
   assert.match(planTab, /data-recency={recency\.tone}/)
-  assert.match(planTab, /<span>最近更新<\/span>/)
+  assert.match(planTab, /<span>决策更新<\/span>/)
+  assert.match(planTab, /<strong>\{label\}<\/strong>/)
   assert.match(styles, /\.advice-updated-at\[data-recency="fresh"\]/)
   assert.match(styles, /\.advice-updated-at\[data-recency="today"\]/)
   assert.match(styles, /\.advice-updated-at\[data-recency="older"\]/)
@@ -114,7 +117,7 @@ test('持仓总览位于当前持仓标题和筛选胶囊上方', () => {
   )
 })
 
-test('账户总览只保留系统盯盘授权并移除批量生成控制', () => {
+test('账户总览并列系统盯盘与批量决策更新控制', () => {
   const holdingSection = planTab.slice(planTab.indexOf('function HoldingList'))
   const overviewZone = holdingSection.indexOf('className="portfolio-overview-zone"')
   const overview = holdingSection.indexOf('<HoldOverview')
@@ -131,11 +134,20 @@ test('账户总览只保留系统盯盘授权并移除批量生成控制', () =>
     holdingSection.slice(controls, heading),
     /<AutoRefreshControl/,
   )
+  assert.match(
+    holdingSection.slice(controls, heading),
+    /<DecisionBatchControl quote=\{quote\} \/>/,
+  )
+  assert.match(
+    holdingSection.slice(controls, heading),
+    /<DecisionBatchProgress quote=\{quote\} \/>/,
+  )
   assert.doesNotMatch(holdingSection, /className="batch-bar"/)
-  assert.doesNotMatch(holdingSection, /className=\{'batch-prog'/)
-  assert.doesNotMatch(holdingHeader, /<AdvisorScore|<AutoRefreshControl|batch-entry/)
+  assert.match(planTab, /className=\{'batch-prog decision-batch-progress/)
+  assert.doesNotMatch(holdingHeader, /<AdvisorScore|<AutoRefreshControl|<DecisionBatchControl|batch-entry/)
   assert.match(styles, /\.portfolio-overview-zone\s*\{/)
   assert.match(styles, /\.portfolio-command-actions\s*\{/)
+  assert.match(styles, /\.decision-batch-progress\s*\{/)
 })
 
 test('桌面与移动端持仓标题和筛选轨道共用吸顶容器', () => {

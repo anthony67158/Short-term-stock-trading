@@ -3,7 +3,7 @@
 //   旧版:一次 FC 请求内【串行】生成指定 codes,进度写 batchProgress。任务不持久 → FC 崩/超时即丢,
 //         无状态/无重试/无取消,点两次起两份。
 //   新版:任务按角色沉到账号 data.jobs/reviewJobs(OSS 持久,见 _jobs.js),服务端为唯一权威源:
-//         · 主V3评估默认四路，review 使用独立四路容量；
+//         · 主决策评估默认四路，review 使用独立四路容量；
 //           同一协调器串行持久化，但两条任务lane可并行。
 //         · 断点续跑:running 但租约过期(FC 崩)= 孤儿 → 下次 drain 自动回收重跑。
 //         · 失败重试:失败回 queued 直到 maxAttempts。

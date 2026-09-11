@@ -27,7 +27,7 @@ test('日线模型明确拒绝把今日盘中价带冒充同日概率预测', ()
     /daily_model_has_no_intraday_remaining-session_label/,
   )
   assert.match(prompts, /禁止把盘中支撑压力或实时执行价带冒充同日模型预测/)
-  assert.match(prompts, /交易动作、价格、手数和风险只服从服务端V3决策/)
+  assert.match(prompts, /交易动作、价格、手数和风险只服从服务端系统决策/)
 })
 
 test('下一交易日量化结果贯穿军师载荷和进度事件', () => {

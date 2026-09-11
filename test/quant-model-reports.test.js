@@ -2,10 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import {
+  decisionWorkflowRun,
   dedupeQuantReports,
   formatQuantMetric,
   opportunityReportSnapshot,
-  v3WorkflowRun,
 } from '../shared/quantRetrainReport.js'
 import { listReports, readOpportunitySummary } from '../api/quant_report.js'
 
@@ -28,7 +28,7 @@ test('量化指标保留负值和零值，缺失值不冒充零', () => {
   }
 })
 
-test('当前V3状态使用真实训练时点且未知样本不补零', () => {
+test('当前决策模型状态使用真实训练时点且未知样本不补零', () => {
   const snapshot = opportunityReportSnapshot({
     generatedAt: 1788999769800,
     trainingGeneratedAt: 1788999640,
@@ -77,7 +77,7 @@ test('量化汇报按最新时间读取，并保留同一轮不同模型', async
   assert.equal(await readOpportunitySummary(async () => { throw new Error('offline') }), null)
 })
 
-test('V3无论训练成败都发布汇报，选择性上传后才确认发布', () => {
+test('决策模型无论训练成败都发布汇报，选择性上传后才确认发布', () => {
   const workflow = readFileSync('.github/workflows/daily-retrain.yml', 'utf8')
   const report = workflow.split('- name: Publish V3 result to in-app quant report')[1]?.split('\n      - name:')[0]
   assert.ok(report)
@@ -91,8 +91,8 @@ test('V3无论训练成败都发布汇报，选择性上传后才确认发布', 
   assert.match(workflow, /test_publish_model_retrain_report\.py/)
 })
 
-test('量化汇报用V3任务结果覆盖整条工作流的辅助任务失败', () => {
-  const run = v3WorkflowRun({
+test('量化汇报用决策任务结果覆盖整条工作流的辅助任务失败', () => {
+  const run = decisionWorkflowRun({
     current: null,
     latest: {
       runId: 34521836061,
@@ -114,8 +114,8 @@ test('量化汇报用V3任务结果覆盖整条工作流的辅助任务失败', 
   assert.equal(run.scope, 'opportunity-retrain')
 })
 
-test('V3已完成时不被仍在运行的辅助任务误报为训练中', () => {
-  const run = v3WorkflowRun({
+test('决策任务已完成时不被仍在运行的辅助任务误报为训练中', () => {
+  const run = decisionWorkflowRun({
     current: {
       runId: 42,
       runNumber: 37,

@@ -514,7 +514,7 @@ function AnalysisResult({ result }) {
           <DecisionPath nodes={displayResult.decisionNodes} />
           <EvidenceList evidence={displayResult.evidence} />
           <div className="portfolio-analysis-meta">
-            <span>{displayResult.meta?.model || 'V3决策'}</span>
+            <span>{displayResult.meta?.model || '系统决策'}</span>
             {displayResult.meta?.endpoint && <span>{displayResult.meta.endpoint}</span>}
             {displayResult.meta?.quantModelLabel && <span>{displayResult.meta.quantModelLabel}</span>}
             <span>{displayResult.generatedAt ? new Date(displayResult.generatedAt).toLocaleString('zh-CN') : ''}</span>

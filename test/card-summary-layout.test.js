@@ -23,17 +23,17 @@ const fixedCardMarker =
 const fixedCards = precision.slice(precision.indexOf(fixedCardMarker))
 
 test('持仓与自选卡直接展示核心摘要并保留详情入口', () => {
-  assert.equal((planTab.match(/<V3DecisionSummary/g) || []).length, 3)
+  assert.equal((planTab.match(/<DecisionSummary/g) || []).length, 3)
   assert.match(planTab, /openDetailFromCardEvent/)
-  assert.match(planTab, /v3DecisionPresentation/)
+  assert.match(planTab, /decisionPresentation/)
   assert.doesNotMatch(planTab, /CardAdviceDisclosure|embeddedFull/)
   assert.doesNotMatch(planTab, /useLayoutEffect/)
 })
 
-test('卡片当前动作由V3与账本止损共同投影而不读取旧军师', () => {
+test('卡片当前动作由系统决策与账本止损共同投影而不读取旧军师', () => {
   assert.match(
     planTab,
-    /const decisionView = v3DecisionPresentation/,
+    /const decisionView = decisionPresentation/,
   )
   assert.doesNotMatch(planTab, /TrackingRepairAction|repairTracking/)
   assert.doesNotMatch(planTab, /旧建议只有结论|生成可追踪建议/)
@@ -138,14 +138,14 @@ test('持仓和自选卡展示最近有效价但只用连续竞价价触发动�
   )
 })
 
-test('交易卡片保留稳定区域且V3空状态按内容收缩', () => {
+test('交易卡片保留稳定区域且决策空状态按内容收缩', () => {
   assert.match(
     planTab,
-    /'trade-card plan-cand stock-detail-card-hitarea v3-card'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
+    /'trade-card plan-cand stock-detail-card-hitarea decision-card'[\s\S]*?\(cardAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(
     planTab,
-    /'trade-card hold-item stock-detail-card-hitarea v3-card'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
+    /'trade-card hold-item stock-detail-card-hitarea decision-card'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(precision, new RegExp(fixedCardMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   assert.match(fixedCards, /\.hold-grid \.hold-head,[\s\S]*?\.plan-cand \.pc-top\s*{[^}]*height:\s*64px[^}]*max-height:\s*64px/s)
@@ -159,23 +159,23 @@ test('交易卡片保留稳定区域且V3空状态按内容收缩', () => {
   )
   assert.match(
     fixedCards,
-    /\.hold-grid \.hold-item\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*500px[^}]*max-height:\s*none/s,
+    /\.hold-grid \.hold-item\.decision-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*500px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,
-    /\.plan-cand\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*350px[^}]*max-height:\s*none/s,
+    /\.plan-cand\.decision-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*350px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,
-    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-grid \.hold-item\.v3-card,[\s\S]*?\.plan-cand\.v3-card\s*{[^}]*height:\s*100%[^}]*align-self:\s*stretch/s,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-grid \.hold-item\.decision-card,[\s\S]*?\.plan-cand\.decision-card\s*{[^}]*height:\s*100%[^}]*align-self:\s*stretch/s,
   )
   assert.match(
     fixedCards,
-    /\.trade-card\.v3-card \.v3-decision-summary\s*{[^}]*flex:\s*none/s,
+    /\.trade-card\.decision-card \.decision-summary\s*{[^}]*flex:\s*none/s,
   )
   assert.match(
     fixedCards,
-    /\.trade-card\.v3-card \.trade-card-review-slot:empty\s*{[^}]*display:\s*none/s,
+    /\.trade-card\.decision-card \.trade-card-review-slot:empty\s*{[^}]*display:\s*none/s,
   )
   assert.match(
     calmSurface,
@@ -449,7 +449,7 @@ test('策略摘要不使用悬浮预览且文字区域进入股票详情', () =>
 
 test('持仓卡先展示指令再展示仓位核心数据与次级盘面证据', () => {
   const holdStart = planTab.indexOf(
-    "<div className={'trade-card hold-item stock-detail-card-hitarea v3-card'",
+    "<div className={'trade-card hold-item stock-detail-card-hitarea decision-card'",
   )
   const holdEnd = planTab.indexOf(
     '{operationForm && (mobileOperations',
@@ -492,9 +492,9 @@ test('自选卡直接展示操作摘要并把概率依据移入详情', () => {
     (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
     0,
   )
-  assert.match(planTab, /<V3DecisionSummary advice=\{advice\} view=\{baseView\}/)
+  assert.match(planTab, /<DecisionSummary advice=\{advice\} view=\{baseView\}/)
   assert.doesNotMatch(planTab.slice(planTab.indexOf('function CandDecision')), /<AdaptiveValueStrip/)
-  assert.match(read('src/components/V3DecisionSummary.jsx'), /detailed &&[\s\S]*决策依据/)
+  assert.match(read('src/components/DecisionSummary.jsx'), /detailed &&[\s\S]*决策依据/)
 })
 
 test('个股详情展示最近收盘快照与近5日关键趋势', () => {
@@ -535,7 +535,7 @@ test('个股详情展示最近收盘快照与近5日关键趋势', () => {
 
 test('个股详情以决策优先并移除指标表格线', () => {
   const quoteIndex = stockDetail.indexOf('className="detail-quote"')
-  const formulaIndex = stockDetail.indexOf('<V3DecisionSummary')
+  const formulaIndex = stockDetail.indexOf('<DecisionSummary')
   const noteIndex = stockDetail.indexOf(
     'className="stock-note-anchor detail-note-section"',
   )
@@ -567,11 +567,11 @@ test('普通收藏先纳入作战且自主成交记录不冒充系统推荐', ()
   )
   assert.match(
     planTab,
-    /generation\?\.active \|\| enrolling[\s\S]*?正在更新决策[\s\S]*?!view\.waiting[\s\S]*?更新 V3 决策[\s\S]*?查看跟踪条件/s,
+    /generation\?\.active \|\| enrolling[\s\S]*?正在更新决策[\s\S]*?!view\.waiting[\s\S]*?更新决策[\s\S]*?查看跟踪条件/s,
   )
   assert.match(
     precision,
-    /\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/s,
+    /\.hold-item > \.pi-actions,[\s\S]*?\.plan-cand \.pc-actions\.with-review\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+var\(--control-size\)[^}]*gap:\s*var\(--space-2xs\)/s,
   )
 })
 
@@ -598,5 +598,9 @@ test('持仓卡使用紧凑决策区并统一操作与工具列', () => {
   assert.match(
     precision,
     /\.pi-card-tools\s*{[^}]*width:\s*40px/s,
+  )
+  assert.match(
+    planTab,
+    /<summary aria-label=\{`\$\{q\?\.name \|\| p\.name\}更多操作`\} title="更多操作">\s*<Icon name="edit" size=\{13\} \/>\s*<\/summary>/s,
   )
 })

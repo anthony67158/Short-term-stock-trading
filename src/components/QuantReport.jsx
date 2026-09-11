@@ -51,13 +51,14 @@ function formatDuration(seconds) {
 }
 
 function WorkflowStatus({ workflow }) {
-  const run = workflow?.v3 || workflow?.current || workflow?.latest
+  const run =
+    workflow?.decision || workflow?.current || workflow?.latest
   if (!run) {
     return (
       <section className="qrp-runtime qrp-runtime-neutral">
         <div className="qrp-runtime-title">
           <Icon name="activity" size={15} />
-          <span>V3每日训练任务</span>
+          <span>决策模型每日训练任务</span>
           <b>状态暂不可用</b>
         </div>
       </section>
@@ -68,7 +69,7 @@ function WorkflowStatus({ workflow }) {
     <section className={`qrp-runtime qrp-runtime-${meta.tone}`}>
       <div className="qrp-runtime-title">
         <Icon name={run.state === 'running' ? 'refresh' : 'activity'} size={15} className={run.state === 'running' ? 'spin' : ''} />
-        <span>V3每日训练任务</span>
+        <span>决策模型每日训练任务</span>
         <b>{meta.label}</b>
       </div>
       <div className="qrp-runtime-facts">
@@ -96,9 +97,9 @@ function OpportunityStatus({ value }) {
     ? lastRelease.releaseMode === 'PARTIAL' ? '选择性晋级' : '整包晋级'
     : '维持现役'
   return (
-    <section className="qrp-opportunity" aria-label="V3 当前状态">
-      <div className="qrp-section-head"><h3>V3 当前状态</h3><span>{value.label}</span></div>
-      <p className="qrp-conclusion">{value.directUse ? '当前V3已启用，只有通过冠军对照与整体风险验证的新组合才会替换它' : value.productionEligible ? '生产模型已就绪' : '尚未切换生产模型'}</p>
+    <section className="qrp-opportunity" aria-label="决策模型当前状态">
+      <div className="qrp-section-head"><h3>决策模型当前状态</h3><span>{value.label}</span></div>
+      <p className="qrp-conclusion">{value.directUse ? '当前生产模型已启用，只有通过冠军对照与整体风险验证的新组合才会替换它' : value.productionEligible ? '生产模型已就绪' : '尚未切换生产模型'}</p>
       <dl className="qrp-stats">
         <div><dt>生产版本</dt><dd>{value.modelVersion || '未提供'}</dd></div>
         <div><dt>成熟样本</dt><dd>{count(value.samples)}</dd></div>
@@ -274,9 +275,9 @@ export default function QuantReport() {
 
   return (
     <div className="modal-mask qrp-mask" onClick={onClose} onKeyDown={handleKey}>
-      <div ref={panel} className="qrp-panel" role="dialog" aria-modal="true" aria-label="V3每日训练与发布" onClick={(e) => e.stopPropagation()}>
+      <div ref={panel} className="qrp-panel" role="dialog" aria-modal="true" aria-label="决策模型每日训练与发布" onClick={(e) => e.stopPropagation()}>
         <div className="qrp-bar">
-          <h2 className="qrp-heading"><Icon name="gauge" size={18} /> V3 每日训练与发布</h2>
+          <h2 className="qrp-heading"><Icon name="gauge" size={18} /> 决策模型每日训练与发布</h2>
           <div className="qrp-actions">
             <button className="qrp-close" title="刷新汇报" aria-label="刷新汇报" disabled={busy} aria-busy={loading} onClick={() => quantReportStore.load({ force: true })}>
               <Icon name="refresh" size={16} />
@@ -284,14 +285,14 @@ export default function QuantReport() {
             <button className="qrp-close" title="清空全部汇报" aria-label="清空全部汇报" disabled={busy || !reports.length} onClick={() => setConfirmClear(true)}>
               <Icon name="trash" size={16} />
             </button>
-            <button ref={closeButton} className="qrp-close" onClick={onClose} title="关闭V3训练发布" aria-label="关闭V3训练发布"><Icon name="close" size={16} /></button>
+            <button ref={closeButton} className="qrp-close" onClick={onClose} title="关闭决策模型训练发布" aria-label="关闭决策模型训练发布"><Icon name="close" size={16} /></button>
           </div>
         </div>
 
         <div className="qrp-scroll">
           {error && <div className="qrp-error" role="alert">{error}</div>}
           {confirmClear && <section className="qrp-confirm" aria-label="清空汇报确认">
-            <p>清空全部 V3 训练与发布历史？此操作无法撤销。</p>
+            <p>清空全部决策模型训练与发布历史？此操作无法撤销。</p>
             <div>
               <button className="qrp-btn" disabled={busy} onClick={() => setConfirmClear(false)}>取消</button>
               <button className="qrp-btn" disabled={busy} onClick={async () => {
@@ -305,7 +306,7 @@ export default function QuantReport() {
           <WorkflowStatus workflow={workflow} />
           <OpportunityStatus value={opportunity} />
           {loading && reports.length === 0 ? (
-            <div className="qrp-empty"><Icon name="refresh" size={16} className="spin" /><span>正在加载 V3 训练与发布记录…</span></div>
+            <div className="qrp-empty"><Icon name="refresh" size={16} className="spin" /><span>正在加载决策模型训练与发布记录…</span></div>
           ) : error && reports.length === 0 ? (
             <div className="qrp-empty">
               <button className="qrp-btn" disabled={busy} onClick={() => quantReportStore.load({ force: true })}><Icon name="refresh" size={14} />重试</button>
@@ -313,7 +314,7 @@ export default function QuantReport() {
           ) : visibleReports.length === 0 ? (
             <div className="qrp-empty">
               <Icon name="gauge" size={22} />
-              <span>暂无 V3 训练与发布记录</span>
+              <span>暂无决策模型训练与发布记录</span>
             </div>
           ) : (
             <>

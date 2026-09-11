@@ -143,6 +143,26 @@ test('全站同组按钮等高且纯图标按钮保持正方形', () => {
     precision,
     /@media \(max-width:\s*720px\)\s*{[\s\S]*?\.plan-cand \.pc-actions > button\s*{[^}]*height:\s*var\(--touch-target\)/s,
   )
+  assert.match(
+    precision,
+    /Final control geometry:[\s\S]*?button\.btn,[\s\S]*?align-items:\s*center[^}]*justify-content:\s*center[^}]*min-height:\s*var\(--control-size\)/s,
+  )
+  assert.match(
+    precision,
+    /\.tabs > button\.tab\s*{[^}]*height:\s*var\(--control-size-compact\)[^}]*min-height:\s*var\(--control-size-compact\)/s,
+  )
+  assert.match(
+    precision,
+    /\.hub-tabs > button\.hub-tab\s*{[^}]*height:\s*var\(--control-size\)[^}]*min-height:\s*var\(--control-size\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*720px\)\s*{[\s\S]*?button\.btn,[\s\S]*?min-height:\s*var\(--touch-target\)[\s\S]*?\.hub-tabs > button\.hub-tab\s*{[^}]*height:\s*var\(--touch-target\)/s,
+  )
+  assert.match(
+    precision,
+    /@media \(max-width:\s*380px\)\s*{[\s\S]*?\.ss-input > button\.ss-btn\s*{[^}]*width:\s*var\(--touch-target\)[^}]*min-width:\s*var\(--touch-target\)[\s\S]*?\.ss-btn \.ss-btn-txt\s*{[^}]*display:\s*none/s,
+  )
 })
 
 test('全站面板、指标、表格与反馈状态使用统一视觉语法', () => {
@@ -263,16 +283,16 @@ test('持仓与自选卡片共用真实股票题材标签且移动端可换行',
 test('持仓与自选卡片使用独立身份行且决策优先于次级指标', () => {
   assert.match(
     planTab,
-    /className=\{'trade-card hold-item stock-detail-card-hitarea v3-card'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
+    /className=\{'trade-card hold-item stock-detail-card-hitarea decision-card'[\s\S]*?\(holdAdvice \? ' has-advice' : ' no-advice'\)/,
   )
   assert.match(planTab, /className="stock-card-metrics hold-card-metrics"/)
-  assert.match(planTab, /className=\{'trade-card plan-cand stock-detail-card-hitarea v3-card'/)
+  assert.match(planTab, /className=\{'trade-card plan-cand stock-detail-card-hitarea decision-card'/)
   assert.doesNotMatch(planTab, /className="stock-card-metrics pc-metrics"/)
   assert.equal(
     (planTab.match(/<MarketPulse quote=\{q\}/g) || []).length,
     0,
   )
-  assert.match(planTab, /<V3DecisionSummary/)
+  assert.match(planTab, /<DecisionSummary/)
   assert.match(planTab, /className={'pc-pin'/)
   assert.match(
     precision,
@@ -568,11 +588,11 @@ test('持仓区共用页面边线、筛选栏留出安全区且卡片展示建�
   assert.match(precision, /\.hold-grid\s*{[^}]*align-items:\s*stretch/s)
   assert.match(
     precision,
-    /\.hold-grid:has\(\.v3-card\),[\s\S]*?\.plan-cand-grid:has\(\.v3-card\)\s*{[^}]*align-items:\s*start/s,
+    /\.hold-grid:has\(\.decision-card\),[\s\S]*?\.plan-cand-grid:has\(\.decision-card\)\s*{[^}]*align-items:\s*start/s,
   )
   assert.match(
     precision,
-    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-grid:has\(\.v3-card\),[\s\S]*?\.plan-cand-grid:has\(\.v3-card\)\s*{[^}]*align-items:\s*stretch/s,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-grid:has\(\.decision-card\),[\s\S]*?\.plan-cand-grid:has\(\.decision-card\)\s*{[^}]*align-items:\s*stretch/s,
   )
   assert.match(
     precision,
@@ -716,22 +736,22 @@ test('持仓页大型展开层统一挂到顶层Portal避免被吸顶区遮盖',
   )
 })
 
-test('V3持仓与自选卡回收空槽且保留固定功能区域', () => {
+test('系统决策持仓与自选卡回收空槽且保留固定功能区域', () => {
   assert.match(
     fixedCards,
-    /\.hold-grid \.hold-item\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*500px[^}]*max-height:\s*none/s,
+    /\.hold-grid \.hold-item\.decision-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*500px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,
-    /\.plan-cand\.v3-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*350px[^}]*max-height:\s*none/s,
+    /\.plan-cand\.decision-card\s*{[^}]*height:\s*auto[^}]*min-height:\s*350px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,
-    /\.hold-item\.v3-card \.card-decision-slot\s*{[^}]*height:\s*auto[^}]*min-height:\s*230px[^}]*max-height:\s*none/s,
+    /\.hold-item\.decision-card \.card-decision-slot\s*{[^}]*height:\s*auto[^}]*min-height:\s*230px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,
-    /\.plan-cand\.v3-card \.card-decision-slot\s*{[^}]*height:\s*auto[^}]*min-height:\s*180px[^}]*max-height:\s*none/s,
+    /\.plan-cand\.decision-card \.card-decision-slot\s*{[^}]*height:\s*auto[^}]*min-height:\s*180px[^}]*max-height:\s*none/s,
   )
   assert.match(
     fixedCards,
@@ -759,7 +779,7 @@ test('V3持仓与自选卡回收空槽且保留固定功能区域', () => {
   )
   assert.match(
     fixedCards,
-    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-item\.v3-card > \.pi-actions,[\s\S]*?\.plan-cand\.v3-card \.pc-actions\s*{[^}]*margin-top:\s*auto/s,
+    /@media \(min-width:\s*721px\)\s*{[\s\S]*?\.hold-item\.decision-card > \.pi-actions,[\s\S]*?\.plan-cand\.decision-card \.pc-actions\s*{[^}]*margin-top:\s*auto/s,
   )
 })
 

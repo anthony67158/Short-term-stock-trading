@@ -571,7 +571,7 @@ test('非硬止损V3清仓先观察并重评而不是直接推送卖出', () => 
     stopPrice: 48.85,
     opQty: '清仓1手',
     decisionSource: {
-      engine: 'V3',
+      engine: 'MULTI_TASK',
       state: 'READY',
       hardProtection: false,
     },

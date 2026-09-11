@@ -35,7 +35,7 @@ export function createQuantReportStore({ fetcher = globalThis.fetch, timeoutMs =
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, id }),
       })
-      state.reports = action === 'clear_v3'
+      state.reports = action === 'clear_decision'
         ? []
         : state.reports.filter((row) => row.id !== id)
       return true
@@ -72,7 +72,7 @@ export function createQuantReportStore({ fetcher = globalThis.fetch, timeoutMs =
       }
     },
     remove(id) { return mutate('delete', id) },
-    clearAll() { return mutate('clear_v3') },
+    clearAll() { return mutate('clear_decision') },
   }
 }
 

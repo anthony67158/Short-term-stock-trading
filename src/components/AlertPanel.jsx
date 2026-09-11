@@ -141,7 +141,7 @@ export default function AlertPanel({ interval }) {
               {autoAlerts.length > 0 && (
                 <div className="alert-group">
                   <div className="alert-group-head">
-                    <span className="sub-name">自动预警 · {autoAlerts.length} 条（随V3决策维护）</span>
+                    <span className="sub-name">自动预警 · {autoAlerts.length} 条（随系统决策维护）</span>
                     <button className="btn tiny" onClick={() => setDelBatch({ ids: autoAlerts.map((a) => a.id), label: `全部 ${autoAlerts.length} 条自动预警` })}>
                       <Icon name="trash" size={11} /> 全部删除
                     </button>

@@ -25,11 +25,11 @@ const plan = {
     state: 'READY', serverVerified: true, productionEligible: true,
     shadowOnly: false, pFill: 0.8, pWinGivenFill: 0.6,
     expectedNetR: 0.3, netRLowerBound: -0.8, expectedShortfall10: -1.2,
-    modelVersion: 'test-v3',
+    modelVersion: 'test-decision-model',
   },
 }
 
-test('V3选定动作不接受LLM手数或结论', () => {
+test('系统选定动作不接受LLM手数或结论', () => {
   const first = buildDecisionAction({ payload, plans: [plan], now: 1 })
   const second = buildDecisionAction({
     payload: { ...payload, previousAdvice: { action: '清仓', planQty: 99 } },
@@ -91,7 +91,7 @@ test('模块化引擎使用统一动作价值管理持仓而不调用旧加权�
   )
 })
 
-test('持仓V3为正时保留当前仓位并生成单一路径加仓观察价', () => {
+test('持仓价值为正时保留当前仓位并生成单一路径加仓观察价', () => {
   const held = {
     ...payload,
     holdQty: 2,
@@ -124,7 +124,7 @@ test('持仓V3为正时保留当前仓位并生成单一路径加仓观察价', 
   assert.equal(result.holdingAddPlan.plannedAction, 'PROBE_ADD')
 })
 
-test('持仓加仓观察价复核通过后V3输出ADD请求', () => {
+test('持仓加仓观察价复核通过后系统输出ADD请求', () => {
   const result = buildDecisionAction({
     payload: {
       ...payload,
@@ -150,7 +150,7 @@ test('持仓加仓观察价复核通过后V3输出ADD请求', () => {
   assert.match(result.actionPlan, /加仓/)
 })
 
-test('完整V3评估在模型未就绪时独立返回明确状态与零LLM调用', async () => {
+test('完整决策评估在模型未就绪时独立返回明确状态与零LLM调用', async () => {
   let calls = 0
   const result = await evaluateDecision({
     code: '600001',
@@ -187,7 +187,7 @@ function scenario(overrides = {}) {
   }
 }
 
-test('V3完整编译保留同一路径价格与概率，保存恢复不依赖LLM', async () => {
+test('系统完整编译保留同一路径价格与概率，保存恢复不依赖LLM', async () => {
   const result = await evaluateDecision(scenario())
   const decision = result.result.decisionPlan
   assert.equal(decision.action, 'BUY')
@@ -204,7 +204,7 @@ test('V3完整编译保留同一路径价格与概率，保存恢复不依赖LLM
   assert.equal(adviceCompleteness(restored.advice, result.mode).complete, true)
 })
 
-test('持仓V3初评生成加仓观察价并保留账户核定预算', async () => {
+test('持仓初评生成加仓观察价并保留账户核定预算', async () => {
   const result = await evaluateDecision(scenario({
     book: {
       account: { totalAssets: 100000, cash: 60000 },
@@ -280,7 +280,7 @@ test('持仓V3初评生成加仓观察价并保留账户核定预算', async () 
   assert.equal(blocked.result.breakoutWatchPrice, null)
 })
 
-test('持仓加仓到价后由V3和账户风控共同核定手数', async () => {
+test('持仓加仓到价后由决策模型和账户风控共同核定手数', async () => {
   const addEvent = {
     kind: 'price-review',
     reviewMode: 'ENTRY_CONFIRMATION',
@@ -359,7 +359,7 @@ test('单股直接评估使用训练集已有的探索召回语义', async () =>
   ))
 })
 
-test('V3结果固化本次使用的技术、五日资金和板块证据', async () => {
+test('决策结果固化本次使用的技术、五日资金和板块证据', async () => {
   const result = await evaluateDecision(scenario({
     trends: Array.from({ length: 6 }, (_, index) => ({
       time: `10:${String(index).padStart(2, '0')}`,
@@ -433,7 +433,7 @@ test('触发后路径特征只在复核事件中生成', async () => {
   )
 })
 
-test('预留买入现金、单票预留和模型尾损均约束V3手数', async () => {
+test('预留买入现金、单票预留和模型尾损均约束决策手数', async () => {
   const input = scenario()
   const normal = await evaluateDecision(input)
   const pending = await evaluateDecision({
@@ -454,7 +454,7 @@ test('预留买入现金、单票预留和模型尾损均约束V3手数', async 
   assert.ok(stressed.result.decisionPlan.quantity.lots < normal.result.decisionPlan.quantity.lots)
 })
 
-test('过时报价和缺失资金不产生V3买入指令', async () => {
+test('过时报价和缺失资金不产生买入指令', async () => {
   const stale = await evaluateDecision(scenario({
     quotes: [{ code: '600001', price: 10, isLivePrice: true, tradeDate: '2026-09-09' }],
   }))
@@ -478,7 +478,7 @@ test('模型缺失及资金故障不能阻断持仓硬止损', async () => {
   assert.equal(result.meta.llmCalls, 0)
 })
 
-test('其他持仓风险不完整不阻断V3负期望仓位退出', async () => {
+test('其他持仓风险不完整不阻断负期望仓位退出', async () => {
   const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [], holding: [
       { code: '600001', qty: 2, buyPrice: 10, sl: 9, buyAt: now - 86400000 },
@@ -493,7 +493,7 @@ test('其他持仓风险不完整不阻断V3负期望仓位退出', async () => 
   assert.equal(result.result.decisionSource.hardProtection, false)
 })
 
-test('只有真实触及账本止损才允许V3退出直接进入可执行态', async () => {
+test('只有真实触及账本止损才允许退出直接进入可执行态', async () => {
   const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [], holding: [
       { code: '600001', qty: 2, buyPrice: 10, sl: 10.1, buyAt: now - 86400000 },
@@ -509,7 +509,7 @@ test('只有真实触及账本止损才允许V3退出直接进入可执行态', 
   assert.equal(result.result.decisionSource.hardProtection, true)
 })
 
-test('退出前复核用最新V3结果撤销反弹后的旧清仓或确认新价退出', async () => {
+test('退出前复核用最新模型结果撤销反弹后的旧清仓或确认新价退出', async () => {
   const holdingBook = {
     account: { cash: 80000 },
     closed: [],
@@ -599,10 +599,10 @@ test('退出前复核用最新V3结果撤销反弹后的旧清仓或确认新价
   assert.equal(confirmedExit.result.decisionPlan.prices.reference, 53.9)
 })
 
-test('V3换版期间不得混用三条路径的模型概率', () => {
+test('模型换版期间不得混用三条路径的模型概率', () => {
   const result = buildDecisionAction({ payload, plans: [plan, {
     ...plan, route: 'PULLBACK',
-    opportunityScore: { ...plan.opportunityScore, modelVersion: 'different-v3' },
+    opportunityScore: { ...plan.opportunityScore, modelVersion: 'different-model' },
   }] })
   assert.equal(result.selectedDecisionPlan, null)
   assert.equal(result.planQty, 0)
@@ -634,7 +634,7 @@ test('单股入口和任务worker的决策主链不调用LLM', () => {
   assert.doesNotMatch(worker, /genOne\(|callChat/)
 })
 
-test('V3可执行提醒无需LLM二次裁决且过期或换版即失效', async () => {
+test('可执行提醒无需LLM二次裁决且过期或换版即失效', async () => {
   const result = await evaluateDecision(scenario())
   const data = { holding: [], plan: [{ code: '600001' }], alerts: [], settings: {} }
   projectAdviceAlerts(data, '600001', result.result, { now, requirePriceContract: true })
@@ -646,7 +646,7 @@ test('V3可执行提醒无需LLM二次裁决且过期或换版即失效', async 
   assert.equal(decisionActionAlertMessage(alert, { price: 8 }), null)
   assert.equal(isCurrentDecisionAlert(alert, result.result, now), true)
   assert.equal(isCurrentDecisionAlert(alert, result.result, now + 86400000), false)
-  assert.equal(isCurrentDecisionAlert(alert, { decisionSource: { engine: 'V3' },
+  assert.equal(isCurrentDecisionAlert(alert, { decisionSource: { engine: 'MULTI_TASK' },
     decisionPlan: { decisionId: 'changed' } }, now), false)
   assert.equal(isCurrentDecisionAlert({ candCode: '600001' }, {}, now), false)
   assert.equal(isCurrentDecisionAlert({ code: '600001', type: 'price' }, {}, now), true)

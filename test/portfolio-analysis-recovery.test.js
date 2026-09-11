@@ -75,7 +75,7 @@ test('组合解释只调用一次explain且强制关闭深度思考', async () =
   const stub = chatResult(JSON.stringify({
     summary: '当前维持原仓位。',
     counterCase: '市场可能继续转弱。',
-    invalidation: 'V3决策或账户事实变化后重评。',
+    invalidation: '系统决策或账户事实变化后重评。',
     evidenceGap: '无',
   }))
   const result = await generatePortfolioExplanation(
@@ -103,7 +103,7 @@ test('组合解释越权输出动作字段时拒绝且不修改V3执行单', asy
   const stub = chatResult(JSON.stringify({
     summary: '当前维持原仓位。',
     counterCase: '市场可能继续转弱。',
-    invalidation: 'V3决策或账户事实变化后重评。',
+    invalidation: '系统决策或账户事实变化后重评。',
     evidenceGap: '无',
     action: 'SELL',
   }))

@@ -47,6 +47,6 @@ test('日线辅助模型在收盘后优先提供次日预测', () => {
   assert.match(prompt, /收盘后\/盘前.*次日预测.*主依据/)
   assert.match(prompt, /5日预测.*辅助/)
   assert.match(prompt, /quantNote.*49%.*-0.36%.*49.17.*58.08/)
-  assert.match(prompt, /交易动作、价格、手数和风险只服从服务端V3决策/)
+  assert.match(prompt, /交易动作、价格、手数和风险只服从服务端系统决策/)
   assert.doesNotMatch(prompt, /Transformer|V2\.1|V2\.0/)
 })

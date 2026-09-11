@@ -5,17 +5,17 @@ import {
   normalizeRetrainRun,
   opportunityReportSnapshot,
   quantReportModel,
-  v3WorkflowRun,
+  decisionWorkflowRun,
 } from '../shared/quantRetrainReport.js';
 
-// ============ V3 每日训练与发布台账（阿里云 OSS 持久化）============
-// 每轮 V3 训练完成后写入冠军、挑战者、组成部分选择、整体门禁和部署结果。
+// ============ 决策模型每日训练与发布台账（阿里云 OSS 持久化）============
+// 每轮训练完成后写入冠军、挑战者、组成部分选择、整体门禁和部署结果。
 // 历史个股/板块报告只读兼容，不再进入量化汇报主视图。
 //
 //   GET  /api/quant_report[?limit=50]        → { ok, reports:[{id,at,decision,title,body,...}] }
 //   POST /api/quant_report { action:'append', title, body, decision?, meta? }  ← 定时任务调用
 //   POST /api/quant_report { action:'delete', id }     单条删除(id = pathname)
-//   POST /api/quant_report { action:'clear_v3' }       清空V3记录
+//   POST /api/quant_report { action:'clear_decision' } 清空决策模型记录
 //
 // 存储：每条一个 blob，pathname = quantreport/<ts>.json，读取取全部按时间倒序。
 
@@ -132,7 +132,7 @@ export default async function handler(req, res) {
         reports,
         workflow: {
           ...workflow,
-          v3: v3WorkflowRun(workflow, reports),
+          decision: decisionWorkflowRun(workflow, reports),
         },
         opportunity,
       });
@@ -185,7 +185,7 @@ export default async function handler(req, res) {
         return ok(res, { ok: true });
       }
 
-      if (action === 'clear_v3') {
+      if (action === 'clear_decision') {
         const { blobs } = await list({ prefix: PREFIX, limit: 10000 });
         for (const blob of (blobs || [])) {
           const record = await readJson(blob);

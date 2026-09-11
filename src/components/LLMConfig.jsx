@@ -12,7 +12,7 @@ const ROLE_ORDER = [
 ]
 
 const ROLE_META = {
-  explain: { icon: 'spark', label: 'V3决策与组合解释', badge: '2 路并行' },
+  explain: { icon: 'spark', label: '决策与组合解释', badge: '2 路并行' },
   assistant: { icon: 'brain', label: '智能体助手', badge: '工具调用' },
   daily: { icon: 'history', label: '策略日报', badge: '日报' },
   sector: { icon: 'chart', label: '板块前瞻', badge: '板块' },

@@ -39,7 +39,7 @@ export default function HoldingPlanDialog({
     : manualFields > 0
       ? '部分手动调整'
       : aiPlan
-        ? '随V3决策更新'
+        ? '随系统决策更新'
         : '规则计划'
   const titleId = `holding-plan-title-${holding.id}`
 

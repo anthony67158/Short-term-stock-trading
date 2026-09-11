@@ -32,7 +32,7 @@ book.settings = {
 }
 const values = [
   ['000001', '平安银行', 11.7, 'EXIT', 10, 'READY'],
-  ['600036', '招商银行', 41, 'HOLD', 0, 'READY'],
+  ['600036', '招商银行', 41, 'ADD', 1, 'READY'],
   ['300750', '宁德时代', 336, 'HOLD', 0, 'MODEL_NOT_READY'],
   ['002594', '比亚迪', 86, 'WATCH', 0, 'READY'],
   ['688981', '中芯国际', 120, 'BUY', 1, 'READY'],
@@ -69,20 +69,22 @@ for (const [code, name, price, action, lots, state] of values) {
   book.advice[code] = {
     mode, at: now, cachedAt: now,
     advice: {
-      name, action: { EXIT: '清仓', HOLD: '持有', BUY: '买入', WATCH: '观望' }[action],
+      name, action: { EXIT: '清仓', ADD: '加仓', HOLD: '持有', BUY: '买入', WATCH: '观望' }[action],
       title: '本地测试决策',
       actionPlan: action === 'EXIT' ? '卖出可卖10手并记录成交'
-        : action === 'BUY' ? '买入1手，成交后记录' : '本次不加仓、不减仓',
-      opQty: action === 'EXIT' ? '清仓10手' : null,
+        : action === 'ADD' ? '加仓1手，成交后记录'
+          : action === 'BUY' ? '买入1手，成交后记录' : '本次不加仓、不减仓',
+      opQty: action === 'EXIT' ? '清仓10手' : action === 'ADD' ? '加仓1手' : null,
       planQty: lots,
       buyPrice: action === 'BUY' ? price : null,
+      addPrice: action === 'ADD' ? price : null,
       reducePrice: action === 'EXIT' ? price : null,
       stopPrice: +(price * 0.96).toFixed(2), targetPrice: +(price * 1.06).toFixed(2),
       pullbackWatchPrice: code === '002594' ? 84 : null,
-      decisionSource: { engine: 'V3', state, evaluatedAt: now, modelVersion: 'LOCAL_TEST_DOUBLE' },
+      decisionSource: { engine: 'MULTI_TASK', state, evaluatedAt: now, modelVersion: 'LOCAL_TEST_DOUBLE' },
       decisionPlan: {
         schemaVersion: 'decision-plan.v2', decisionId: `test-${code}`, mode,
-        action, actionability: ['BUY', 'EXIT'].includes(action) ? 'READY' : 'WATCH',
+        action, actionability: ['BUY', 'ADD', 'EXIT'].includes(action) ? 'READY' : 'WATCH',
         quantity: { lots, holdingLots: holding?.qty || 0 },
         prices: { reference: price, stop: price * 0.96, target: price * 1.06 },
         validUntil: new Date(now + 3600000).toISOString(),
@@ -95,15 +97,15 @@ for (const [code, name, price, action, lots, state] of values) {
       futurePlan: '按价格与风险条件管理',
       ...(code === '600036'
         ? {
-            v3Explanation: {
-              schemaVersion: 'v3-explanation.v2',
+            decisionExplanation: {
+              schemaVersion: 'decision-explanation.v1',
               status: 'ready',
               decisionId: `test-${code}`,
               model: 'LOCAL_EXPLAIN_DOUBLE',
               generatedAt: now,
               summary: '当前持有路径的费后价值高于立即减仓。',
               counterCase: '资金转弱时持有优势可能消失。',
-              invalidation: '价格或账户事实变化后重新运行V3。',
+              invalidation: '价格或账户事实变化后重新运行系统决策。',
               evidenceGap: '缺少真实盘中逐笔成交。',
             },
           }
@@ -134,4 +136,24 @@ window.fetch = async (input, options) => {
   return new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
 }
 planStore.setData(book)
+const { applyCloudBatch } = await import('../../src/adviceBatch.js')
+applyCloudBatch({
+  running: false,
+  total: 1,
+  done: 1,
+  ok: 1,
+  fail: 0,
+  skipped: 0,
+  batchId: 'local-completed-batch',
+  items: [{
+    code: '002594',
+    name: '比亚迪',
+    status: 'ok',
+  }],
+  startedAt: now - 20_000,
+  finishedAt: now,
+  at: now,
+  source: 'server',
+  concurrency: 4,
+}, true)
 ReactDOM.createRoot(document.getElementById('root')).render(<MainApp />)

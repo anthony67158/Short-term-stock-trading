@@ -76,7 +76,7 @@ test('持仓模型失败或自动切换时展示真实恢复状态', () => {
 })
 
 test('LLM配置页由解释角色承载持仓说明并保存', () => {
-  assert.match(config, /explain:\s*\{[^}]*label:\s*'V3决策与组合解释'/)
+  assert.match(config, /explain:\s*\{[^}]*label:\s*'决策与组合解释'/)
   assert.match(config, /roleEndpoints:\s*payload/)
   assert.match(apiConfig, /roleEndpoints:\s*body/)
   assert.doesNotMatch(config, /主端点最大在途/)

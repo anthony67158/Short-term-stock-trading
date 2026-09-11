@@ -6,7 +6,10 @@ import StockTags from './StockTags'
 import SelectionOrigin from './SelectionOrigin'
 import { StockNoteEditor } from './StockNote'
 import AdviceGenerationStatus from './AdviceGenerationStatus'
-import V3DecisionSummary from './V3DecisionSummary'
+import DecisionSummary from './DecisionSummary'
+import {
+  isDecisionEngineAdvice,
+} from '../../shared/decisionEngineSource.js'
 import { usePolling } from '../hooks'
 import { fmtPct, pctClass, fmtRaw, fmtNum } from '../format'
 import { api } from '../apiBase'
@@ -439,7 +442,7 @@ export default function StockDetail({ stock, onClose }) {
     const priceHint = (overview && overview.price) || myHold?.cost || null
     // ★关键★ 生成流程交给模块级后台 runner：关闭弹窗也照跑完、落缓存、记决策；
     // 本组件仅订阅 runner + 缓存来展示进度/结果（见下方 useEffect）。
-    // 经门控层触发:V3容量已满 → 展示正在评估清单;该股已在生成 → 复用进度不重复触发。
+    // 经门控层触发:决策容量已满 → 展示正在评估清单;该股已在生成 → 复用进度不重复触发。
     const r = await tryStartAdvice({
       code: stock.code,
       mode: myHold ? 'hold_advice' : 'buy_advice',
@@ -481,7 +484,7 @@ export default function StockDetail({ stock, onClose }) {
     }
   }
   const [showAlert, setShowAlert] = useState(false) // 设预警表单开关
-  // V3容量已满时订阅本地/云端进度；有任务完成后自动关闭弹窗。
+  // 决策容量已满时订阅本地/云端进度；有任务完成后自动关闭弹窗。
   useEffect(() => {
     if (!busyModal) return
     const refresh = () => {
@@ -1095,7 +1098,7 @@ export default function StockDetail({ stock, onClose }) {
                   <div className="decide-primary">
                     <div className="decide-title">
                       <Icon name="target" size={14} />
-                      <span>V3 · 操作决策</span>
+                      <span>系统 · 操作决策</span>
                     </div>
                     {myHold ? <span className="decide-hold">持仓 {myHold.qty}手 · 成本{fmtRaw(myHold.cost)}</span>
                             : <span className="decide-hold none">未持仓</span>}
@@ -1129,8 +1132,8 @@ export default function StockDetail({ stock, onClose }) {
                   </div>
                 </div>
 
-                {!quantState?.loading && quantState?.advice?.decisionSource?.engine !== 'V3' && (
-                  <V3DecisionSummary
+                {!quantState?.loading && !isDecisionEngineAdvice(quantState?.advice) && (
+                  <DecisionSummary
                     holdingLots={myHold?.qty || 0}
                     stopPrice={book.holding.find((item) => item.code === stock.code)?.sl}
                     currentPrice={quoteDisplayState(overview).livePrice}
@@ -1152,7 +1155,7 @@ export default function StockDetail({ stock, onClose }) {
                     </button>
                   </div>
                 )}
-                {shouldShowAdviceResult(quantState) && quantState?.advice?.decisionSource?.engine === 'V3' && (() => {
+                {shouldShowAdviceResult(quantState) && isDecisionEngineAdvice(quantState?.advice) && (() => {
                   const q = quantState.result || {}
                   const adv = quantState.advice
                   const dec = q.decision || {}
@@ -1182,7 +1185,7 @@ export default function StockDetail({ stock, onClose }) {
                   return (
                     <>
                       {adv ? (
-                        <V3DecisionSummary
+                        <DecisionSummary
                           code={stock.code}
                           advice={adv}
                           holdingLots={myHold?.qty || 0}
@@ -1209,7 +1212,7 @@ export default function StockDetail({ stock, onClose }) {
                           {generationMetrics?.durationMs > 0 && (
                             <span className="generation-proof">
                               <Icon name="check" size={10} />
-                              V3 决策已保存
+                              系统决策已保存
                               {' · '}
                               {(generationMetrics.durationMs / 1000).toFixed(1)}秒
                             </span>
@@ -1345,7 +1348,7 @@ export default function StockDetail({ stock, onClose }) {
                         </div>
                       )}
 
-                      <div className="dq-hint">走势统计仅作参考，不覆盖上方V3决策。</div>
+                      <div className="dq-hint">走势统计仅作参考，不覆盖上方系统决策。</div>
                     </>
                   )
                 })()}
@@ -1556,7 +1559,7 @@ export default function StockDetail({ stock, onClose }) {
             type="button"
             disabled={adviceActions.quick.disabled}
             aria-busy={adviceActions.quick.active}
-            title="读取当前行情并由V3重新核定操作"
+            title="读取当前行情并由系统重新核定操作"
             onClick={() => loadQuant(false)}
           >
             <Icon
@@ -1565,7 +1568,7 @@ export default function StockDetail({ stock, onClose }) {
               className={adviceActions.quick.active ? 'spin' : ''}
             />
             <span className="footbar-action-copy">
-              <span>{quantState?.loading ? '正在评估' : '更新 V3 决策'}</span>
+              <span>{quantState?.loading ? '正在评估' : '更新决策'}</span>
             </span>
           </button>
           <button
@@ -1590,7 +1593,7 @@ export default function StockDetail({ stock, onClose }) {
           </button>
         </div>
 
-        {/* V3容量已满时列出正在评估的股票，可点击查看进度。 */}
+        {/* 决策容量已满时列出正在评估的股票，可点击查看进度。 */}
         {busyModal && (
           <div className="busy-modal-mask" onClick={() => setBusyModal(null)}>
             <div className="busy-modal" onClick={(e) => e.stopPropagation()}>

@@ -382,12 +382,19 @@ test('批次取消响应丢失后重试仍可由服务端墓碑确认', async ()
   assert.equal(sends, 2)
 })
 
-test('本地个股停止同时中止runner并更新批量项且持仓页不暴露批量停止', () => {
+test('本地个股停止中止runner，批量进度仅通过批次控制暴露全部停止', () => {
   assert.match(
     generationStatusSource,
     /else\s*\{\s*cancelAdvice\(code\)\s*void cancelOne\(code\)/,
   )
-  assert.doesNotMatch(planTabSource, /全部停止/)
+  assert.match(
+    planTabSource,
+    /function DecisionBatchProgress[\s\S]*?void cancelBatch\(\)[\s\S]*?全部停止/,
+  )
+  const holdingCard = planTabSource.slice(
+    planTabSource.indexOf('function HoldingItem'),
+  )
+  assert.doesNotMatch(holdingCard, /全部停止/)
 })
 
 test('底层全部停止不等待提交请求并保留批次级取消协议', () => {

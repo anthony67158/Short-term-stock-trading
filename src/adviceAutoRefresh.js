@@ -85,6 +85,13 @@ function codesForScopes(scopes) {
     isAdviceReviewEnabled(st.settings || {}, code))
 }
 
+export function getManualAdviceRefreshCodes(scope = 'both') {
+  const scopes = scope === 'hold'
+    ? ['hold']
+    : scope === 'watch' ? ['watch'] : ['hold', 'watch']
+  return codesForScopes(scopes)
+}
+
 function markTry(scopes, at) {
   if (scopes.includes('hold')) planStore.setSetting(K_HOLD_LASTTRY, at)
   if (scopes.includes('watch')) planStore.setSetting(K_WATCH_LASTTRY, at)

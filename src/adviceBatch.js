@@ -2,7 +2,7 @@
 // 用户在自选/候选区多选(或全选)若干只股票 → 一键后台批量生成 AI 操作建议。
 // 特点:
 //   1) 模块级单例 + pub/sub —— 关闭面板/切 Tab 也照跑,回来还能看到实时进度(后台处理)。
-//   2) 动态并发:V3评估使用独立容量，默认四路，不再绑定LLM端点。
+//   2) 动态并发:决策评估使用独立容量，默认四路，不再绑定LLM端点。
 //   3) 复用与手动生成完全同源的 spec 构造(buildHoldSpec/buildWatchSpec)与后台 runner(startAdvice)。
 //   4) 不做新鲜度节流:用户勾选了哪些就重生成哪些(选择权完全交给用户)。
 //   5) 可取消:批次墓碑立即阻止后续派发，并协作中止在途请求。
@@ -37,7 +37,7 @@ import {
   settleQueuedAdviceCancellations,
 } from '../shared/adviceCancellation.js'
 
-// 本地兜底并发按V3容量动态填槽——容量 = 总容量 − 非本批占用数,
+// 本地兜底并发按决策容量动态填槽——容量 = 总容量 − 非本批占用数,
 // 谁跑完就补谁的槽,与服务端 drainAccount 的调度模型一致(见 runBatchAdvice 末尾的 worker)。
 
 // 进度状态(单例):
@@ -78,7 +78,7 @@ export function seedConcurrency(n) {
   state.concurrency = resolveDecisionConcurrency(n)
   notify()
 }
-// 同步窥视V3容量占用(供批量入口 UI 先行门控)。
+// 同步窥视决策容量占用(供批量入口 UI 先行门控)。
 // 返回 { busy:[{code,name}], concurrency, full }。full=true 表示容量已被非本批单股评估占满。
 export function peekBatchBusy(excludeCodes, deepMode = false) {
   const ex = new Set((excludeCodes || []).filter(Boolean).map(String))

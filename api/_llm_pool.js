@@ -197,7 +197,7 @@ export function endpointsForRole(config, role) {
   return served.length ? served : all;
 }
 
-// 承接某物理角色的可用端点数。V3决策任务使用独立计算容量，
+// 承接某物理角色的可用端点数。系统决策任务使用独立计算容量，
 // 不再由LLM端点数量决定。
 export function endpointCountForRole(config, role) {
   role = canonicalLlmRole(role);

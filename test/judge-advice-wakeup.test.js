@@ -203,7 +203,7 @@ test('FC自动把线上旧版V3直接清仓提醒迁移成退出前复核', () =
           reducePrice: 53.47,
           opQty: '清仓1手',
           decisionSource: {
-            engine: 'V3',
+            engine: 'MULTI_TASK',
             state: 'READY',
             hardProtection: false,
           },
@@ -226,7 +226,7 @@ test('FC自动把线上旧版V3直接清仓提醒迁移成退出前复核', () =
       type: 'price',
       op: 'lte',
       value: 53.47,
-      decisionEngine: 'V3',
+      decisionEngine: 'MULTI_TASK',
       decisionId: 'legacy-v3-exit',
       actionSide: 'SELL',
       enabled: false,
@@ -235,7 +235,7 @@ test('FC自动把线上旧版V3直接清仓提醒迁移成退出前复核', () =
   }
 
   assert.equal(
-    cronAlertTest.migrateV3ExitReviewAlerts(data, now),
+    cronAlertTest.migrateDecisionExitReviewAlerts(data, now),
     true,
   )
   assert.equal(data.alerts.length, 1)

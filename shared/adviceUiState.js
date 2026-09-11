@@ -502,7 +502,7 @@ export async function startAdvicePersistently(
             ? submission.busy
             : [],
           concurrency: Number(submission.concurrency) || 1,
-          error: submission.error || 'V3评估容量已满',
+          error: submission.error || '决策评估容量已满',
         }
       }
       // Timeout/connection loss or an explicit server rejection can happen

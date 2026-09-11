@@ -213,7 +213,7 @@ function OpportunityRow({
           成交 <b>{probability(estimate.pFill)}</b>
         </span>
         <span>
-          V3胜率 <b>{probability(estimate.pWinGivenFill)}</b>
+          模型胜率 <b>{probability(estimate.pWinGivenFill)}</b>
         </span>
         <span>
           净期望 <b data-positive={Number(estimate.expectedNetR) > 0}>
@@ -504,10 +504,10 @@ function OpportunityBoard({
           <span>基础单笔风险 {number(snapshot.opportunityContext.baseRiskPct, 2)}%</span>
           <span>通过 {laneSummary.actionable}/{laneSummary.total}</span>
           {snapshot.trainingStatus?.enabled === true ? (
-            <span>V3当前模型已启用</span>
+            <span>当前决策模型已启用</span>
           ) : snapshot.trainingStatus?.readiness ? (
             <span title={snapshot.trainingStatus.directEntry?.reason || ''}>
-              V3成熟样本 {snapshot.trainingStatus.readiness.samples}
+              成熟样本 {snapshot.trainingStatus.readiness.samples}
               /{snapshot.trainingStatus.readiness.requirements.samples}
               {' · '}成交样本 {snapshot.trainingStatus.readiness.filledSamples}
               /{snapshot.trainingStatus.readiness.requirements.filledSamples}

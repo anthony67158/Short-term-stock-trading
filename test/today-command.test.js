@@ -7,7 +7,7 @@ const now = Date.parse('2026-09-09T02:00:00.000Z')
 
 function entry(advice) {
   return { mode: advice.mode || 'buy_advice', at: now,
-    advice: { decisionSource: { engine: 'V3', state: 'READY' }, ...advice } }
+    advice: { decisionSource: { engine: 'MULTI_TASK', state: 'READY' }, ...advice } }
 }
 
 test('当前指令优先展示退出复核但不提前暴露可执行手数', () => {

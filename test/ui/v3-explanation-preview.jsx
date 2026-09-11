@@ -2,7 +2,7 @@ import ReactDOM from 'react-dom/client'
 import '../../tokens.css'
 import '../../src/styles.css'
 import '../../src/styles/precision.css'
-import V3DecisionSummary from '../../src/components/V3DecisionSummary.jsx'
+import DecisionSummary from '../../src/components/DecisionSummary.jsx'
 
 if (!import.meta.env.DEV) throw new Error('Local fixture only')
 
@@ -15,7 +15,7 @@ const advice = {
   fundNote: '主力与小单资金方向存在分歧。',
   invalidation: '价格或账户事实变化后重新运行V3。',
   decisionSource: {
-    engine: 'V3',
+    engine: 'MULTI_TASK',
     state: 'READY',
     evaluatedAt: now,
     modelVersion: 'LOCAL_TEST_DOUBLE',
@@ -29,7 +29,7 @@ const advice = {
     prices: { reference: 53.9, stop: 48.85, target: 58.2 },
     validUntil: new Date(now + 3600000).toISOString(),
   },
-  selectedV3Plan: {
+  selectedDecisionPlan: {
     opportunityScore: {
       pFill: 0.68,
       pWinGivenFill: 0.59,
@@ -38,8 +38,8 @@ const advice = {
       expectedShortfall10: -0.74,
     },
   },
-  v3Explanation: {
-    schemaVersion: 'v3-explanation.v2',
+  decisionExplanation: {
+    schemaVersion: 'decision-explanation.v1',
     status: 'ready',
     decisionId,
     model: 'LOCAL_EXPLAIN_DOUBLE',
@@ -53,7 +53,7 @@ const advice = {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <main style={{ maxWidth: 720, margin: '32px auto', padding: 16 }}>
-    <V3DecisionSummary
+    <DecisionSummary
       advice={advice}
       code="003036"
       holdingLots={1}
