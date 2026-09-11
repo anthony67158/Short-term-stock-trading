@@ -45,6 +45,9 @@ import {
 import {
   fetchStrategyPatternSnapshot,
 } from './_strategy_pattern_snapshot.js'
+import {
+  resolveStrategyPatternCapabilities,
+} from '../shared/strategyPatternCapabilities.js'
 
 function finite(value) {
   if (value == null || value === '' || value === '-') return null
@@ -511,6 +514,8 @@ function publicCandidate(item, rank) {
     adaptive: item.adaptive || null,
     cautions: item.adaptive?.cautions || [],
     shadowFeatures: item.shadowFeatures || {},
+    strategyPatternCapabilities:
+      item.strategyPatternCapabilities || null,
     strategyPatternPolicy: item.strategyPatternPolicy || 'RESEARCH',
     strategyPatterns: item.strategyPatterns || [],
     actionAlternatives: item.counterfactualPlans || [],
@@ -526,12 +531,19 @@ export async function scanFormulaSelectionCandidates({
   fetchFund = fetchResilientStockFund,
   fetchTags = fetchStockTagProfile,
   fetchPatternSnapshot = fetchStrategyPatternSnapshot,
-  enableStrategyPatterns =
-    process.env.STRATEGY_PATTERN_POLICY === 'ACTIVE',
+  strategyPatternCapabilities =
+    resolveStrategyPatternCapabilities(process.env),
+  enableStrategyPatterns,
   matchSector = sectorOpportunityFromTags,
   onProgress = null,
   now = Date.now(),
 } = {}) {
+  const patternCapabilities = typeof enableStrategyPatterns === 'boolean'
+    ? resolveStrategyPatternCapabilities({
+        STRATEGY_PATTERN_POLICY:
+          enableStrategyPatterns ? 'ACTIVE' : 'RESEARCH',
+      })
+    : strategyPatternCapabilities
   const normalizedMode = mode === 'close' ? 'close' : 'intraday'
   const report = async (progress) => {
     if (typeof onProgress === 'function') await onProgress(progress)
@@ -543,7 +555,7 @@ export async function scanFormulaSelectionCandidates({
   })
   const [universe, rawPatternSnapshot] = await Promise.all([
     fetchUniverse({ now }),
-    enableStrategyPatterns
+    patternCapabilities.recall
       ? fetchPatternSnapshot({ now }).catch(() => null)
       : Promise.resolve(null),
   ])
@@ -557,7 +569,7 @@ export async function scanFormulaSelectionCandidates({
     ? latestQuoteDate || beijingDayKey(now)
     : beijingDayKey(now)
   const patternSnapshot = usablePatternSnapshot(
-    rawPatternSnapshot,
+    patternCapabilities.recall ? rawPatternSnapshot : null,
     expectedDate,
   )
   const eligibleQuotes = allQuotes.filter((quote) =>
@@ -649,7 +661,7 @@ export async function scanFormulaSelectionCandidates({
           candles: kline.candles,
           mode: normalizedMode,
         })
-        event.strategyPatterns = enableStrategyPatterns
+        event.strategyPatterns = patternCapabilities.display
           ? buildStrategyPatternAnalysis({
               quote,
               candles: kline.candles,
@@ -755,7 +767,7 @@ export async function scanFormulaSelectionCandidates({
           sectorOpportunity,
           mode: normalizedMode,
         })
-        const strategyPatterns = enableStrategyPatterns
+        const strategyPatterns = patternCapabilities.display
           ? buildStrategyPatternAnalysis({
               quote,
               candles: kline.candles,
@@ -775,7 +787,8 @@ export async function scanFormulaSelectionCandidates({
             sectorOpportunity,
             formulaId: formula.matches[0]?.formulaId || 'UNKNOWN',
             shadowFeatures,
-            strategyPatternPolicy: enableStrategyPatterns
+            strategyPatternCapabilities: patternCapabilities,
+            strategyPatternPolicy: patternCapabilities.playbookBlend
               ? 'ACTIVE'
               : 'RESEARCH',
           },
@@ -820,7 +833,8 @@ export async function scanFormulaSelectionCandidates({
           adaptive,
           shadowFeatures,
           strategyPatterns,
-          strategyPatternPolicy: enableStrategyPatterns
+          strategyPatternCapabilities: patternCapabilities,
+          strategyPatternPolicy: patternCapabilities.playbookBlend
             ? 'ACTIVE'
             : 'RESEARCH',
           counterfactualPlans: event.counterfactualPlans,
@@ -900,6 +914,14 @@ export async function scanFormulaSelectionCandidates({
               ?? patternSnapshot.stocks.size,
           }
         : null,
+      strategyPatternCapabilities: {
+        recall: patternCapabilities.recall === true,
+        priceAnchors: patternCapabilities.priceAnchors === true,
+        confirmation: patternCapabilities.confirmation === true,
+        display: patternCapabilities.display === true,
+        playbookBlend: patternCapabilities.playbookBlend === true,
+        modelFeatures: patternCapabilities.modelFeatures === true,
+      },
     },
     formulas: FORMULA_REGISTRY
       .filter((item) => item.mode === normalizedMode.toUpperCase())
@@ -992,8 +1014,10 @@ export async function buildStockFormulaSelection({
     fund,
     sectorOpportunity,
   })
+  const patternCapabilities =
+    resolveStrategyPatternCapabilities(process.env)
   const strategyPatterns =
-    process.env.STRATEGY_PATTERN_POLICY === 'ACTIVE'
+    patternCapabilities.display
       ? buildStrategyPatternAnalysis({
           candles: kline.candles,
           quote,
@@ -1036,6 +1060,7 @@ export async function buildStockFormulaSelection({
     quote,
     formula,
     strategyPatterns,
+    strategyPatternCapabilities: patternCapabilities,
     decision,
     advisorReference,
   }

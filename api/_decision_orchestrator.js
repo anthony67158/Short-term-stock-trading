@@ -13,6 +13,10 @@ import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatu
 import { buildOpportunityReviewFeatureInput } from '../shared/opportunityReviewFeatures.js'
 import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
 import { summarizeStrategyPatterns } from '../shared/strategyPatternFeatures.js'
+import {
+  resolveStrategyPatternCapabilities,
+  strategyPatternAnalysisEnabled,
+} from '../shared/strategyPatternCapabilities.js'
 import { buildDecisionAction } from '../shared/decisionEnginePolicy.js'
 import { compileDecisionPlan, applyCompiledDecisionPlan } from '../shared/decisionPlan.js'
 import { compileExecutionPlan } from '../shared/executionPlan.js'
@@ -82,9 +86,9 @@ function buildDecisionEvidence({
   fund,
   shadowFeatures,
   missingEvidence,
-  strategyPatternPolicyActive = false,
+  strategyPatternDisplayEnabled = false,
 }) {
-  const strategyPattern = strategyPatternPolicyActive
+  const strategyPattern = strategyPatternDisplayEnabled
     ? summarizeStrategyPatterns({
         ...shadowFeatures,
         ret5dPct: shadowFeatures.ret5dPct,
@@ -214,8 +218,10 @@ export async function evaluateDecision({
   const candles = (detail?.candles || []).filter((bar) =>
     [bar.close, bar.high, bar.low].every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
   const context = buildMarketOpportunityContext({ market: market || {} })
-  const strategyPatternPolicyActive =
-    process.env.STRATEGY_PATTERN_POLICY === 'ACTIVE'
+  const strategyPatternCapabilities =
+    resolveStrategyPatternCapabilities(process.env)
+  const strategyPatternToolsEnabled =
+    strategyPatternAnalysisEnabled(strategyPatternCapabilities)
   const shadowFeatures = buildOpportunityShadowFeatures({
     quote,
     candles,
@@ -224,7 +230,7 @@ export async function evaluateDecision({
     sectorOpportunity: sector || {},
     mode: quote.live === true ? 'intraday' : 'close',
   })
-  const strategyPattern = strategyPatternPolicyActive
+  const strategyPattern = strategyPatternCapabilities.display
     ? summarizeStrategyPatterns({
         ...shadowFeatures,
         ret5dPct: shadowFeatures.ret5dPct,
@@ -236,8 +242,9 @@ export async function evaluateDecision({
     quote,
     fund,
     sectorOpportunity: sector,
-    ...(strategyPatternPolicyActive ? { shadowFeatures } : {}),
-    strategyPatternPolicy: strategyPatternPolicyActive
+    ...(strategyPatternToolsEnabled ? { shadowFeatures } : {}),
+    strategyPatternCapabilities,
+    strategyPatternPolicy: strategyPatternCapabilities.playbookBlend
       ? 'ACTIVE'
       : 'RESEARCH',
   }
@@ -312,7 +319,8 @@ export async function evaluateDecision({
     fund,
     shadowFeatures,
     missingEvidence,
-    strategyPatternPolicyActive,
+    strategyPatternDisplayEnabled:
+      strategyPatternCapabilities.display,
   })
   // One request per route prevents stock-code keyed clients from mixing three prices.
   const evaluated = await Promise.all(plans.map(async (plan) => {
@@ -358,6 +366,7 @@ export async function evaluateDecision({
     ...buildDecisionAction({ payload, plans: evaluated, now }),
     fundNote: '',
     strategyPattern,
+    strategyPatternCapabilities,
   }
   const reviewScoreInput = isTriggeredReviewEvent(reviewEvent)
     ? buildOpportunityReviewFeatureInput({
