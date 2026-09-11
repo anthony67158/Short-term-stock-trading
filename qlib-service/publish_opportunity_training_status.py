@@ -72,6 +72,11 @@ def _active_model(bucket, prefix):
             value.get("productionEligible") is True,
         "activatedAt": _count(value.get("activatedAt")),
         "usagePolicy": value.get("usagePolicy"),
+        "releaseManagement": (
+            value.get("releaseManagement")
+            if isinstance(value.get("releaseManagement"), dict)
+            else None
+        ),
     }
 
 
@@ -82,9 +87,21 @@ def build_training_status(report, promotion=None, active_model=None):
         (active_model or {}).get("productionEligible")
     )
     direct = (active_model or {}).get("usagePolicy") == "DIRECT"
+    selective = (
+        promotion
+        if isinstance(promotion, dict)
+        and promotion.get("schemaVersion")
+        == "opportunity-selective-release.v1"
+        else None
+    )
     ensemble = report.get("seedEnsemble") or {}
     ensemble_decision = ensemble.get("decision") or {}
-    if direct and ensemble:
+    if selective is not None:
+        promotion_blockers = list(
+            (selective.get("compatibility") or {}).get("blockers")
+            or []
+        )
+    elif direct and ensemble:
         reason = (
             _ensemble_window_note(ensemble)
             or str(ensemble_decision.get("reason") or "").strip()
@@ -133,6 +150,20 @@ def build_training_status(report, promotion=None, active_model=None):
             for item in promotion_blockers[:8]
         ],
         "activeModel": active_model,
+        "lastReleaseDecision": ({
+            "action": selective.get("action"),
+            "reason": str(selective.get("reason") or "")[:180],
+            "championVersion": selective.get("championVersion"),
+            "challengerVersion": selective.get("challengerVersion"),
+            "selectedVersion": selective.get("selectedVersion"),
+            "releaseMode": selective.get("releaseMode"),
+            "promotedComponents":
+                list(selective.get("promotedComponents") or [])[:8],
+            "compatibleCombinations":
+                _count(selective.get("compatibleCombinations")),
+            "combinationsEvaluated":
+                _count(selective.get("combinationsEvaluated")),
+        } if selective is not None else None),
     }
 
 

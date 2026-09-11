@@ -38,6 +38,119 @@ def sample(state="REJECTED"):
 
 
 class PublishModelRetrainReportTest(unittest.TestCase):
+    def test_selective_release_compares_champion_challenger_and_selected_model(self):
+        release = {
+            "schemaVersion": "opportunity-selective-release.v1",
+            "action": "PUBLISH",
+            "eligible": True,
+            "championVersion": "opportunity-score.champion",
+            "challengerVersion": "opportunity-score.challenger",
+            "selectedVersion": "opportunity-score.challenger.selective",
+            "releaseMode": "PARTIAL",
+            "promotedComponents": ["ranking"],
+            "combinationsEvaluated": 3,
+            "compatibleCombinations": 2,
+            "componentDecisions": [{
+                "component": "ranking",
+                "label": "横截面排序",
+                "status": "IMPROVED",
+                "improved": True,
+                "improvements": ["Top5费后净R至少提升0.01R"],
+                "blockers": [],
+                "metrics": [{
+                    "label": "Top5费后净R",
+                    "champion": 0.30,
+                    "challenger": 0.34,
+                    "delta": 0.04,
+                }],
+            }],
+            "thresholds": {
+                "overall": {"lowerBoundMinimum": 0.0},
+            },
+            "evaluation": {
+                "champion": {
+                    "business": {
+                        "mean_net_r_at_5": 0.30,
+                        "netRLowerBound": 0.08,
+                    },
+                },
+                "challenger": {
+                    "business": {
+                        "mean_net_r_at_5": 0.34,
+                        "netRLowerBound": 0.10,
+                    },
+                },
+                "selected": {
+                    "business": {
+                        "mean_net_r_at_5": 0.35,
+                        "netRLowerBound": 0.11,
+                    },
+                },
+            },
+            "compatibility": {"passed": True, "blockers": []},
+        }
+
+        _, report = build_report(
+            "opportunity",
+            sample("SHADOW_READY"),
+            release,
+            env={**ENV, "RETRAIN_PUBLISHED": "true"},
+        )
+
+        self.assertEqual(report["schemaVersion"], "quant-retrain-report.v3")
+        self.assertEqual(report["decision"], "promote")
+        self.assertEqual(
+            report["details"]["deployment"]["releaseMode"],
+            "PARTIAL",
+        )
+        self.assertEqual(
+            report["details"]["components"][0]["status"],
+            "IMPROVED",
+        )
+        self.assertEqual(
+            report["details"]["metrics"][0]["champion"],
+            0.30,
+        )
+        self.assertEqual(
+            report["details"]["metrics"][0]["selected"],
+            0.35,
+        )
+
+    def test_selective_release_holds_current_model_when_no_component_wins(self):
+        release = {
+            "schemaVersion": "opportunity-selective-release.v1",
+            "action": "KEEP_CURRENT",
+            "eligible": False,
+            "championVersion": "opportunity-score.champion",
+            "challengerVersion": "opportunity-score.challenger",
+            "selectedVersion": None,
+            "releaseMode": "NONE",
+            "promotedComponents": [],
+            "evaluation": {
+                "champion": {},
+                "challenger": {},
+                "selected": {},
+            },
+            "compatibility": {
+                "passed": False,
+                "blockers": ["Top5净R下置信界必须大于0"],
+            },
+        }
+
+        _, report = build_report(
+            "opportunity",
+            sample("SHADOW_READY"),
+            release,
+            env=ENV,
+        )
+
+        self.assertEqual(report["decision"], "hold")
+        self.assertIn("继续使用现役版本", report["summary"])
+        self.assertIn(
+            "Top5净R下置信界必须大于0",
+            report["details"]["blockers"],
+        )
+
     def test_v3_records_negative_expectation_and_sample_counts(self):
         key, report = build_report("opportunity", sample(), {
             "eligible": False, "blockers": ["净R下界未大于0"],

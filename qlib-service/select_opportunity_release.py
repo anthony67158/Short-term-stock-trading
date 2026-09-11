@@ -810,14 +810,28 @@ def select_release(
         data,
         holdout,
     )
-    component_decisions = [
-        component_decision(
+    component_decisions = []
+    individual_evaluations = {}
+    for component in COMPONENTS:
+        models, metadata = compose_release(
+            champion_models,
+            champion_metadata,
+            challenger_models,
+            challenger_metadata,
+            (component,),
+        )
+        evaluation = evaluate_release(
+            models,
+            metadata,
+            data,
+            holdout,
+        )
+        individual_evaluations[component] = evaluation
+        component_decisions.append(component_decision(
             component,
             champion_evaluation,
-            challenger_evaluation,
-        )
-        for component in COMPONENTS
-    ]
+            evaluation,
+        ))
     improved = [
         item["component"]
         for item in component_decisions
@@ -830,19 +844,22 @@ def select_release(
     )
     for group in combinations:
         for components in group:
-            models, metadata = compose_release(
-                champion_models,
-                champion_metadata,
-                challenger_models,
-                challenger_metadata,
-                components,
-            )
-            evaluation = evaluate_release(
-                models,
-                metadata,
-                data,
-                holdout,
-            )
+            if len(components) == 1:
+                evaluation = individual_evaluations[components[0]]
+            else:
+                models, metadata = compose_release(
+                    champion_models,
+                    champion_metadata,
+                    challenger_models,
+                    challenger_metadata,
+                    components,
+                )
+                evaluation = evaluate_release(
+                    models,
+                    metadata,
+                    data,
+                    holdout,
+                )
             compatibility = compatibility_gate(
                 champion_evaluation,
                 evaluation,

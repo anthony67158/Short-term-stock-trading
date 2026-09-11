@@ -1,6 +1,6 @@
 # 每日量化增量训练（公开行情归档 + 成熟样本重训 + 三种子回测）
 # 触发：北京时间工作日 01:15（UTC 前一日 17:15）+ 手动。
-# 机制：国内FC归档公开行情→成熟样本压实→LightGBM+CatBoost重训与回测→更新DIRECT基准。
+# 机制：国内FC归档公开行情→成熟样本压实→V3重训→成员级冠军对照→整体门禁→选择性更新DIRECT版本。
 #       量化服务 model_lib 每 1h 从 OSS 热更新，故上传即上线，无需重部署 FC。
 name: daily-retrain
 
@@ -77,6 +77,8 @@ jobs:
             tests/test_archive_public_market_day.py \
             tests/test_opportunity_sector_archive.py \
             tests/test_archive_tushare_market_day.py \
+            tests/test_download_opportunity_release.py \
+            tests/test_select_opportunity_release.py \
             tests/test_promote_opportunity_model.py \
             tests/test_publish_opportunity_training_status.py \
             tests/test_publish_model_retrain_report.py \
@@ -212,19 +214,6 @@ jobs:
               fh.write("\n".join(lines) + "\n")
           PY
 
-      - name: Publish result to in-app quant report
-        if: always()
-        continue-on-error: true
-        env:
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SHA: ${{ github.sha }}
-          RETRAIN_JOB_STATUS: ${{ job.status }}
-          RETRAIN_PREFLIGHT: ${{ steps.preflight.outputs.reachable }}
-        run: python publish_retrain_report.py
-
       - name: Upload stock retrain diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -237,7 +226,10 @@ jobs:
           if-no-files-found: warn
 
   opportunity-retrain:
-    needs: verify
+    needs:
+      - verify
+      - market-data-archive
+    if: ${{ always() && needs.verify.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     defaults:
@@ -284,6 +276,12 @@ jobs:
           done
           exit "$missing"
 
+      - name: Download current production V3 as champion
+        run: |
+          python download_opportunity_release.py \
+            --output opportunity-model/champion \
+            --prefix opportunitymodel/
+
       - name: Collect mature opportunity outcomes
         run: |
           python collect_opportunity_outcomes.py \
@@ -329,51 +327,42 @@ jobs:
             --seeds 42,7,2026 \
             --poc-report opportunity-model/seed-ensemble/report.json
 
-      - name: Publish best available combination as the DIRECT baseline
-        id: opportunity-baseline
+      - name: Select improved V3 components and validate the whole model
+        id: opportunity-selection
         run: |
-          if [ -f opportunity-model/shadow/opportunity_meta.json ]; then
-            python upload_opportunity_model.py \
-              --directory opportunity-model/shadow \
-              --prefix opportunitymodel/ \
-              --activate-baseline
-            echo "published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No valid model artifacts were produced; keeping the current model."
-          fi
-
-      - name: Evaluate production model combination
-        run: |
-          python promote_opportunity_model.py \
-            --source opportunity-model/shadow \
-            --report opportunity-model/opportunity_training_report.json \
-            --stability opportunity-model/stability/stability.json \
-            --output opportunity-model/production \
-            --check-only \
-            --decision-output opportunity-model/promotion_decision.json
-
-      - name: Publish production model only after all gates pass
-        id: opportunity-production
-        run: |
-          eligible=$(python - <<'PY'
+          python select_opportunity_release.py \
+            --dataset opportunity-dataset.npz \
+            --champion opportunity-model/champion \
+            --challenger opportunity-model/shadow \
+            --output opportunity-model/release \
+            --decision-output opportunity-model/release_decision.json
+          publish=$(python - <<'PY'
           import json
-          with open("opportunity-model/promotion_decision.json", encoding="utf-8") as fh:
-              print("true" if json.load(fh).get("eligible") is True else "false")
+          with open(
+              "opportunity-model/release_decision.json",
+              encoding="utf-8",
+          ) as handle:
+              decision = json.load(handle)
+          print(
+              "true"
+              if decision.get("action") == "PUBLISH"
+              and decision.get("eligible") is True
+              else "false"
+          )
           PY
           )
-          if [ "$eligible" = "true" ]; then
-            python promote_opportunity_model.py \
-              --source opportunity-model/shadow \
-              --report opportunity-model/opportunity_training_report.json \
-              --stability opportunity-model/stability/stability.json \
-              --output opportunity-model/production
-            python upload_opportunity_model.py \
-              --directory opportunity-model/production \
-              --prefix opportunitymodel/
-            echo "published=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Production gates not passed; keeping the current production manifest."
-          fi
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Publish selected V3 release atomically
+        id: opportunity-production
+        if: steps.opportunity-selection.outputs.publish == 'true'
+        run: |
+          python upload_opportunity_model.py \
+            --directory opportunity-model/release \
+            --prefix opportunitymodel/ \
+            --activate-baseline \
+            --release-decision opportunity-model/release_decision.json
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Publish V3 readiness to the workbench
         if: always()
@@ -381,7 +370,7 @@ jobs:
           if [ -f opportunity-model/opportunity_training_report.json ]; then
             python publish_opportunity_training_status.py \
               --report opportunity-model/opportunity_training_report.json \
-              --promotion opportunity-model/promotion_decision.json \
+              --promotion opportunity-model/release_decision.json \
               --prefix opportunitymodel/
           else
             echo "::warning::Opportunity training report is missing; status was not updated."
@@ -391,14 +380,19 @@ jobs:
         if: always()
         continue-on-error: true
         env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
           RETRAIN_JOB_STATUS: ${{ job.status }}
           RETRAIN_PUBLISHED: ${{ steps.opportunity-production.outputs.published }}
-          RETRAIN_DIRECT_PUBLISHED: ${{ steps.opportunity-baseline.outputs.published }}
         run: |
           python publish_model_retrain_report.py \
             --model opportunity \
             --report opportunity-model/opportunity_training_report.json \
-            --promotion opportunity-model/promotion_decision.json
+            --promotion opportunity-model/release_decision.json
 
       - name: Upload opportunity diagnostics
         if: always()
@@ -408,7 +402,7 @@ jobs:
           path: |
             qlib-service/opportunity-model/opportunity_training_report.json
             qlib-service/opportunity-model/opportunity_trials.jsonl
-            qlib-service/opportunity-model/promotion_decision.json
+            qlib-service/opportunity-model/release_decision.json
             qlib-service/opportunity-model/stability/
             qlib-service/opportunity-model/seed-42/report.json
             qlib-service/opportunity-model/seed-7/report.json
@@ -656,17 +650,6 @@ jobs:
           set -o pipefail
           python train_sector_model.py |
             tee sector_retrain_result.json
-
-      - name: Publish sector result to in-app quant report
-        if: always()
-        continue-on-error: true
-        env:
-          RETRAIN_JOB_STATUS: ${{ job.status }}
-          RETRAIN_PREFLIGHT: ${{ steps.sector-preflight.outputs.reachable }}
-        run: |
-          python publish_model_retrain_report.py \
-            --model sector \
-            --report sector_retrain_result.json
 
       - name: Upload sector retrain diagnostics
         if: always()

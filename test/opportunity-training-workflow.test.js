@@ -10,19 +10,20 @@ const read = (path) => readFileSync(
 const workflow = read('.github/workflows/daily-retrain.yml')
 const exporter = read('scripts/export-opportunity-outcomes.mjs')
 
-test('V3每日重训直接发布模型，晋级保留为后置诊断', () => {
+test('V3每日重训以现役版本为冠军并只发布通过验证的组合', () => {
   assert.match(workflow, /opportunity-retrain:/)
+  assert.match(workflow, /download_opportunity_release\.py/)
   assert.match(workflow, /collect_opportunity_outcomes\.py/)
   assert.match(workflow, /train_opportunity_seed_ensemble\.py/)
+  assert.match(workflow, /select_opportunity_release\.py/)
   assert.match(
     workflow,
-    /--directory opportunity-model\/shadow[\s\S]*?--prefix opportunitymodel\//,
+    /--champion opportunity-model\/champion[\s\S]*?--challenger opportunity-model\/shadow/,
   )
-  assert.match(workflow, /--check-only/)
-  assert.match(workflow, /promotion_decision\.json/)
+  assert.match(workflow, /release_decision\.json/)
   assert.match(
     workflow,
-    /--directory opportunity-model\/production[\s\S]*?--prefix opportunitymodel\//,
+    /--directory opportunity-model\/release[\s\S]*?--release-decision opportunity-model\/release_decision\.json/,
   )
   assert.match(
     workflow,
@@ -30,13 +31,25 @@ test('V3每日重训直接发布模型，晋级保留为后置诊断', () => {
   )
 })
 
-test('直接发布不等待晋级结果且V3样本允许导出', () => {
-  const shadowStep = workflow.match(
-    /- name: Publish best available combination as the DIRECT baseline([\s\S]*?)(?=\n      - name:)/,
+test('没有通过选择与整体兼容性验证时不得覆盖现役V3', () => {
+  const selectionStep = workflow.match(
+    /- name: Select improved V3 components and validate the whole model([\s\S]*?)(?=\n      - name:)/,
   )?.[1] || ''
-  assert.match(shadowStep, /--prefix opportunitymodel\/\s*\\\s*\n\s*--activate-baseline/)
-  assert.doesNotMatch(shadowStep, /eligible.*true|promotion_decision/)
-  assert.match(exporter, /opportunity-score-feature\.v4/)
+  const publishStep = workflow.match(
+    /- name: Publish selected V3 release atomically([\s\S]*?)(?=\n      - name:)/,
+  )?.[1] || ''
+
+  assert.match(selectionStep, /decision\.get\("action"\) == "PUBLISH"/)
+  assert.match(
+    publishStep,
+    /if: steps\.opportunity-selection\.outputs\.publish == 'true'/,
+  )
+  assert.match(publishStep, /--activate-baseline/)
+  assert.doesNotMatch(
+    workflow,
+    /--directory opportunity-model\/shadow[\s\S]*?--activate-baseline/,
+  )
+  assert.match(exporter, /opportunity-score-feature\.v5/)
 })
 
 test('每日重训把新成熟结果压实进版本化历史基线', () => {

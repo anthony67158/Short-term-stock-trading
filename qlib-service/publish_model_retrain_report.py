@@ -9,8 +9,16 @@ from pathlib import Path
 
 
 MODEL_LABELS = {"opportunity": "V3 机会模型", "sector": "板块模型"}
+COMPONENT_LABELS = {
+    "fillProbability": "成交概率",
+    "winProbability": "盈利概率",
+    "payoff": "胜负幅度",
+    "tailRisk": "尾部风险",
+    "ranking": "横截面排序",
+}
 DECISIONS = {
     "promote": "已发布",
+    "hold": "维持现役",
     "updated": "已更新",
     "shadow": "仅影子发布",
     "reject": "未通过晋级",
@@ -70,16 +78,203 @@ def ensemble_window_note(ensemble):
     )
 
 
-def metric_row(label, challenger, baseline=None, unit="number"):
+def metric_row(
+    label,
+    challenger,
+    baseline=None,
+    unit="number",
+    *,
+    selected=None,
+):
     return {
         "label": label,
         "challenger": number(challenger),
         "baseline": number(baseline),
+        "champion": number(baseline),
+        "selected": number(selected),
         "unit": unit,
     }
 
 
+def nested_metric(value, *path):
+    current = value
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def selective_release_details(report, release, env):
+    readiness = report.get("readiness") or {}
+    split = report.get("split") or {}
+    evaluations = release.get("evaluation") or {}
+    champion = evaluations.get("champion") or {}
+    challenger = evaluations.get("challenger") or {}
+    selected = evaluations.get("selected") or {}
+    action = release.get("action")
+    published = (
+        action == "PUBLISH"
+        and release.get("eligible") is True
+        and env.get("RETRAIN_PUBLISHED") == "true"
+    )
+    decision = (
+        "promote"
+        if published
+        else "error"
+        if action == "PUBLISH"
+        else "hold"
+    )
+    promoted = [
+        COMPONENT_LABELS.get(value, text(value))
+        for value in release.get("promotedComponents") or []
+    ]
+    facts = [
+        {"label": "成熟样本", "value": display(readiness.get("samples"))},
+        {
+            "label": "完整成交样本",
+            "value": display(readiness.get("filled_samples")),
+        },
+        {"label": "独立交易日", "value": display(readiness.get("dates"))},
+        {
+            "label": "训练截止",
+            "value": text(split.get("train_end_date")) or "未提供",
+        },
+        {
+            "label": "生产对照版本",
+            "value": text(release.get("championVersion")) or "未提供",
+        },
+        {
+            "label": "训练候选版本",
+            "value": text(release.get("challengerVersion")) or "未提供",
+        },
+        {
+            "label": "发布版本",
+            "value": (
+                text(release.get("selectedVersion"))
+                if published
+                else text(release.get("championVersion"))
+            ) or "未提供",
+        },
+        {
+            "label": "晋级方式",
+            "value": {
+                "FULL": "整包晋级",
+                "PARTIAL": "组成部分选择性晋级",
+                "NONE": "维持现役",
+            }.get(release.get("releaseMode"), "维持现役"),
+        },
+        {
+            "label": "晋级组成",
+            "value": "、".join(promoted) if promoted else "无",
+        },
+        {
+            "label": "组合验证",
+            "value": (
+                f"{int(release.get('compatibleCombinations') or 0)}/"
+                f"{int(release.get('combinationsEvaluated') or 0)} 组通过"
+            ),
+        },
+    ]
+    metric_paths = (
+        ("Top5费后净R", ("business", "mean_net_r_at_5"), "r"),
+        ("Top5净R下置信界", ("business", "netRLowerBound"), "r"),
+        ("Top5正净R命中率", ("business", "precision_at_5"), "percent"),
+        ("Top5最大回撤", ("business", "max_drawdown_r_at_5"), "r"),
+        ("正期望覆盖率", ("business", "positiveExpectedCoverage"), "percent"),
+        ("成交概率准确率", ("pFill", "accuracy"), "percent"),
+        ("成交概率召回率", ("pFill", "recall"), "percent"),
+        ("成交概率F1", ("pFill", "f1"), "percent"),
+        ("成交概率Brier", ("pFill", "brier"), "number"),
+        ("盈利概率准确率", ("pWinGivenFill", "accuracy"), "percent"),
+        ("盈利概率召回率", ("pWinGivenFill", "recall"), "percent"),
+        ("盈利概率F1", ("pWinGivenFill", "f1"), "percent"),
+        ("盈利概率Brier", ("pWinGivenFill", "brier"), "number"),
+        ("净R平均绝对误差", ("expectedNetR", "mae"), "r"),
+        ("Q10覆盖率", ("tailRisk", "q10Coverage"), "percent"),
+        ("千条推理耗时", ("inference", "msPer1000"), "ms"),
+    )
+    metrics = [
+        metric_row(
+            label,
+            nested_metric(challenger, *path),
+            nested_metric(champion, *path),
+            unit,
+            selected=nested_metric(selected, *path),
+        )
+        for label, path, unit in metric_paths
+    ]
+    components = []
+    for item in release.get("componentDecisions") or []:
+        if not isinstance(item, dict):
+            continue
+        components.append({
+            "component": text(item.get("component")),
+            "label": (
+                text(item.get("label"))
+                or COMPONENT_LABELS.get(item.get("component"), "模型组成")
+            ),
+            "status": text(item.get("status")) or "UNCHANGED",
+            "improvements": [
+                text(value)
+                for value in item.get("improvements") or []
+                if text(value)
+            ][:6],
+            "blockers": [
+                text(value)
+                for value in item.get("blockers") or []
+                if text(value)
+            ][:6],
+            "metrics": [
+                {
+                    "label": text(metric.get("label")),
+                    "challenger": number(metric.get("challenger")),
+                    "champion": number(metric.get("champion")),
+                    "delta": number(metric.get("delta")),
+                    "lowerIsBetter":
+                        metric.get("lowerIsBetter") is True,
+                }
+                for metric in item.get("metrics") or []
+                if isinstance(metric, dict)
+            ][:8],
+        })
+    blockers = [
+        *(
+            (release.get("compatibility") or {}).get("blockers")
+            or []
+        ),
+    ]
+    if action == "PUBLISH" and not published:
+        blockers.insert(0, "选择性发布已通过，但生产清单未确认更新")
+    return (
+        decision,
+        facts,
+        metrics,
+        [text(value) for value in blockers if text(value)][:12],
+        milliseconds(report.get("generatedAt")),
+        {
+            "components": components,
+            "thresholds": release.get("thresholds") or {},
+            "deployment": {
+                "action": action,
+                "published": published,
+                "releaseMode": release.get("releaseMode"),
+                "championVersion": release.get("championVersion"),
+                "challengerVersion": release.get("challengerVersion"),
+                "selectedVersion": release.get("selectedVersion"),
+                "promotedComponents":
+                    release.get("promotedComponents") or [],
+            },
+        },
+    )
+
+
 def opportunity_details(report, promotion, env):
+    if (
+        promotion.get("schemaVersion")
+        == "opportunity-selective-release.v1"
+    ):
+        return selective_release_details(report, promotion, env)
     readiness = report.get("readiness") or {}
     split = report.get("split") or {}
     ranking = (report.get("metrics") or {}).get("ranking") or {}
@@ -186,7 +381,14 @@ def opportunity_details(report, promotion, env):
             label, (values.get("challenger") or {}).get(key),
             (values.get("baseline") or {}).get(key),
         ))
-    return decision, facts, metrics, blockers, milliseconds(report.get("generatedAt"))
+    return (
+        decision,
+        facts,
+        metrics,
+        blockers,
+        milliseconds(report.get("generatedAt")),
+        {},
+    )
 
 
 def sector_details(report, _promotion, _env):
@@ -221,7 +423,14 @@ def sector_details(report, _promotion, _env):
                 f"{label} {metric_label}", candidate.get(key),
                 baseline.get(key), unit,
             ))
-    return decision, facts, metrics, blockers, milliseconds(meta.get("trained_at"))
+    return (
+        decision,
+        facts,
+        metrics,
+        blockers,
+        milliseconds(meta.get("trained_at")),
+        {},
+    )
 
 
 def build_report(model, report=None, promotion=None, *, env=None, now_ms=None):
@@ -235,11 +444,18 @@ def build_report(model, report=None, promotion=None, *, env=None, now_ms=None):
     job_status = text(env.get("RETRAIN_JOB_STATUS"))
     if isinstance(report, dict) and report:
         builder = opportunity_details if model == "opportunity" else sector_details
-        decision, facts, metrics, blockers, trained_at = builder(report, promotion or {}, env)
+        (
+            decision,
+            facts,
+            metrics,
+            blockers,
+            trained_at,
+            extra_details,
+        ) = builder(report, promotion or {}, env)
     else:
         skipped = job_status == "success" and env.get("RETRAIN_PREFLIGHT") == "skip"
         decision = "skip" if skipped else "error"
-        facts, metrics, trained_at = [], [], None
+        facts, metrics, trained_at, extra_details = [], [], None, {}
         blockers = ["行情数据源不可达，本次跳过"] if skipped else ["本轮未生成完整训练报告"]
     if job_status in ("failure", "failed", "cancelled"):
         decision = "cancelled" if job_status == "cancelled" else "error"
@@ -247,6 +463,7 @@ def build_report(model, report=None, promotion=None, *, env=None, now_ms=None):
     blockers = list(dict.fromkeys(text(value) for value in blockers if text(value)))[:12]
     summary = {
         "promote": "本轮模型已通过检查并发布。",
+        "hold": "本轮没有形成更优且兼容的组合，继续使用现役版本。",
         "updated": "本轮模型已直接更新；发布成功不代表通过晋级，评测结果如下。",
         "shadow": "仅发布影子模型，未切换生产模型。",
         "reject": "本轮未通过晋级，生产模型未切换。",
@@ -256,14 +473,19 @@ def build_report(model, report=None, promotion=None, *, env=None, now_ms=None):
     }[decision]
     repo = text(env.get("GITHUB_REPOSITORY")) or "anthony67158/Short-term-stock-trading"
     result = {
-        "schemaVersion": "quant-retrain-report.v2",
+        "schemaVersion": "quant-retrain-report.v3",
         "at": at,
         "model": model,
         "title": f"{MODEL_LABELS[model]} · 每日重训",
         "decision": decision,
         "summary": summary,
         "body": "\n".join([summary, *(f"{row['label']}：{row['value']}" for row in facts), *blockers]),
-        "details": {"facts": facts, "metrics": metrics, "blockers": blockers},
+        "details": {
+            "facts": facts,
+            "metrics": metrics,
+            "blockers": blockers,
+            **extra_details,
+        },
         "meta": {
             "model": model,
             "runId": run_id,

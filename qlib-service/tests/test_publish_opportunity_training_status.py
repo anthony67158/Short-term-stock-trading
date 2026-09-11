@@ -123,6 +123,52 @@ class OpportunityTrainingStatusTest(unittest.TestCase):
             ],
         )
 
+    def test_selective_release_status_records_hold_decision(self):
+        value = build_training_status(
+            {
+                "state": "SHADOW_READY",
+                "readiness": {
+                    "samples": 1800,
+                    "filled_samples": 700,
+                    "dates": 80,
+                },
+            },
+            {
+                "schemaVersion": "opportunity-selective-release.v1",
+                "action": "KEEP_CURRENT",
+                "reason": "没有组成部分通过整体风险阈值",
+                "championVersion": "opportunity-score.champion",
+                "challengerVersion": "opportunity-score.challenger",
+                "selectedVersion": None,
+                "releaseMode": "NONE",
+                "promotedComponents": [],
+                "compatibleCombinations": 0,
+                "combinationsEvaluated": 3,
+                "compatibility": {
+                    "passed": False,
+                    "blockers": ["Top5净R下置信界必须大于0"],
+                },
+            },
+            active_model={
+                "modelVersion": "opportunity-score.champion",
+                "usagePolicy": "DIRECT",
+                "productionEligible": True,
+            },
+        )
+
+        self.assertEqual(
+            value["promotionBlockers"],
+            ["Top5净R下置信界必须大于0"],
+        )
+        self.assertEqual(
+            value["lastReleaseDecision"]["action"],
+            "KEEP_CURRENT",
+        )
+        self.assertEqual(
+            value["lastReleaseDecision"]["combinationsEvaluated"],
+            3,
+        )
+
     def test_publishes_compact_status_to_stable_oss_key(self):
         bucket = Bucket({
             "runId": "opportunity-score.prod",

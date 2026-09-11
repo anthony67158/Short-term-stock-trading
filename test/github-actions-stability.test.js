@@ -36,11 +36,13 @@ test('重训主模型、板块模型与V3模型分离运行', () => {
   assert.match(retrain, /Collect mature opportunity outcomes/)
   assert.match(retrain, /Run three-seed LightGBM and CatBoost walk-forward/)
   assert.match(retrain, /Train and evaluate opportunity challenger/)
-  assert.match(retrain, /Publish best available combination as the DIRECT baseline/)
+  assert.match(retrain, /Download current production V3 as champion/)
+  assert.match(retrain, /Select improved V3 components and validate the whole model/)
+  assert.match(retrain, /Publish selected V3 release atomically/)
   assert.match(retrain, /--activate-baseline/)
   assert.match(
     retrain,
-    /if \[ -f opportunity-model\/shadow\/opportunity_meta\.json \]/,
+    /if: steps\.opportunity-selection\.outputs\.publish == 'true'/,
   )
   assert.match(retrain, /Preflight - Tushare板块数据源/)
   assert.match(retrain, /TushareClient\(timeout=20, retries=1\)/)
@@ -59,6 +61,6 @@ test('Actions总是保留诊断产物且发布报告失败不遮蔽训练结果'
   assert.match(retrain, /if-no-files-found:\s*warn/)
   assert.match(
     retrain,
-    /Publish result to in-app quant report[\s\S]*continue-on-error:\s*true/,
+    /Publish V3 result to in-app quant report[\s\S]*continue-on-error:\s*true/,
   )
 })
