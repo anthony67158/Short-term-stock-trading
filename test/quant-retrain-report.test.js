@@ -95,6 +95,7 @@ test('量化汇报弹窗展示任务状态、训练结果和GitHub运行入口',
   const store = read('src/quantReportStore.js')
 
   assert.match(api, /normalizeRetrainRun/)
+  assert.match(api, /v3WorkflowRun\(workflow, reports\)/)
   assert.match(api, /api\.github\.com\/repos\/anthony67158\/Short-term-stock-trading\/actions\/workflows\/daily-retrain\.yml\/runs/)
   assert.match(api, /workflow/)
   assert.match(store, /workflow:/)
@@ -102,7 +103,7 @@ test('量化汇报弹窗展示任务状态、训练结果和GitHub运行入口',
   assert.match(store, /clear_v3/)
   assert.match(api, /quantReportModel\(record\) === 'opportunity'/)
   assert.match(component, /V3 每日训练与发布/)
-  assert.match(component, /每日重训任务/)
+  assert.match(component, /V3每日训练任务/)
   assert.match(component, /训练中/)
   assert.match(component, /运行详情/)
   assert.match(component, /r\.meta\?\.runNumber/)

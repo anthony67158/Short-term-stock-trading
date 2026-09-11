@@ -67,3 +67,28 @@ test('每日重训把新成熟结果压实进版本化历史基线', () => {
     /--input opportunity-outcomes\.json/,
   )
 })
+
+test('市场归档强制使用QUANT_KEY且不再依赖Tushare', () => {
+  const archive = workflow.split('  market-data-archive:')[1] || ''
+
+  assert.match(
+    archive,
+    /for name in \\\s*QUANT_KEY \\\s*OSS_ACCESS_KEY_ID/,
+  )
+  assert.match(archive, /继续使用现有OSS市场归档/)
+  assert.match(archive, /X-API-Key: \$QUANT_KEY/)
+  assert.doesNotMatch(archive, /archive_tushare_market_day/)
+  assert.doesNotMatch(archive, /TUSHARE_TOKEN/)
+})
+
+test('辅助模型异常会留审计但不再拖垮V3主训练状态', () => {
+  const stock = workflow.split('  stock-retrain:')[1]
+    ?.split('\n  opportunity-retrain:')[0] || ''
+
+  assert.match(stock, /continue-on-error: true/)
+  assert.match(stock, /id: stock-training/)
+  assert.match(stock, /Record auxiliary retrain failure/)
+  assert.match(stock, /stage.*github-actions/)
+  assert.match(stock, /\("失败阶段", rec\.get\("stage", "-"\)\)/)
+  assert.match(stock, /\("错误详情", rec\.get\("error", "-"\)\)/)
+})

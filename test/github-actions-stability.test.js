@@ -20,11 +20,12 @@ test('所有Python Actions共享精确版本依赖并包含TestClient运行时',
   assert.doesNotMatch(retrain, /pip install "fastapi/)
 })
 
-test('重训主模型、板块模型与V3模型分离运行', () => {
+test('日线辅助模型与V3分离运行且每日流程不依赖Tushare', () => {
   assert.match(retrain, /^\s{2}verify:/m)
   assert.match(retrain, /^\s{2}stock-retrain:/m)
-  assert.match(retrain, /^\s{2}sector-retrain:/m)
   assert.match(retrain, /^\s{2}opportunity-retrain:/m)
+  assert.doesNotMatch(retrain, /^\s{2}sector-retrain:/m)
+  assert.doesNotMatch(retrain, /TUSHARE_TOKEN:/)
   assert.match(retrain, /needs:\s*verify/)
   assert.match(retrain, /OSS_ALLOW_PUBLIC_NETWORK:\s*"true"/)
   assert.match(
@@ -32,7 +33,6 @@ test('重训主模型、板块模型与V3模型分离运行', () => {
     /OSS_ENDPOINT:\s*https:\/\/oss-cn-hangzhou\.aliyuncs\.com/,
   )
   assert.match(retrain, /Verify stock model OSS connectivity/)
-  assert.match(retrain, /Verify sector model OSS connectivity/)
   assert.match(retrain, /Collect mature opportunity outcomes/)
   assert.match(retrain, /Run three-seed LightGBM and CatBoost walk-forward/)
   assert.match(retrain, /Train and evaluate opportunity challenger/)
@@ -44,14 +44,6 @@ test('重训主模型、板块模型与V3模型分离运行', () => {
     retrain,
     /if: steps\.opportunity-selection\.outputs\.publish == 'true'/,
   )
-  assert.match(retrain, /Preflight - Tushare板块数据源/)
-  assert.match(retrain, /TushareClient\(timeout=20, retries=1\)/)
-  assert.match(retrain, /except urllib\.error\.HTTPError as error:/)
-  assert.match(
-    retrain,
-    /except \(urllib\.error\.URLError, TimeoutError, ConnectionError\) as error:/,
-  )
-  assert.match(retrain, /Skip sector retrain \(数据源不可达\)/)
   assert.match(retrain, /Archive latest completed market day from public sources/)
   assert.match(retrain, /archive-market-day/)
 })

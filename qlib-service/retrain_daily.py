@@ -1193,5 +1193,36 @@ def main():
     log("晋级完成:", json.dumps(rec, ensure_ascii=False))
 
 
+def run_with_audit(entry=main):
+    """Guarantee an audit record for failures outside the guarded stages."""
+    try:
+        entry()
+        return 0
+    except SystemExit:
+        raise
+    except Exception as error:  # noqa: BLE001
+        record = {
+            "decision": "error",
+            "stage": "unhandled",
+            "errorType": type(error).__name__,
+            "error": str(error)[:500],
+            "occurredAt": int(time.time()),
+        }
+        try:
+            append_history(record)
+        except Exception as audit_error:  # noqa: BLE001
+            log(
+                "未捕获异常且审计写入失败:",
+                type(audit_error).__name__,
+                str(audit_error)[:160],
+            )
+        log(
+            "未捕获训练异常:",
+            record["errorType"],
+            record["error"],
+        )
+        return 1
+
+
 if __name__ == "__main__":
-    main()
+    sys.exit(run_with_audit())

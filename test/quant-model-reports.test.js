@@ -1,7 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { dedupeQuantReports, formatQuantMetric, opportunityReportSnapshot } from '../shared/quantRetrainReport.js'
+import {
+  dedupeQuantReports,
+  formatQuantMetric,
+  opportunityReportSnapshot,
+  v3WorkflowRun,
+} from '../shared/quantRetrainReport.js'
 import { listReports, readOpportunitySummary } from '../api/quant_report.js'
 
 test('同一轮三个模型分别保留，单模型重试覆盖旧汇报', () => {
@@ -84,4 +89,45 @@ test('V3无论训练成败都发布汇报，选择性上传后才确认发布', 
   assert.ok(publish.indexOf('upload_opportunity_model.py') < publish.indexOf('echo "published=true"'))
   assert.match(publish, /--release-decision/)
   assert.match(workflow, /test_publish_model_retrain_report\.py/)
+})
+
+test('量化汇报用V3任务结果覆盖整条工作流的辅助任务失败', () => {
+  const run = v3WorkflowRun({
+    current: null,
+    latest: {
+      runId: 34521836061,
+      runNumber: 36,
+      state: 'failed',
+      status: 'completed',
+      conclusion: 'failure',
+    },
+  }, [{
+    model: 'opportunity',
+    meta: {
+      runId: 34521836061,
+      workflowStatus: 'success',
+    },
+  }])
+
+  assert.equal(run.state, 'success')
+  assert.equal(run.conclusion, 'success')
+  assert.equal(run.scope, 'opportunity-retrain')
+})
+
+test('V3已完成时不被仍在运行的辅助任务误报为训练中', () => {
+  const run = v3WorkflowRun({
+    current: {
+      runId: 42,
+      runNumber: 37,
+      state: 'running',
+      status: 'in_progress',
+      conclusion: null,
+    },
+  }, [{
+    model: 'opportunity',
+    meta: { runId: 42, workflowStatus: 'success' },
+  }])
+
+  assert.equal(run.state, 'success')
+  assert.equal(run.scope, 'opportunity-retrain')
 })

@@ -59,6 +59,43 @@ export function normalizeRetrainRun(run, now = Date.now()) {
   }
 }
 
+function completedState(status) {
+  const value = String(status || '').toLowerCase()
+  if (value === 'success') return 'success'
+  if (value === 'cancelled') return 'cancelled'
+  if (value === 'failure' || value === 'failed') return 'failed'
+  return 'unknown'
+}
+
+export function v3WorkflowRun(workflow, reports = []) {
+  const current = workflow?.current
+  const normalizedReports = Array.isArray(reports) ? reports : []
+  const reportFor = (run) => normalizedReports.find((item) => (
+    quantReportModel(item) === 'opportunity'
+    && positiveInteger(item?.meta?.runId) === run?.runId
+  ))
+  const completedV3 = (run) => {
+    const state = completedState(reportFor(run)?.meta?.workflowStatus)
+    return state === 'unknown'
+      ? null
+      : {
+          ...run,
+          state,
+          status: 'completed',
+          conclusion: state === 'failed' ? 'failure' : state,
+          scope: 'opportunity-retrain',
+        }
+  }
+  const currentV3 = completedV3(current)
+  if (currentV3) return currentV3
+  if (current?.state === 'running' || current?.state === 'queued') {
+    return { ...current, scope: 'daily-retrain' }
+  }
+  const latest = workflow?.latest
+  if (!latest) return null
+  return completedV3(latest) || { ...latest, scope: 'daily-retrain' }
+}
+
 function legacySignature(report) {
   return [
     String(report?.decision || ''),

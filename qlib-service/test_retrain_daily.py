@@ -35,6 +35,30 @@ def load_retrain_daily():
 
 
 class ForwardHoldoutSplitTest(unittest.TestCase):
+    def test_unhandled_failure_is_audited_before_returning_nonzero(self):
+        retrain = load_retrain_daily()
+        records = []
+
+        with (
+            mock.patch.object(
+                retrain,
+                "append_history",
+                side_effect=records.append,
+            ),
+            mock.patch.object(retrain, "log"),
+        ):
+            code = retrain.run_with_audit(
+                lambda: (_ for _ in ()).throw(
+                    RuntimeError("training exploded")
+                )
+            )
+
+        self.assertEqual(code, 1)
+        self.assertEqual(records[0]["decision"], "error")
+        self.assertEqual(records[0]["stage"], "unhandled")
+        self.assertEqual(records[0]["errorType"], "RuntimeError")
+        self.assertIn("training exploded", records[0]["error"])
+
     def test_dependency_stubs_do_not_leak_between_test_modules(self):
         before = {
             name: sys.modules.get(name)

@@ -94,6 +94,7 @@ jobs:
 
   stock-retrain:
     needs: verify
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     defaults:
@@ -169,12 +170,49 @@ jobs:
           echo "reachable=$(cat preflight.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Run champion-challenger retrain
+        id: stock-training
         if: steps.preflight.outputs.reachable == 'ok'
+        continue-on-error: true
         run: python retrain_daily.py --pool 600 --bars 700 --horizon 5
 
       - name: Skip notice (数据源不可达)
         if: steps.preflight.outputs.reachable != 'ok'
         run: echo "::warning::行情数据源(新浪/腾讯 CN)在本次 CI 出口 IP 下不可达,已跳过当日重训(线上保持冠军不变,非代码故障)。"
+
+      - name: Record auxiliary retrain failure
+        if: always() && steps.stock-training.outcome == 'failure'
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import time
+
+          path = "retrain_history.jsonl"
+          has_record = False
+          if os.path.isfile(path):
+              with open(path, encoding="utf-8") as handle:
+                  has_record = any(line.strip() for line in handle)
+          if not has_record:
+              record = {
+                  "decision": "error",
+                  "stage": "github-actions",
+                  "reason": "auxiliary_stock_retrain_failed",
+                  "error": (
+                      "36因子日线辅助模型训练进程异常退出；"
+                      "V3主训练继续运行"
+                  ),
+                  "occurredAt": int(time.time()),
+              }
+              with open(path, "a", encoding="utf-8") as handle:
+                  handle.write(
+                      json.dumps(record, ensure_ascii=False) + "\n"
+                  )
+          print(
+              "::warning title=Auxiliary stock retrain failed::"
+              "36因子辅助模型本轮失败，已保留现役版本并写入审计；"
+              "V3主训练不受影响"
+          )
+          PY
 
       - name: Publish retrain decision
         if: always()
@@ -198,6 +236,8 @@ jobs:
               fields = [
                   ("决策", rec.get("decision", "unknown")),
                   ("原因", rec.get("reason", "-")),
+                  ("失败阶段", rec.get("stage", "-")),
+                  ("错误详情", rec.get("error", "-")),
                   ("样本数", rec.get("n_samples", "-")),
                   ("冠军 AUC", rec.get("champ_baseline_auc", "-")),
                   ("挑战者 AUC", rec.get("chall_holdout_auc", "-")),
@@ -422,7 +462,6 @@ jobs:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PIP_DEFAULT_TIMEOUT: "90"
       QUANT_KEY: ${{ secrets.QUANT_KEY }}
-      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
       OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
@@ -444,10 +483,14 @@ jobs:
           python -m pip install --retries 5 -r requirements-ci.txt
           python -m pip check
 
-      - name: Verify archive secrets
+      - name: Verify archive storage configuration
         run: |
           missing=0
-          for name in QUANT_KEY
+          for name in \
+            QUANT_KEY \
+            OSS_ACCESS_KEY_ID \
+            OSS_ACCESS_KEY_SECRET \
+            OSS_BUCKET
           do
             if [ -z "${!name}" ]; then
               echo "::error title=Missing Actions secret::$name 未配置"
@@ -469,29 +512,34 @@ jobs:
             https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run/archive-market-day \
             > market-archive-report.json
 
-      - name: Temporary Tushare fallback while token is available
+      - name: Reuse existing OSS history when archive endpoint is unavailable
         if: steps.public-archive.outcome != 'success'
         run: |
-          if [ -z "$TUSHARE_TOKEN" ]; then
-            echo "::error::公开行情归档失败，且Tushare临时令牌不可用"
-            exit 1
-          fi
-          python archive_tushare_market_day.py \
-            --universe-size 1000 \
-            --max-per-min 120 \
-            --report market-archive-report.json
+          python - <<'PY'
+          import json
+          import time
+          with open(
+              "market-archive-report.json",
+              "w",
+              encoding="utf-8",
+          ) as handle:
+              json.dump({
+                  "status": "REUSED_EXISTING_ARCHIVE",
+                  "generatedAt": int(time.time()),
+                  "reason": (
+                      "杭州量化FC归档端点暂时不可用；"
+                      "本轮训练继续使用现有OSS历史"
+                  ),
+              }, handle, ensure_ascii=False, indent=2)
+          print(
+              "::warning title=Market archive reused::"
+              "本轮没有新增市场归档，V3继续使用现有OSS市场归档训练"
+          )
+          PY
 
       - name: Refresh online five-day fund history
-        run: python publish_recent_fund_history.py
-
-      - name: Refresh sector membership while Tushare is available
         continue-on-error: true
-        run: |
-          if [ -n "$TUSHARE_TOKEN" ]; then
-            python archive_tushare_sector_membership.py --publish
-          else
-            echo "Tushare token unavailable; using the existing OSS membership archive."
-          fi
+        run: python publish_recent_fund_history.py
 
       - name: Publish archive summary
         if: always()
@@ -512,152 +560,4 @@ jobs:
         with:
           name: market-data-archive-${{ github.run_id }}
           path: qlib-service/market-archive-report.json
-          if-no-files-found: warn
-
-  sector-retrain:
-    needs:
-      - verify
-      - market-data-archive
-    if: ${{ always() && needs.verify.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    defaults:
-      run:
-        working-directory: qlib-service
-    env:
-      PYTHONUNBUFFERED: "1"
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_DEFAULT_TIMEOUT: "90"
-      TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
-      OSS_ALLOW_PUBLIC_NETWORK: "true"
-      OSS_REGION: oss-cn-hangzhou
-      SECTOR_MODEL_PREFIX: sectormodel/
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Use Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: qlib-service/requirements-ci.txt
-
-      - name: Install locked training dependencies
-        run: |
-          python -m pip install --retries 5 -r requirements-ci.txt
-          python -m pip check
-
-      - name: Verify required training secrets
-        run: |
-          missing=0
-          for name in \
-            OSS_ACCESS_KEY_ID \
-            OSS_ACCESS_KEY_SECRET \
-            OSS_BUCKET
-          do
-            if [ -z "${!name}" ]; then
-              echo "::error title=Missing Actions secret::$name 未配置"
-              missing=1
-            fi
-          done
-          exit "$missing"
-
-      - name: Verify sector model OSS connectivity
-        run: |
-          python - <<'PY'
-          from upload_model import bucket
-          meta = bucket().head_object("sectormodel/meta.json")
-          if int(meta.content_length or 0) <= 0:
-              raise RuntimeError("sectormodel/meta.json is empty")
-          print("[preflight] sector model OSS reachable")
-          PY
-
-      - name: Restore sector history cache
-        uses: actions/cache@v5
-        with:
-          path: qlib-service/sector_raw_cache.json.gz
-          key: sector-raw-${{ runner.os }}-${{ github.run_number }}
-          restore-keys: |
-            sector-raw-${{ runner.os }}-
-
-      - name: Preflight - Tushare板块数据源
-        id: sector-preflight
-        run: |
-          python - <<'PY'
-          import datetime as dt
-          import os
-          import urllib.error
-          from tushare_client import TushareClient
-
-          state = "skip"
-          if not os.environ.get("TUSHARE_TOKEN"):
-              print("[preflight] Tushare token unavailable; keep current sector model")
-              open("sector_preflight.txt", "w").write(state)
-              raise SystemExit(0)
-          try:
-              end = dt.date.today()
-              start = end - dt.timedelta(days=14)
-              rows = TushareClient(timeout=20, retries=1).trade_cal(
-                  start_date=start.strftime("%Y%m%d"),
-                  end_date=end.strftime("%Y%m%d"),
-              )
-              state = "ok" if rows else "skip"
-              print(f"[preflight] tushare rows={len(rows)}")
-          except urllib.error.HTTPError as error:
-              if error.code not in (408, 425, 429, 500, 502, 503, 504):
-                  raise
-              print(
-                  "::warning title=Tushare preflight failed::"
-                  + str(error)[:180]
-              )
-          except (urllib.error.URLError, TimeoutError, ConnectionError) as error:
-              print(
-                  "::warning title=Tushare preflight failed::"
-                  + str(error)[:180]
-              )
-          with open("sector_preflight.txt", "w") as handle:
-              handle.write(state)
-          PY
-          echo "reachable=$(cat sector_preflight.txt)" >> "$GITHUB_OUTPUT"
-
-      - name: Build incremental sector dataset
-        if: steps.sector-preflight.outputs.reachable == 'ok'
-        shell: bash
-        run: |
-          status=1
-          for attempt in 1 2 3; do
-            if python build_sector_dataset.py --start-date 20230911; then
-              status=0
-              break
-            fi
-            echo "::warning::板块数据更新第 ${attempt} 次失败，准备重试"
-            sleep $((attempt * 20))
-          done
-          exit "$status"
-
-      - name: Skip sector retrain (数据源不可达)
-        if: steps.sector-preflight.outputs.reachable != 'ok'
-        run: echo "::warning::Tushare本轮不可达，已安全保留现役板块冠军"
-
-      - name: Run sector champion-challenger retrain
-        if: steps.sector-preflight.outputs.reachable == 'ok'
-        shell: bash
-        run: |
-          set -o pipefail
-          python train_sector_model.py |
-            tee sector_retrain_result.json
-
-      - name: Upload sector retrain diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: sector-retrain-${{ github.run_id }}
-          path: |
-            qlib-service/sector_retrain_result.json
-            qlib-service/sector_meta.json
-            qlib-service/sector_hard_errors.json
           if-no-files-found: warn

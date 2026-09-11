@@ -48,8 +48,9 @@ V3 训练数据分两层保存在 OSS：成熟标签使用
 可复算的日线、资金流和因果股票池 5 分钟线使用
 `opportunitymodel/market-data/v1/` 按交易日不可变归档并校验 SHA-256。
 原始行情不得直接充当标签。每日市场分片由杭州量化 FC 使用东方财富主源、
-腾讯回退写入 OSS；Tushare 只用于短期历史补齐和低频行业成员刷新，Token
-到期不得中断 V3 每日训练。
+腾讯回退写入 OSS；`daily-retrain.yml` 必须使用仓库 Secret `QUANT_KEY`
+调用该 FC，不得读取或回退到 `TUSHARE_TOKEN`。Tushare 只允许人工历史回填，
+不得成为 V3 每日训练依赖。归档端点短暂失败时明确记录并复用现有 OSS 历史。
 
 ## 铁律：前端改动必须双部署
 

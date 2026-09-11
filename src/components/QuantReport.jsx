@@ -51,13 +51,13 @@ function formatDuration(seconds) {
 }
 
 function WorkflowStatus({ workflow }) {
-  const run = workflow?.current || workflow?.latest
+  const run = workflow?.v3 || workflow?.current || workflow?.latest
   if (!run) {
     return (
       <section className="qrp-runtime qrp-runtime-neutral">
         <div className="qrp-runtime-title">
           <Icon name="activity" size={15} />
-          <span>每日重训任务</span>
+          <span>V3每日训练任务</span>
           <b>状态暂不可用</b>
         </div>
       </section>
@@ -68,7 +68,7 @@ function WorkflowStatus({ workflow }) {
     <section className={`qrp-runtime qrp-runtime-${meta.tone}`}>
       <div className="qrp-runtime-title">
         <Icon name={run.state === 'running' ? 'refresh' : 'activity'} size={15} className={run.state === 'running' ? 'spin' : ''} />
-        <span>每日重训任务</span>
+        <span>V3每日训练任务</span>
         <b>{meta.label}</b>
       </div>
       <div className="qrp-runtime-facts">

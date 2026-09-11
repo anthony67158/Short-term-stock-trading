@@ -5,6 +5,7 @@ import {
   normalizeRetrainRun,
   opportunityReportSnapshot,
   quantReportModel,
+  v3WorkflowRun,
 } from '../shared/quantRetrainReport.js';
 
 // ============ V3 每日训练与发布台账（阿里云 OSS 持久化）============
@@ -126,7 +127,15 @@ export default async function handler(req, res) {
         workflowStatus(),
         readOpportunitySummary(),
       ]);
-      return ok(res, { ok: true, reports, workflow, opportunity });
+      return ok(res, {
+        ok: true,
+        reports,
+        workflow: {
+          ...workflow,
+          v3: v3WorkflowRun(workflow, reports),
+        },
+        opportunity,
+      });
     }
 
     if (req.method === 'POST') {

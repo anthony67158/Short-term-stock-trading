@@ -7,16 +7,15 @@ const workflow = readFileSync(
   'utf8',
 )
 
-test('每日归档上一完整交易日并只从Actions Secret读取凭证', () => {
-  const job = workflow.split('  market-data-archive:')[1]
-    ?.split('\n  sector-retrain:')[0] || ''
+test('每日归档只使用QUANT_KEY调用杭州量化FC', () => {
+  const job = workflow.split('  market-data-archive:')[1] || ''
 
   assert.match(job, /needs: verify/)
   assert.match(job, /timeout-minutes: 35/)
-  assert.match(job, /TUSHARE_TOKEN: \$\{\{ secrets\.TUSHARE_TOKEN \}\}/)
-  assert.match(job, /archive_tushare_market_day\.py/)
-  assert.match(job, /--universe-size 1000/)
-  assert.match(job, /--max-per-min 120/)
+  assert.match(job, /QUANT_KEY: \$\{\{ secrets\.QUANT_KEY \}\}/)
+  assert.match(job, /X-API-Key: \$QUANT_KEY/)
+  assert.match(job, /REUSED_EXISTING_ARCHIVE/)
+  assert.doesNotMatch(job, /TUSHARE_TOKEN|archive_tushare/)
   assert.doesNotMatch(job, /token=[a-f0-9]{20,}/i)
 })
 
@@ -37,12 +36,15 @@ test('市场归档合同进入每日重训验证门禁', () => {
   assert.match(workflow, /tests\/test_archive_tushare_market_day\.py/)
 })
 
-test('市场归档与板块训练串行使用同一Tushare限流额度', () => {
-  const job = workflow.split('  sector-retrain:')[1] || ''
+test('V3训练等待市场归档且每日流程不依赖Tushare', () => {
+  const job = workflow.split('  opportunity-retrain:')[1]
+    ?.split('\n  market-data-archive:')[0] || ''
 
-  assert.match(job, /needs:\s*\n\s+- verify\s*\n\s+- market-data-archive/)
   assert.match(
     job,
     /if: \$\{\{ always\(\) && needs\.verify\.result == 'success' \}\}/,
   )
+  assert.match(job, /needs:\s*\n\s+- verify\s*\n\s+- market-data-archive/)
+  assert.doesNotMatch(workflow, /^\s{2}sector-retrain:/m)
+  assert.doesNotMatch(workflow, /TUSHARE_TOKEN:/)
 })

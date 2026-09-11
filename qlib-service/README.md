@@ -80,10 +80,11 @@ python3 upload_opportunity_model.py \
 10:20、13:40、15:10 运行，17:10 结算。历史加速回填的数据合同见
 `../docs/v3-opportunity-history-data.md`。
 
-每日原始市场数据不依赖 Tushare。GitHub Actions 调用杭州量化 FC 的
-`POST /archive-market-day`，由 FC 使用东方财富全市场/历史 5 分钟接口并以
-腾讯 5 分钟接口兜底，完整性通过后写入 OSS。Tushare 只保留为短期回填和
-行业成员刷新工具。
+每日原始市场数据不依赖 Tushare。GitHub Actions 使用仓库 Secret
+`QUANT_KEY` 调用杭州量化 FC 的 `POST /archive-market-day`，由 FC 使用
+东方财富全市场/历史 5 分钟接口并以腾讯 5 分钟接口兜底，完整性通过后写入
+OSS。`daily-retrain.yml` 不读取 `TUSHARE_TOKEN`；Tushare 只保留为人工历史
+回填工具。归档端点短暂不可用时，本轮明确记录降级并复用现有 OSS 历史。
 
 ## 生产架构
 
