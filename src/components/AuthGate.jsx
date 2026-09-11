@@ -195,7 +195,7 @@ export function AccountMenu() {
               {searchConfig.hasKey ? '更换豆包 API Key' : '配置豆包 API Key'}
             </button>
             <button type="button" role="menuitem" className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false) }}>
-              <Icon name="gauge" size={13} />量化汇报
+              <Icon name="gauge" size={13} />V3训练发布
             </button>
             <button type="button" role="menuitem" className="acct-item" onClick={() => themeStore.toggle()}>
               <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={13} />

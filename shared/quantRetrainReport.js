@@ -89,6 +89,7 @@ export function formatQuantMetric(value, unit = 'number') {
   if (numeric == null) return '未提供'
   if (unit === 'percent') return `${(numeric * 100).toFixed(2)}%`
   if (unit === 'r') return `${numeric.toFixed(3)} R`
+  if (unit === 'ms') return `${numeric.toFixed(2)} ms`
   return numeric.toFixed(4)
 }
 
@@ -106,11 +107,27 @@ export function opportunityReportSnapshot(value) {
     DIRECT_ACTIVE: '当前模型直接使用',
   }
   const readiness = value.readiness || {}
+  const release = value.lastReleaseDecision
+  const lastReleaseDecision = release && typeof release === 'object'
+    ? {
+        action: release.action === 'PUBLISH' ? 'PUBLISH' : 'KEEP_CURRENT',
+        reason: String(release.reason || '').slice(0, 180),
+        releaseMode: ['FULL', 'PARTIAL', 'NONE'].includes(release.releaseMode)
+          ? release.releaseMode
+          : 'NONE',
+        promotedComponents: Array.isArray(release.promotedComponents)
+          ? release.promotedComponents.map(String).slice(0, 8)
+          : [],
+      }
+    : null
   return {
     at,
     label: labels[value.state] || '状态待核对',
     productionEligible: value.productionEligible === true,
     directUse: value.usagePolicy === 'DIRECT' || value.activeModel?.usagePolicy === 'DIRECT',
+    modelVersion: String(
+      value.activeModel?.modelVersion || value.modelVersion || '',
+    ) || null,
     samples: finite(readiness.samples),
     filledSamples: finite(readiness.filledSamples ?? readiness.filled_samples),
     dates: finite(readiness.dates),
@@ -118,6 +135,7 @@ export function opportunityReportSnapshot(value) {
       ...(Array.isArray(readiness.blockers) ? readiness.blockers : []),
       ...(Array.isArray(value.promotionBlockers) ? value.promotionBlockers : []),
     ])].map((item) => String(item).slice(0, 180)).slice(0, 8),
+    lastReleaseDecision,
   }
 }
 

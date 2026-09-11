@@ -10,6 +10,7 @@ import './QuantReport.css'
 
 const DECISION_META = {
   promote: { label: '已发布', tone: 'ok' },
+  hold: { label: '维持现役', tone: 'neutral' },
   updated: { label: '已更新', tone: 'neutral' },
   shadow: { label: '仅影子发布', tone: 'neutral' },
   reject: { label: '未通过晋级', tone: 'warn' },
@@ -90,15 +91,26 @@ function OpportunityStatus({ value }) {
   if (!value) return null
   const count = (number) => number == null || !Number.isFinite(Number(number))
     ? '未提供' : Number(number).toLocaleString('zh-CN')
+  const lastRelease = value.lastReleaseDecision
+  const releaseLabel = lastRelease?.action === 'PUBLISH'
+    ? lastRelease.releaseMode === 'PARTIAL' ? '选择性晋级' : '整包晋级'
+    : '维持现役'
   return (
     <section className="qrp-opportunity" aria-label="V3 当前状态">
       <div className="qrp-section-head"><h3>V3 当前状态</h3><span>{value.label}</span></div>
-      <p className="qrp-conclusion">{value.directUse ? '当前V3已启用，评测记录不限制使用' : value.productionEligible ? '生产模型已就绪' : '尚未切换生产模型'}</p>
+      <p className="qrp-conclusion">{value.directUse ? '当前V3已启用，只有通过冠军对照与整体风险验证的新组合才会替换它' : value.productionEligible ? '生产模型已就绪' : '尚未切换生产模型'}</p>
       <dl className="qrp-stats">
+        <div><dt>生产版本</dt><dd>{value.modelVersion || '未提供'}</dd></div>
         <div><dt>成熟样本</dt><dd>{count(value.samples)}</dd></div>
         <div><dt>完整成交样本</dt><dd>{count(value.filledSamples)}</dd></div>
         <div><dt>独立交易日</dt><dd>{count(value.dates)}</dd></div>
       </dl>
+      {lastRelease && (
+        <p className="qrp-release-line">
+          最近决策 <b>{releaseLabel}</b>
+          {lastRelease.promotedComponents?.length > 0 && ` · ${lastRelease.promotedComponents.length} 个组成部分`}
+        </p>
+      )}
       {value.blockers?.length > 0 && <ul className="qrp-reasons">{value.blockers.map((item) => <li key={item}>{humanizeUserFacingText(item)}</li>)}</ul>}
       <p className="qrp-sync-note">最近记录 {formatTime(value.at)}</p>
     </section>
@@ -119,6 +131,50 @@ function parseBody(body) {
   return { fields, rest }
 }
 
+function ComponentDecisions({ components }) {
+  if (!Array.isArray(components) || components.length === 0) return null
+  const statusLabel = {
+    IMPROVED: '可晋级',
+    BLOCKED: '已拦截',
+    UNCHANGED: '无提升',
+  }
+  return (
+    <section className="qrp-components" aria-label="组成部分评估">
+      <h4>组成部分评估</h4>
+      <div className="qrp-component-list">
+        {components.map((item) => (
+          <div className="qrp-component" key={item.component || item.label}>
+            <div>
+              <strong>{item.label || '模型组成'}</strong>
+              <span data-status={item.status}>{statusLabel[item.status] || '待核对'}</span>
+            </div>
+            {[...(item.improvements || []), ...(item.blockers || [])].slice(0, 2).map((line) => (
+              <p key={line}>{humanizeUserFacingText(line)}</p>
+            ))}
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function RiskThresholds({ thresholds }) {
+  const value = thresholds?.overall
+  if (!value || typeof value !== 'object') return null
+  return (
+    <section className="qrp-thresholds" aria-label="整体发布风险阈值">
+      <h4>整体发布硬阈值</h4>
+      <ul>
+        <li>净R下置信界必须大于 {formatQuantMetric(value.lowerBoundMinimum, 'r')}</li>
+        <li>Top5费后净R最多下降 {formatQuantMetric(value.meanNetRMaxDrop, 'r')}</li>
+        <li>Top5命中率最多下降 {formatQuantMetric(value.precisionMaxDrop, 'percent')}</li>
+        <li>最大回撤增幅不得超过 {formatQuantMetric(value.drawdownRelativeIncrease, 'percent')} 或 {formatQuantMetric(value.drawdownAbsoluteIncrease, 'r')}</li>
+        <li>千条推理耗时增幅不得超过 {formatQuantMetric(value.inferenceLatencyRelativeIncrease, 'percent')} 且超过 {formatQuantMetric(value.inferenceLatencyAbsoluteIncreaseMsPer1000, 'ms')}</li>
+      </ul>
+    </section>
+  )
+}
+
 function ReportCard({ r, busy, expanded }) {
   const meta = DECISION_META[r.decision] || null
   const legacy = parseBody(humanizeUserFacingText(r.body))
@@ -126,6 +182,7 @@ function ReportCard({ r, busy, expanded }) {
   const fields = structured && Array.isArray(r.details.facts) ? r.details.facts : legacy.fields
   const metrics = Array.isArray(r.details?.metrics) ? r.details.metrics : []
   const blockers = Array.isArray(r.details?.blockers) ? r.details.blockers : []
+  const components = Array.isArray(r.details?.components) ? r.details.components : []
   const url = safeRunUrl(r.meta?.workflowUrl)
   return (
     <article className={'qrp-card' + (meta ? ' qrp-' + meta.tone : '')} data-model={quantReportModel(r)}>
@@ -155,14 +212,17 @@ function ReportCard({ r, busy, expanded }) {
           </dl>
         )}
         {metrics.length > 0 && <table className="qrp-metrics">
-          <caption>样本外评估</caption>
-          <thead><tr><th scope="col">指标</th><th scope="col">本次候选</th><th scope="col">对照</th></tr></thead>
+          <caption>同一独立盲测集整体评估</caption>
+          <thead><tr><th scope="col">指标</th><th scope="col">生产对照</th><th scope="col">本次训练</th><th scope="col">发布组合</th></tr></thead>
           <tbody>{metrics.map((item, index) => <tr key={index}>
             <th scope="row">{item.label}</th>
+            <td>{formatQuantMetric(item.champion ?? item.baseline, item.unit)}</td>
             <td>{formatQuantMetric(item.challenger, item.unit)}</td>
-            <td>{formatQuantMetric(item.baseline, item.unit)}</td>
+            <td>{formatQuantMetric(item.selected, item.unit)}</td>
           </tr>)}</tbody>
         </table>}
+        <ComponentDecisions components={components} />
+        <RiskThresholds thresholds={r.details?.thresholds} />
         {blockers.length > 0 && <ul className="qrp-reasons">{blockers.map((item, index) => <li key={index}>{humanizeUserFacingText(item)}</li>)}</ul>}
         {!structured && legacy.rest.length > 0 && <div className="qrp-note">{legacy.rest.join('\n')}</div>}
       </details>
@@ -172,13 +232,12 @@ function ReportCard({ r, busy, expanded }) {
 
 export default function QuantReport() {
   const { reports, workflow, opportunity, loading, mutating, error } = useQuantReportStore()
-  const [model, setModel] = useState('all')
   const [confirmClear, setConfirmClear] = useState(false)
   const panel = useRef(null)
   const closeButton = useRef(null)
   const onClose = () => quantReportUiStore.close()
   const busy = loading || mutating
-  const visibleReports = reports.filter((row) => model === 'all' || quantReportModel(row) === model)
+  const visibleReports = reports.filter((row) => quantReportModel(row) === 'opportunity')
 
   useEffect(() => {
     const previous = document.activeElement
@@ -215,9 +274,9 @@ export default function QuantReport() {
 
   return (
     <div className="modal-mask qrp-mask" onClick={onClose} onKeyDown={handleKey}>
-      <div ref={panel} className="qrp-panel" role="dialog" aria-modal="true" aria-label="量化汇报" onClick={(e) => e.stopPropagation()}>
+      <div ref={panel} className="qrp-panel" role="dialog" aria-modal="true" aria-label="V3每日训练与发布" onClick={(e) => e.stopPropagation()}>
         <div className="qrp-bar">
-          <h2 className="qrp-heading"><Icon name="gauge" size={18} /> 量化汇报</h2>
+          <h2 className="qrp-heading"><Icon name="gauge" size={18} /> V3 每日训练与发布</h2>
           <div className="qrp-actions">
             <button className="qrp-close" title="刷新汇报" aria-label="刷新汇报" disabled={busy} aria-busy={loading} onClick={() => quantReportStore.load({ force: true })}>
               <Icon name="refresh" size={16} />
@@ -225,14 +284,14 @@ export default function QuantReport() {
             <button className="qrp-close" title="清空全部汇报" aria-label="清空全部汇报" disabled={busy || !reports.length} onClick={() => setConfirmClear(true)}>
               <Icon name="trash" size={16} />
             </button>
-            <button ref={closeButton} className="qrp-close" onClick={onClose} title="关闭量化汇报" aria-label="关闭量化汇报"><Icon name="close" size={16} /></button>
+            <button ref={closeButton} className="qrp-close" onClick={onClose} title="关闭V3训练发布" aria-label="关闭V3训练发布"><Icon name="close" size={16} /></button>
           </div>
         </div>
 
         <div className="qrp-scroll">
           {error && <div className="qrp-error" role="alert">{error}</div>}
           {confirmClear && <section className="qrp-confirm" aria-label="清空汇报确认">
-            <p>清空全部模型的历史汇报？此操作无法撤销。</p>
+            <p>清空全部 V3 训练与发布历史？此操作无法撤销。</p>
             <div>
               <button className="qrp-btn" disabled={busy} onClick={() => setConfirmClear(false)}>取消</button>
               <button className="qrp-btn" disabled={busy} onClick={async () => {
@@ -245,13 +304,8 @@ export default function QuantReport() {
           </section>}
           <WorkflowStatus workflow={workflow} />
           <OpportunityStatus value={opportunity} />
-          <div className="qrp-filters" role="group" aria-label="模型筛选">
-            {Object.entries({ all: '全部', ...QUANT_REPORT_MODELS }).map(([key, label]) => (
-              <button key={key} aria-pressed={model === key} onClick={() => setModel(key)}>{label}</button>
-            ))}
-          </div>
           {loading && reports.length === 0 ? (
-            <div className="qrp-empty"><Icon name="refresh" size={16} className="spin" /><span>正在加载量化每日汇报…</span></div>
+            <div className="qrp-empty"><Icon name="refresh" size={16} className="spin" /><span>正在加载 V3 训练与发布记录…</span></div>
           ) : error && reports.length === 0 ? (
             <div className="qrp-empty">
               <button className="qrp-btn" disabled={busy} onClick={() => quantReportStore.load({ force: true })}><Icon name="refresh" size={14} />重试</button>
@@ -259,19 +313,19 @@ export default function QuantReport() {
           ) : visibleReports.length === 0 ? (
             <div className="qrp-empty">
               <Icon name="gauge" size={22} />
-              <span>{model === 'all' ? '暂无量化汇报' : `${QUANT_REPORT_MODELS[model]}暂无历史汇报`}</span>
+              <span>暂无 V3 训练与发布记录</span>
             </div>
           ) : (
             <>
               <div className="qrp-count" role="status">最近 {visibleReports.length} 条汇报{loading ? ' · 正在更新' : ''}</div>
               <div className="qrp-list">
-                {visibleReports.map((r, index) => <ReportCard key={`${model}:${r.id}`} r={r} busy={busy} expanded={index === 0} />)}
+                {visibleReports.map((r, index) => <ReportCard key={r.id} r={r} busy={busy} expanded={index === 0} />)}
               </div>
             </>
           )}
         </div>
 
-        <div className="qrp-foot">工作日 01:15（北京时间）计划重训 · 样本外评估不代表实盘收益</div>
+        <div className="qrp-foot">工作日 01:15（北京时间）自动训练 · 仅更优且通过整体风险验证的组成部分会发布</div>
       </div>
     </div>
   )

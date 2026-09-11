@@ -4,16 +4,17 @@ import {
   dedupeQuantReports,
   normalizeRetrainRun,
   opportunityReportSnapshot,
+  quantReportModel,
 } from '../shared/quantRetrainReport.js';
 
-// ============ 量化每日重训「中文汇报」台账（阿里云 OSS 持久化）============
-// 每天的持续训练定时任务跑完后 POST 一条中文汇报到这里；前端「预警中心 · 量化」页读取展示，
-// 支持单条删除 + 一键清空。彻底替代原来「通过 Mira 推送」的方式。
+// ============ V3 每日训练与发布台账（阿里云 OSS 持久化）============
+// 每轮 V3 训练完成后写入冠军、挑战者、组成部分选择、整体门禁和部署结果。
+// 历史个股/板块报告只读兼容，不再进入量化汇报主视图。
 //
 //   GET  /api/quant_report[?limit=50]        → { ok, reports:[{id,at,decision,title,body,...}] }
 //   POST /api/quant_report { action:'append', title, body, decision?, meta? }  ← 定时任务调用
 //   POST /api/quant_report { action:'delete', id }     单条删除(id = pathname)
-//   POST /api/quant_report { action:'clear' }          清空全部
+//   POST /api/quant_report { action:'clear_v3' }       清空V3记录
 //
 // 存储：每条一个 blob，pathname = quantreport/<ts>.json，读取取全部按时间倒序。
 
@@ -80,7 +81,11 @@ async function workflowStatus() {
 }
 
 // 读全部汇报（倒序，最新在前）
-export async function listReports(limit, storage = { list, readJson }) {
+export async function listReports(
+  limit,
+  storage = { list, readJson },
+  model = 'all',
+) {
   const { blobs } = await storage.list({ prefix: PREFIX, limit: 10000 });
   const sorted = (blobs || []).slice().sort(
     (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime()
@@ -93,7 +98,11 @@ export async function listReports(limit, storage = { list, readJson }) {
     }));
     out.push(...batch.filter(Boolean));
   }
-  return dedupeQuantReports(out).slice(0, limit);
+  return dedupeQuantReports(out)
+    .filter((report) => (
+      model === 'all' || quantReportModel(report) === model
+    ))
+    .slice(0, limit);
 }
 
 export async function readOpportunitySummary(reader = readJson) {
@@ -111,8 +120,9 @@ export default async function handler(req, res) {
   try {
     if (req.method === 'GET') {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+      const model = req.query.model === 'all' ? 'all' : 'opportunity';
       const [reports, workflow, opportunity] = await Promise.all([
-        listReports(limit),
+        listReports(limit, { list, readJson }, model),
         workflowStatus(),
         readOpportunitySummary(),
       ]);
@@ -163,6 +173,17 @@ export default async function handler(req, res) {
       if (action === 'clear') {
         const { blobs } = await list({ prefix: PREFIX, limit: 10000 });
         for (const b of (blobs || [])) await del(b.url);
+        return ok(res, { ok: true });
+      }
+
+      if (action === 'clear_v3') {
+        const { blobs } = await list({ prefix: PREFIX, limit: 10000 });
+        for (const blob of (blobs || [])) {
+          const record = await readJson(blob);
+          if (quantReportModel(record) === 'opportunity') {
+            await del(blob.url);
+          }
+        }
         return ok(res, { ok: true });
       }
 

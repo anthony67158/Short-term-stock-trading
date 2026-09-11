@@ -35,7 +35,9 @@ export function createQuantReportStore({ fetcher = globalThis.fetch, timeoutMs =
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action, id }),
       })
-      state.reports = action === 'clear' ? [] : state.reports.filter((row) => row.id !== id)
+      state.reports = action === 'clear_v3'
+        ? []
+        : state.reports.filter((row) => row.id !== id)
       return true
     } catch {
       state.error = '删除未成功，请刷新后重试'
@@ -55,7 +57,7 @@ export function createQuantReportStore({ fetcher = globalThis.fetch, timeoutMs =
       state.error = ''
       emit()
       try {
-        const payload = await request('/api/quant_report?limit=200&_t=' + Date.now(), { cache: 'no-store' })
+        const payload = await request('/api/quant_report?model=opportunity&limit=200&_t=' + Date.now(), { cache: 'no-store' })
         if (!Array.isArray(payload.reports)) throw new Error('汇报列表无效')
         state.reports = payload.reports
         state.workflow = payload.workflow || null
@@ -70,7 +72,7 @@ export function createQuantReportStore({ fetcher = globalThis.fetch, timeoutMs =
       }
     },
     remove(id) { return mutate('delete', id) },
-    clearAll() { return mutate('clear') },
+    clearAll() { return mutate('clear_v3') },
   }
 }
 

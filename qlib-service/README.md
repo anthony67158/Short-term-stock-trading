@@ -13,8 +13,9 @@ https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run
 交易决策只由 V3 机会模型产生。36 维 `/predict` 仅提供日线辅助证据；
 Transformer V2/V2.1、独立 EAS 推理和对应训练管线已下线。
 
-独立的 `POST /opportunity-score` 承载机会动作价值评分。按用户要求，当前模型
-以 `usagePolicy=DIRECT` 直接用于决策，不以影子资格或晋级结果为前提。
+独立的 `POST /opportunity-score` 承载机会动作价值评分。当前生产模型
+以 `usagePolicy=DIRECT` 直接用于决策；每日新训练模型必须先与这个现役版本
+执行成员级冠军-挑战者评估，不能直接覆盖生产清单。
 分布外只提示，不关闭预测。文件、特征合同或预测数值异常仍如实报错，
 不影响现有 36 维 `/predict`。
 
@@ -39,36 +40,43 @@ npm run opportunity:train
 排序头在训练端导出为 JSON 对称树，线上由 NumPy 等价执行，不携带 CatBoost
 runtime；与原生 CatBoost 的 1,000 条样本对拍最大绝对误差为
 `1.67e-16`。
-`shadow` 是兼容保留的产物目录名，不代表仅允许影子使用。直接发布当前模型：
+`shadow` 是挑战者产物目录名。每日流水线先下载现役生产包，再对成交概率、
+盈利概率、胜负幅度、尾部风险和横截面排序五个组成部分分别评估，并穷举通过
+单项门槛的混合组合：
 
 ```bash
 cd qlib-service
+python3 download_opportunity_release.py \
+  --output opportunity-model/champion
+python3 select_opportunity_release.py \
+  --dataset opportunity-dataset.npz \
+  --champion opportunity-model/champion \
+  --challenger opportunity-model/shadow \
+  --output opportunity-model/release \
+  --decision-output opportunity-model/release_decision.json
+```
+
+只有决策为 `PUBLISH` 时才发布选中的完整组合：
+
+```bash
 python3 upload_opportunity_model.py \
-  --directory opportunity-model/shadow \
+  --directory opportunity-model/release \
   --prefix opportunitymodel/ \
-  --activate-baseline
+  --activate-baseline \
+  --release-decision opportunity-model/release_decision.json
 ```
 
-walk-forward、Top5 费后净R提升、下置信界、回撤和命中率仍保留为晋级诊断，
-不阻止当前模型使用。可选的晋级记录生成：
-
-```bash
-cd ..
-npm run opportunity:promote
-cd qlib-service
-python3 upload_opportunity_model.py \
-  --directory opportunity-model/production \
-  --prefix opportunitymodel/
-```
-
-`shadowOnly`、`productionEligible` 保留真实评测记录，不需要人为改成通过。
-模型启用由 `usagePolicy=DIRECT` 明确表达；不得伪造评测成功。
+整体门禁要求净R下置信界大于0，并限制费后净R、最大回撤、命中率、正期望
+覆盖率、Brier、净R误差、Q10覆盖率和推理延迟的最大退化。没有可晋级组合时
+保持现役 `manifest.json`。发布决策写入
+`opportunitymodel/release-history/<version>.json`，模型元数据记录每个头的
+来源版本，完整阈值见
+`../docs/decisions/ADR-004-v3-selective-model-release.md`。
 
 `.github/workflows/daily-retrain.yml` 在每个工作日北京时间 01:15 自动执行
-成熟样本收集、三折三种子回测、预测级集成训练、当前基准直接发布、资格诊断和
-状态发布。回测不会用负期望候选补满 Top5，无机会日期按 `0R` 保留。资格检查
-未全部通过不会伪造 `productionEligible`，也不会撤销用户指定的当前 `DIRECT`
-基准。生产采样由主 FC 在
+市场数据归档、成熟样本收集、三折三种子回测、预测级集成训练、成员选择、
+整体验证、自动发布和状态归档。回测不会用负期望候选补满 Top5，无机会日期
+按 `0R` 保留。生产采样由主 FC 在
 10:20、13:40、15:10 运行，17:10 结算。历史加速回填的数据合同见
 `../docs/v3-opportunity-history-data.md`。
 

@@ -629,9 +629,9 @@ export function MainApp() {
         </ErrorBoundary>
       )}
 
-      {/* 量化汇报弹窗:入口在账号菜单,与「AI 模型配置」并列;懒加载,仅打开时挂载 */}
+      {/* V3训练发布弹窗:入口在账号菜单,与「AI 模型配置」并列;懒加载,仅打开时挂载 */}
       {quantReportOpen && (
-        <ErrorBoundary label="量化汇报">
+        <ErrorBoundary label="V3训练发布">
           <Suspense fallback={null}>
             <QuantReport />
           </Suspense>
