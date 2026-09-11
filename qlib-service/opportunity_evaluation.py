@@ -96,6 +96,26 @@ def binary_metrics(labels, probabilities):
     probabilities = _probabilities(probabilities)
     if len(labels) != len(probabilities):
         raise ValueError("概率与标签长度不一致")
+    predicted = probabilities >= 0.5
+    positive = labels == 1
+    true_positive = int(np.sum(predicted & positive))
+    false_positive = int(np.sum(predicted & ~positive))
+    false_negative = int(np.sum(~predicted & positive))
+    precision = (
+        true_positive / (true_positive + false_positive)
+        if true_positive + false_positive
+        else 0.0
+    )
+    recall = (
+        true_positive / (true_positive + false_negative)
+        if true_positive + false_negative
+        else 0.0
+    )
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
     log_loss = -np.mean(
         labels * np.log(probabilities)
         + (1 - labels) * np.log(1 - probabilities)
@@ -103,6 +123,10 @@ def binary_metrics(labels, probabilities):
     return {
         "samples": int(len(labels)),
         "positive_rate": round(float(labels.mean()), 6),
+        "accuracy": round(float(np.mean(predicted == positive)), 6),
+        "precision": round(float(precision), 6),
+        "recall": round(float(recall), 6),
+        "f1": round(float(f1), 6),
         "brier": round(
             float(np.mean(np.square(probabilities - labels))),
             6,

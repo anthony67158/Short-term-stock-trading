@@ -30,6 +30,10 @@ class OpportunityEvaluationTest(unittest.TestCase):
         self.assertLess(metrics["brier"], 0.1)
         self.assertLess(metrics["log_loss"], 0.4)
         self.assertGreater(metrics["auc"], 0.9)
+        self.assertEqual(metrics["accuracy"], 1.0)
+        self.assertEqual(metrics["precision"], 1.0)
+        self.assertEqual(metrics["recall"], 1.0)
+        self.assertEqual(metrics["f1"], 1.0)
         self.assertEqual(metrics["samples"], 6)
         self.assertTrue(metrics["reliability"])
 
