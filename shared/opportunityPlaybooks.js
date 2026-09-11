@@ -1,5 +1,9 @@
 export const OPPORTUNITY_PLAYBOOK_VERSION = 'opportunity-playbook.v1'
 
+import {
+  strategyPatternCapabilitiesOf,
+} from './strategyPatternCapabilities.js'
+
 export const PLAYBOOKS = Object.freeze([
   'MOMENTUM_BREAKOUT',
   'LEADER_PULLBACK',
@@ -224,27 +228,30 @@ export function scoreOpportunityPlaybooks(
     + liquidity * 0.12
     + booleanScore(pct < 0 && vwapDistance >= -1) * 0.1,
   )
-  const patternCoverage = candidate.strategyPatternPolicy === 'ACTIVE'
+  const patternEnabled =
+    strategyPatternCapabilitiesOf(candidate).playbookBlend
+  const patternCoverage = patternEnabled
     ? finite(shadow.patternHistoryCoverage) ?? 0
     : 0
-  const patternMomentum = Math.max(
+  const patternMomentum = patternEnabled ? Math.max(
     finite(shadow.patternPlatformBreakoutScore) ?? 0,
     finite(shadow.patternVolumePriceSurgeScore) ?? 0,
-  )
-  const patternPullback = Math.max(
+  ) : 0
+  const patternPullback = patternEnabled ? Math.max(
     finite(shadow.patternSupportPullbackScore) ?? 0,
     finite(shadow.patternLowVolTrendScore) ?? 0,
-  )
-  const patternAccumulation = Math.max(
+  ) : 0
+  const patternAccumulation = patternEnabled ? Math.max(
     finite(shadow.patternVolumePriceSurgeScore) ?? 0,
     finite(shadow.patternSupportPullbackScore) ?? 0,
-  )
-  const patternReversal =
-    finite(shadow.patternLowerShadowReversalScore) ?? 0
-  const patternRange = Math.max(
+  ) : 0
+  const patternReversal = patternEnabled
+    ? finite(shadow.patternLowerShadowReversalScore) ?? 0
+    : 0
+  const patternRange = patternEnabled ? Math.max(
     finite(shadow.patternSupportPullbackScore) ?? 0,
     finite(shadow.patternLowVolTrendScore) ?? 0,
-  )
+  ) : 0
   const factors = {
     momentum,
     pullback,

@@ -8,6 +8,9 @@ import {
 import {
   buildMarketOpportunityContext,
 } from '../shared/marketOpportunityContext.js'
+import {
+  scoreOpportunityPlaybooks,
+} from '../shared/opportunityPlaybooks.js'
 
 const marketContext = buildMarketOpportunityContext({
   marketGate: { regime: { score: 66 } },
@@ -131,4 +134,47 @@ test('uses the strongest validated pattern in route confirmation text', () => {
 
   assert.equal(pullback.patternContext.id, 'SUPPORT_PULLBACK')
   assert.match(pullback.entryPlan.trigger, /MA20|结构支撑/)
+})
+
+test('direct price anchors do not require playbook blending', () => {
+  const directCapabilities = {
+    schemaVersion: 'strategy-pattern-capabilities.v1',
+    recall: true,
+    priceAnchors: true,
+    confirmation: true,
+    display: true,
+    playbookBlend: false,
+    modelFeatures: false,
+  }
+  const patternedCandidate = {
+    ...candidate,
+    strategyPatternCapabilities: directCapabilities,
+    shadowFeatures: {
+      ...candidate.shadowFeatures,
+      patternHistoryCoverage: 1,
+      patternMa20DistancePct: 1,
+      patternSupportPullbackScore: 92,
+      patternPlatformBreakoutScore: 20,
+      patternVolumePriceSurgeScore: 30,
+      patternLowerShadowReversalScore: 10,
+      patternLowVolTrendScore: 70,
+    },
+  }
+  const baselinePlaybook = scoreOpportunityPlaybooks(candidate, marketContext)
+  const directPlaybook = scoreOpportunityPlaybooks(
+    patternedCandidate,
+    marketContext,
+  )
+  const plans = buildAdaptivePricePlans({
+    candidate: patternedCandidate,
+    candles,
+    trends: [{ price: 10.1, avg: 10.03 }],
+    marketContext,
+  })
+  const pullback = plans.find((item) => item.route === 'PULLBACK')
+
+  assert.equal(directPlaybook.selected.key, baselinePlaybook.selected.key)
+  assert.equal(directPlaybook.selected.score, baselinePlaybook.selected.score)
+  assert.equal(pullback.entryPlan.price, 10)
+  assert.equal(pullback.patternContext.id, 'SUPPORT_PULLBACK')
 })

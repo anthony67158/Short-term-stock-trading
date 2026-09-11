@@ -4,6 +4,12 @@ import {
 import {
   scoreOpportunityPlaybooks,
 } from './opportunityPlaybooks.js'
+import {
+  summarizeStrategyPatterns,
+} from './strategyPatternFeatures.js'
+import {
+  strategyPatternCapabilitiesOf,
+} from './strategyPatternCapabilities.js'
 
 export const ADAPTIVE_PRICE_PLAN_VERSION = 'adaptive-price-plan.v1'
 
@@ -75,21 +81,10 @@ function tradingDaysFor(playbook) {
 }
 
 function strongestPattern(shadow = {}) {
-  return [
-    ['PLATFORM_BREAKOUT', '平台整理突破', shadow.patternPlatformBreakoutScore],
-    ['SUPPORT_PULLBACK', '缩量回踩', shadow.patternSupportPullbackScore],
-    ['VOLUME_PRICE_SURGE', '量价齐升', shadow.patternVolumePriceSurgeScore],
-    [
-      'LOWER_SHADOW_REVERSAL',
-      '长下影反击',
-      shadow.patternLowerShadowReversalScore,
-    ],
-    ['LOW_VOL_TREND', '低波动趋势', shadow.patternLowVolTrendScore],
-  ].map(([id, label, score]) => ({
-    id,
-    label,
-    score: finite(score) ?? 0,
-  })).sort((left, right) => right.score - left.score)[0]
+  return summarizeStrategyPatterns({
+    ...shadow,
+    ret5dPct: shadow.ret5dPct,
+  }).strongest
 }
 
 function patternTrigger(route, pattern, fallback) {
@@ -227,20 +222,30 @@ export function buildAdaptivePricePlans({
   const vwap = finite(trendRows.at(-1)?.avg ?? trendRows.at(-1)?.vwap)
   const playbooks = scoreOpportunityPlaybooks(candidate, marketContext)
   const playbook = playbooks.selected?.key
-  const pattern = candidate.strategyPatternPolicy === 'ACTIVE'
+  const patternCapabilities = strategyPatternCapabilitiesOf(candidate)
+  const patternToolsEnabled = (
+    patternCapabilities.priceAnchors
+    || patternCapabilities.confirmation
+    || patternCapabilities.display
+  )
+  const pattern = patternToolsEnabled
     ? strongestPattern(candidate.shadowFeatures)
     : null
   const patternFeatures = candidate.shadowFeatures || {}
   const patternActive = pattern?.score >= 70
     && Number(patternFeatures.patternHistoryCoverage) >= 0.35
+  const patternAnchorsEnabled =
+    patternActive && patternCapabilities.priceAnchors
+  const patternConfirmationEnabled =
+    patternActive && patternCapabilities.confirmation
   const anchoredPrice = (distance) => finite(distance) != null
     && 1 + Number(distance) / 100 > 0
     ? price(current / (1 + Number(distance) / 100)) : null
-  const platformHigh = patternActive
+  const platformHigh = patternAnchorsEnabled
     ? anchoredPrice(patternFeatures.patternBreakoutDistance10Pct) : null
-  const patternMa20 = patternActive
+  const patternMa20 = patternAnchorsEnabled
     ? anchoredPrice(patternFeatures.patternMa20DistancePct) : null
-  const patternSupport = patternActive
+  const patternSupport = patternAnchorsEnabled
     ? pattern.id === 'PLATFORM_BREAKOUT' ? platformHigh
       : ['SUPPORT_PULLBACK', 'VOLUME_PRICE_SURGE', 'LOW_VOL_TREND'].includes(pattern.id)
         ? patternMa20
@@ -256,14 +261,15 @@ export function buildAdaptivePricePlans({
     vwap,
     ma5,
     ma10,
-    ...(pattern?.score >= 70 ? [ma20] : []),
+    ...(patternAnchorsEnabled ? [ma20] : []),
     support,
     current - atr * 0.45,
   ]
     .map(price)
     .filter((value) => value > 0 && value < current)
     .sort((left, right) => right - left)
-  const breakoutReference = patternActive && pattern.id === 'PLATFORM_BREAKOUT'
+  const breakoutReference = patternAnchorsEnabled
+    && pattern.id === 'PLATFORM_BREAKOUT'
     ? platformHigh || recentHigh : recentHigh
   const breakoutEntry = legalPrice(
     Math.max(current * 1.003, (breakoutReference || current) * 1.001),
@@ -292,7 +298,7 @@ export function buildAdaptivePricePlans({
       target: immediateTarget,
       trigger: patternTrigger(
         'IMMEDIATE',
-        pattern,
+        patternConfirmationEnabled ? pattern : null,
         '现价保持在分时均价上方且主逻辑未失效',
       ),
       playbook,
@@ -316,7 +322,7 @@ export function buildAdaptivePricePlans({
       ),
       trigger: patternTrigger(
         'PULLBACK',
-        pattern,
+        patternConfirmationEnabled ? pattern : null,
         `回踩${pullbackEntry.toFixed(2)}元后重新站稳，资金未继续转弱`,
       ),
       playbook,
@@ -336,7 +342,7 @@ export function buildAdaptivePricePlans({
       target: price(breakoutEntry + risk * rewardR),
       trigger: patternTrigger(
         'BREAKOUT',
-        pattern,
+        patternConfirmationEnabled ? pattern : null,
         `放量突破${breakoutEntry.toFixed(2)}元并保持承接`,
       ),
       playbook,
