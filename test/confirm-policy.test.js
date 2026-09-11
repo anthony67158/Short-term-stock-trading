@@ -112,6 +112,26 @@ test('反弹退出观察60秒，普通止损观察20秒后才请求终局确认'
   assert.equal(shouldRequestConfirmation('buy', now - 5000, now), true)
   assert.equal(shouldRequestConfirmation('sell', now - 59_000, now), false)
   assert.equal(shouldRequestConfirmation('sell', now - 60_000, now), true)
+  assert.equal(shouldRequestConfirmation(
+    'buy',
+    now - 59_000,
+    now,
+    {
+      strategyPatternConfirmation: {
+        schemaVersion: 'strategy-pattern-confirmation.v1',
+      },
+    },
+  ), false)
+  assert.equal(shouldRequestConfirmation(
+    'buy',
+    now - 60_000,
+    now,
+    {
+      strategyPatternConfirmation: {
+        schemaVersion: 'strategy-pattern-confirmation.v1',
+      },
+    },
+  ), true)
 })
 
 test('退出类价格动作首次触价只落盘观察，不立即调用确认', () => {

@@ -47,6 +47,8 @@ function holdingAddPlanOf(plan, payload = {}) {
     actionLabel: full ? '条件加仓' : '条件小仓加仓',
     maxPositionPct,
     manualConfirmationOnly: !full,
+    strategyPatternConfirmation:
+      plan.entryPlan?.strategyPatternConfirmation || null,
   }
 }
 

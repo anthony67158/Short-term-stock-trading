@@ -10,6 +10,9 @@ import {
 import {
   strategyPatternCapabilitiesOf,
 } from './strategyPatternCapabilities.js'
+import {
+  buildStrategyPatternConfirmation,
+} from './strategyPatternConfirmation.js'
 
 export const ADAPTIVE_PRICE_PLAN_VERSION = 'adaptive-price-plan.v1'
 
@@ -140,6 +143,7 @@ function plan({
   trigger,
   playbook,
   patternContext,
+  patternConfirmation,
   now,
 }) {
   const normalizedEntry = price(entry)
@@ -163,6 +167,9 @@ function plan({
         ? '当前连续竞价'
         : '未来1至3个交易日',
       trigger,
+      ...(patternConfirmation
+        ? { strategyPatternConfirmation: patternConfirmation }
+        : {}),
       maxPositionPct: 0,
       validUntil: Number(now) + (
         type === 'IMMEDIATE' ? 15 * 60 * 1000 : 3 * 86400000
@@ -303,6 +310,12 @@ export function buildAdaptivePricePlans({
       ),
       playbook,
       patternContext: pattern,
+      patternConfirmation: patternConfirmationEnabled
+        ? buildStrategyPatternConfirmation({
+            pattern,
+            route: 'IMMEDIATE',
+          })
+        : null,
       now,
     }),
   ]
@@ -327,6 +340,12 @@ export function buildAdaptivePricePlans({
       ),
       playbook,
       patternContext: pattern,
+      patternConfirmation: patternConfirmationEnabled
+        ? buildStrategyPatternConfirmation({
+            pattern,
+            route: 'PULLBACK',
+          })
+        : null,
       now,
     }))
   }
@@ -347,6 +366,12 @@ export function buildAdaptivePricePlans({
       ),
       playbook,
       patternContext: pattern,
+      patternConfirmation: patternConfirmationEnabled
+        ? buildStrategyPatternConfirmation({
+            pattern,
+            route: 'BREAKOUT',
+          })
+        : null,
       now,
     }))
   }

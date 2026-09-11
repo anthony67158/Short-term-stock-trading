@@ -50,6 +50,9 @@ import {
   buildIntradayOpenSummary,
   buildReviewDecisionPacket,
 } from '../shared/reviewDecisionPacket.js';
+import {
+  applyStrategyPatternConfirmationGuard,
+} from '../shared/strategyPatternConfirmation.js';
 
 function compactText(value, maximum = 240) {
   return String(value || '')
@@ -791,15 +794,23 @@ export async function judgeConfirmation({
     },
     now: observedAt,
   });
+  const patternGuardedDet =
+    applyStrategyPatternConfirmationGuard(
+      det,
+      prim,
+      a.strategyPatternConfirmation,
+    );
   const guardedDet = applyConfirmationFundGuard(
     side,
-    det,
+    patternGuardedDet,
     fundContext,
   );
   const signals = {
     side,
     primitives: prim,
     deterministic: guardedDet,
+    strategyPatternConfirmation:
+      guardedDet.strategyPatternConfirmation || null,
     techVerdict: tech && tech.verdict,
     funds: fundContext,
     reviewDecisionPacket: reviewPacket,
@@ -868,6 +879,8 @@ async function logVerdict(a, name, prim, result) {
     policy: result.policy || null,
     deterministicScore: result.signals?.deterministic?.score ?? null,
     deterministicHits: result.signals?.deterministic?.hits || [],
+    strategyPatternConfirmation:
+      result.signals?.strategyPatternConfirmation || null,
     fundSnapshot: result.signals?.funds?.current || null,
     fundChange: result.signals?.funds?.change || null,
     keyDistancePct: prim?.keyDistancePct ?? null,

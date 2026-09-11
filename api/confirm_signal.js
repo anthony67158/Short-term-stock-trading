@@ -31,6 +31,9 @@ import {
   isAuthoritativeWatchingAlert,
   ownsConfirmationLease,
 } from './_confirm_lease.js';
+import {
+  sanitizeStrategyPatternConfirmation,
+} from '../shared/strategyPatternConfirmation.js';
 
 const rateWindows = new Map();
 const RATE_WINDOW_MS = 60 * 1000;
@@ -178,6 +181,14 @@ export function sanitizeConfirmationBody(body) {
     watchingPrice,
   };
   if (raw.planId) alert.planId = text(raw.planId, 120);
+  const strategyPatternConfirmation =
+    sanitizeStrategyPatternConfirmation(
+      raw.strategyPatternConfirmation,
+    );
+  if (strategyPatternConfirmation) {
+    alert.strategyPatternConfirmation =
+      strategyPatternConfirmation;
+  }
   if (raw.judgeContext && typeof raw.judgeContext === 'object') {
     alert.judgeContext = buildJudgeAdviceContext(raw.judgeContext);
   }

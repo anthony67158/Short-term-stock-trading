@@ -592,6 +592,8 @@ export const alertStore = {
     if (!shouldRequestConfirmation(side, a.watchingAt, Date.now(), {
       price: q?.price,
       threshold: a.value,
+      strategyPatternConfirmation:
+        a.strategyPatternConfirmation,
     })) return
     const session = currentAccountSession()
     _confirming.add(a.id)

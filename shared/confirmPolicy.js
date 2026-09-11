@@ -69,7 +69,14 @@ export function shouldRequestConfirmation(
   }
   const startedAt = Number(watchingAt)
   if (!Number.isFinite(startedAt) || startedAt <= 0) return true
-  return now - startedAt >= confirmationPolicy(side).minObserveMs
+  const patternObserveMs = (
+    context.strategyPatternConfirmation?.schemaVersion
+      === 'strategy-pattern-confirmation.v1'
+  ) ? 60 * 1000 : 0
+  return now - startedAt >= Math.max(
+    confirmationPolicy(side).minObserveMs,
+    patternObserveMs,
+  )
 }
 
 export function shouldConfirmImmediatelyAfterTouch(side) {

@@ -735,6 +735,8 @@ async function processAccount(
       if (!shouldRequestConfirmation(side, a.watchingAt, now, {
         price: q?.price,
         threshold: a.value,
+        strategyPatternConfirmation:
+          a.strategyPatternConfirmation,
       })) continue;
       // ★预算护栏:本轮 judge 调用达上限时留给下一轮优先处理；2分钟期限会强制收敛。
       if (judgeCalls >= judgeLimit || !hasJudgeBudget(deadline)) continue;

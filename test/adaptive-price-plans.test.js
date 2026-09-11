@@ -177,4 +177,12 @@ test('direct price anchors do not require playbook blending', () => {
   assert.equal(directPlaybook.selected.score, baselinePlaybook.selected.score)
   assert.equal(pullback.entryPlan.price, 10)
   assert.equal(pullback.patternContext.id, 'SUPPORT_PULLBACK')
+  assert.equal(
+    pullback.entryPlan.strategyPatternConfirmation.patternId,
+    'SUPPORT_PULLBACK',
+  )
+  assert.match(
+    pullback.entryPlan.strategyPatternConfirmation.summary,
+    /分时低点抬高/,
+  )
 })

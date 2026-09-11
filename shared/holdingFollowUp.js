@@ -47,6 +47,8 @@ export function holdingAddReviewPlan(advice = {}) {
           : '突破加仓复核',
         price: watchPrice,
         direction: route === 'PULLBACK' ? 'LTE' : 'GTE',
+        strategyPatternConfirmation:
+          v3Plan.strategyPatternConfirmation || null,
       }],
       reasons: compactReasons([
         advice.quantNote,

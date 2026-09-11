@@ -13,6 +13,9 @@ import { isAdviceReviewEnabled } from './adviceReviewPolicy.js'
 import { executionTriggerDirection } from './executionTrigger.js'
 import { holdingAddReviewPlan } from './holdingFollowUp.js'
 import { monitoringAlerts, monitoringPlanOf } from './monitoringPlan.js'
+import {
+  sanitizeStrategyPatternConfirmation,
+} from './strategyPatternConfirmation.js'
 
 function roundPrice(value) {
   const n = Number(value)
@@ -71,6 +74,22 @@ function baseAlert({ idFactory, now, code, name, op, value, note }) {
     value,
     note,
   }
+}
+
+function strategyPatternConfirmationFor(advice = {}, route = '') {
+  const normalizedRoute = String(route || '').toUpperCase()
+  const plans = [
+    ...(Array.isArray(advice.decisionPaths) ? advice.decisionPaths : []),
+    advice.selectedDecisionPlan,
+  ].filter(Boolean)
+  const selected = plans.find((plan) =>
+    !normalizedRoute
+    || String(plan?.route || plan?.entryPlan?.type || '').toUpperCase()
+      === normalizedRoute
+  )
+  return sanitizeStrategyPatternConfirmation(
+    selected?.entryPlan?.strategyPatternConfirmation,
+  )
 }
 
 function reviewIntentOf(advice = {}) {
@@ -206,6 +225,12 @@ function holdingAddReviewAlerts({
         note: path.label,
         judgeContext,
         reviewIntent: followUp.reviewIntent,
+        ...(path.strategyPatternConfirmation ? {
+          strategyPatternConfirmation:
+            sanitizeStrategyPatternConfirmation(
+              path.strategyPatternConfirmation,
+            ),
+        } : {}),
       }, adviceAt)]
     }
     return [{
@@ -224,6 +249,12 @@ function holdingAddReviewAlerts({
       reviewCategory: 'holding-add',
       judgeContext,
       reviewIntent: followUp.reviewIntent,
+      ...(path.strategyPatternConfirmation ? {
+        strategyPatternConfirmation:
+          sanitizeStrategyPatternConfirmation(
+            path.strategyPatternConfirmation,
+          ),
+      } : {}),
       phase: 'armed',
     }]
   })
@@ -398,6 +429,12 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
       const reviewPrice = roundPrice(watchLevel.price)
       if (reviewPrice == null) continue
       const reviewKey = watchLevel.key
+      const patternConfirmation = strategyPatternConfirmationFor(
+        advice,
+        reviewKey === 'watch_breakout' ? 'BREAKOUT'
+          : reviewKey === 'watch_pullback' ? 'PULLBACK'
+            : '',
+      )
       const previous = alerts.find((alert) =>
         alert?.candCode === code
         && alert.reviewOnly === true
@@ -419,6 +456,9 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
           reviewKey,
           judgeContext,
           reviewIntent,
+          ...(patternConfirmation
+            ? { strategyPatternConfirmation: patternConfirmation }
+            : {}),
         }, adviceAt)
         if (JSON.stringify(refreshed) !== JSON.stringify(previous)) {
           changed = true
@@ -440,6 +480,9 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
           reviewKey,
           judgeContext,
           reviewIntent,
+          ...(patternConfirmation
+            ? { strategyPatternConfirmation: patternConfirmation }
+            : {}),
           phase: 'armed',
         })
         changed = true
@@ -473,6 +516,8 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
       ?? advice.buyPrice,
     )
     if (buyPrice != null) {
+      const patternConfirmation =
+        strategyPatternConfirmationFor(advice)
       const previous = alerts.find((a) => a && a.candCode === code)
       const samePlan = !!(
         previous?.judgeContext?.planId
@@ -485,6 +530,9 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
           value: buyPrice,
           ...(triggerZone ? { triggerZone } : {}),
           ...((triggerZone || priceContract) ? { judgeContext } : {}),
+          ...(patternConfirmation
+            ? { strategyPatternConfirmation: patternConfirmation }
+            : {}),
         })
       } else {
         projected.push({
@@ -493,6 +541,9 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
           phase: 'armed',
           ...(triggerZone ? { triggerZone } : {}),
           ...((triggerZone || priceContract) ? { judgeContext } : {}),
+          ...(patternConfirmation
+            ? { strategyPatternConfirmation: patternConfirmation }
+            : {}),
         })
         changed = true
       }
