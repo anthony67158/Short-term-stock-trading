@@ -9,6 +9,7 @@ import { isContinuousTrading } from '../shared/tradingCalendar.js';
 import {
   buildStockMarketSnapshot,
 } from '../shared/stockMarketSnapshot.js';
+import { fetchFuyaoDailyKline } from './_fuyao.js';
 
 // secid 前缀：6/9/5 开头沪市=1，其余=0
 function toSecid(code) {
@@ -245,6 +246,7 @@ export async function fetchKlineSina(code, klt, lmt) {
 }
 
 export function createResilientKlineFetcher({
+  fetchFuyao = fetchFuyaoDailyKline,
   fetchTencent = fetchKlineTx,
   fetchEastmoney = fetchKlineEastmoney,
   fetchSina = fetchKlineSina,
@@ -270,6 +272,7 @@ export function createResilientKlineFetcher({
     if (!flights.has(key)) {
       const attempt = async () => {
         const sources = [
+          ['fuyao', fetchFuyao],
           ['tencent', fetchTencent],
           ['eastmoney', fetchEastmoney],
         ];

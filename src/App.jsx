@@ -654,7 +654,7 @@ function RegulatoryFooter({ showDisclaimer = false }) {
     <footer className="footer">
       {showDisclaimer && (
         <span className="footer-disclaimer">
-          数据来源：东方财富公开接口 · 智能分析由大模型基于实时数据生成，仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
+          数据来源：同花顺扶摇 / 东方财富 / 腾讯财经 · 智能分析仅供研究参考，非投资建议 · 资金流为已发生数据，追高有滞后风险，注意止损
         </span>
       )}
       <span className="footer-regulatory">

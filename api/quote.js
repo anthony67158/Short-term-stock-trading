@@ -6,6 +6,7 @@ import {
   isTradingDayAt,
 } from '../shared/tradingCalendar.js';
 import { classifyPriceLimit } from '../shared/priceLimitPolicy.js';
+import { fetchFuyaoQuotes } from './_fuyao.js';
 
 // 任意股票实时报价（自选股用）
 // query: codes=600519,000858,300750
@@ -84,15 +85,28 @@ function quotePriceMetadata(tradeDate, now) {
   };
 }
 
-function previousCloseQuote(code, eastmoney, tencent, now) {
+function previousCloseQuote(
+  code,
+  fuyao,
+  eastmoney,
+  tencent,
+  now,
+) {
   const today = beijingDayKey(now);
+  const fuyaoCurrentDay = (
+    String(fuyao?.tradeDate || '').slice(0, 10) === today
+  );
   const eastmoneyCurrentDay = (
     String(eastmoney?.tradeDate || '').slice(0, 10) === today
   );
   const price = (
-    (!positive(eastmoney?.price) && eastmoneyCurrentDay
+    (!positive(fuyao?.price) && fuyaoCurrentDay
+      ? positive(fuyao?.prevClose)
+      : null)
+    || (!positive(eastmoney?.price) && eastmoneyCurrentDay
       ? positive(eastmoney?.prevClose)
       : null)
+    || positive(fuyao?.price)
     || positive(tencent?.price)
     || positive(eastmoney?.price)
     || positive(eastmoney?.prevClose)
@@ -100,7 +114,7 @@ function previousCloseQuote(code, eastmoney, tencent, now) {
   );
   if (price == null) {
     return withPriceLimitState({
-      ...(eastmoney || tencent || {}),
+      ...(fuyao || eastmoney || tencent || {}),
       code,
       price: null,
       pct: null,
@@ -116,8 +130,15 @@ function previousCloseQuote(code, eastmoney, tencent, now) {
   )
     ? eastmoney
     : null;
+  const fuyaoHistorical = (
+    positive(fuyao?.price) != null
+    && String(fuyao?.tradeDate || '').slice(0, 10) !== today
+  )
+    ? fuyao
+    : null;
   const sourceTradeDate = (
-    eastmoneyHistorical?.tradeDate
+    fuyaoHistorical?.tradeDate
+    || eastmoneyHistorical?.tradeDate
     || (
       String(tencent?.tradeDate || '').slice(0, 10) !== today
         ? tencent?.tradeDate || null
@@ -126,17 +147,20 @@ function previousCloseQuote(code, eastmoney, tencent, now) {
   );
   return withPriceLimitState({
     ...(eastmoney || {}),
+    ...(fuyaoHistorical || {}),
     code,
     name: eastmoney?.name || tencent?.name || '',
     industry: eastmoney?.industry || tencent?.industry || null,
-    source: eastmoneyHistorical
-      ? '东方财富·最近收盘'
+    source: fuyaoHistorical
+      ? '同花顺扶摇·最近收盘'
+      : eastmoneyHistorical
+        ? '东方财富·最近收盘'
       : tencent
         ? '腾讯财经·最近收盘'
         : '东方财富·昨收',
     price,
-    pct: eastmoneyHistorical?.pct ?? 0,
-    chg: eastmoneyHistorical?.chg ?? 0,
+    pct: fuyaoHistorical?.pct ?? eastmoneyHistorical?.pct ?? 0,
+    chg: fuyaoHistorical?.chg ?? eastmoneyHistorical?.chg ?? 0,
     turnover: positive(eastmoneyHistorical?.turnover),
     volRatio: positive(eastmoneyHistorical?.volRatio),
     mainInflow: eastmoneyHistorical?.mainInflow ?? null,
@@ -165,6 +189,7 @@ export function mergeQuoteSources(
   eastmoneyList,
   tencentList,
   now = Date.now(),
+  fuyaoList = [],
 ) {
   const eastmoneyByCode = new Map(
     (eastmoneyList || []).map((quote) => [String(quote.code), quote]),
@@ -172,19 +197,57 @@ export function mergeQuoteSources(
   const tencentByCode = new Map(
     (tencentList || []).map((quote) => [String(quote.code), quote]),
   );
+  const fuyaoByCode = new Map(
+    (fuyaoList || []).map((quote) => [String(quote.code), quote]),
+  );
   const today = beijingDayKey(now);
   return (codes || []).map((rawCode) => {
     const code = String(rawCode);
+    const fuyao = fuyaoByCode.get(code);
     const eastmoney = eastmoneyByCode.get(code);
     const tencent = tencentByCode.get(code);
+    const fuyaoValid = positive(fuyao?.price) != null;
     const eastmoneyValid = positive(eastmoney?.price) != null;
     const tencentValid = positive(tencent?.price) != null;
     const eastmoneyCurrent = (
       String(eastmoney?.tradeDate || '').slice(0, 10) === today
     );
+    const fuyaoCurrent = (
+      String(fuyao?.tradeDate || '').slice(0, 10) === today
+    );
     const tencentCurrent = (
       String(tencent?.tradeDate || '').slice(0, 10) === today
     );
+    if (fuyaoValid && fuyaoCurrent) {
+      const supplemental = eastmoneyCurrent
+        ? eastmoney
+        : tencentCurrent ? tencent : null;
+      return withPriceLimitState({
+        ...(supplemental || {}),
+        ...fuyao,
+        code,
+        name: eastmoney?.name || tencent?.name || '',
+        industry: eastmoney?.industry || tencent?.industry || null,
+        turnover: positive(supplemental?.turnover),
+        volRatio: positive(supplemental?.volRatio),
+        mainInflow: eastmoneyCurrent
+          ? eastmoney?.mainInflow ?? null
+          : null,
+        retailInflow: eastmoneyCurrent
+          ? eastmoney?.retailInflow ?? null
+          : null,
+        main5dInflow: eastmoneyCurrent
+          ? eastmoney?.main5dInflow ?? null
+          : null,
+        retail5dInflow: eastmoneyCurrent
+          ? eastmoney?.retail5dInflow ?? null
+          : null,
+        mainRatio: eastmoneyCurrent
+          ? eastmoney?.mainRatio ?? null
+          : null,
+        ...quotePriceMetadata(fuyao.tradeDate, now),
+      });
+    }
     if (eastmoneyValid && eastmoneyCurrent) {
       return {
         ...eastmoney,
@@ -201,7 +264,13 @@ export function mergeQuoteSources(
         ...quotePriceMetadata(tencent.tradeDate, now),
       });
     }
-    return previousCloseQuote(code, eastmoney, tencent, now);
+    return previousCloseQuote(
+      code,
+      fuyao,
+      eastmoney,
+      tencent,
+      now,
+    );
   });
 }
 
@@ -309,19 +378,29 @@ export async function fetchQuotes(codes, dependencies = {}) {
   if (!normalizedCodes.length) return [];
   const fetchEastmoney = dependencies.fetchEastmoney || quoteEastmoney;
   const fetchTencent = dependencies.fetchTencent || quoteTx;
+  const fetchFuyao = dependencies.fetchFuyao || fetchFuyaoQuotes;
   const now = Number(dependencies.now) || Date.now();
 
-  let eastmoneyList = [];
-  try {
-    eastmoneyList = await fetchEastmoney(normalizedCodes);
-  } catch { /* 东财失败 → 走腾讯 */ }
+  const [fuyaoList, eastmoneyList] = await Promise.all([
+    Promise.resolve()
+      .then(() => fetchFuyao(normalizedCodes))
+      .catch(() => []),
+    Promise.resolve()
+      .then(() => fetchEastmoney(normalizedCodes))
+      .catch(() => []),
+  ]);
 
-  // 东财返回了代码但现价为 0 仍属于缺价，必须继续向腾讯补源。
+  // 扶摇与东财都没有有效价时才补取腾讯。
+  const fuyaoByCode = new Map(
+    fuyaoList.map((quote) => [String(quote.code), quote]),
+  );
   const eastmoneyByCode = new Map(
     eastmoneyList.map((quote) => [String(quote.code), quote]),
   );
   const missing = normalizedCodes.filter(
-    (code) => positive(eastmoneyByCode.get(code)?.price) == null,
+    (code) =>
+      positive(fuyaoByCode.get(code)?.price) == null
+      && positive(eastmoneyByCode.get(code)?.price) == null,
   );
   let tencentList = [];
   if (missing.length) {
@@ -335,6 +414,7 @@ export async function fetchQuotes(codes, dependencies = {}) {
     eastmoneyList,
     tencentList,
     now,
+    fuyaoList,
   );
 }
 

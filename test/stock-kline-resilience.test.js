@@ -20,6 +20,35 @@ function candles(count = 180) {
   }))
 }
 
+test('扶摇日线完整时进入统一K线缓存与裁剪链', async () => {
+  let fuyaoCalls = 0
+  const load = createResilientKlineFetcher({
+    fetchFuyao: async () => {
+      fuyaoCalls += 1
+      return {
+        name: '',
+        candles: candles(200),
+        source: '同花顺扶摇',
+      }
+    },
+    fetchTencent: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return { name: '测试股票', candles: candles(200) }
+    },
+    fetchEastmoney: async () => {
+      throw new Error('eastmoney unavailable')
+    },
+    fetchSina: async () => {
+      throw new Error('sina unavailable')
+    },
+  })
+
+  const result = await load('002230', '101', 120)
+  assert.equal(fuyaoCalls, 1)
+  assert.equal(result.source, 'fuyao')
+  assert.equal(result.candles.length, 120)
+})
+
 test('腾讯返回501时公式与详情K线自动切换其他行情源', async () => {
   const load = createResilientKlineFetcher({
     fetchTencent: async () => {

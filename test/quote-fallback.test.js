@@ -197,3 +197,50 @@ test('东财报价映射保留五日主力与小单累计且缺失值不伪装�
   assert.equal(missing.main5dInflow, null)
   assert.equal(missing.retail5dInflow, null)
 })
+
+test('扶摇当前价优先且东财只补充换手行业与资金字段', async () => {
+  const morning = Date.parse('2026-09-11T02:00:00.000Z')
+  let tencentCalls = 0
+  const list = await fetchQuotes(['600519'], {
+    now: morning,
+    fetchFuyao: async () => [{
+      code: '600519',
+      source: '同花顺扶摇',
+      price: 1280,
+      pct: 0.95,
+      chg: 12,
+      amount: 2_560_000_000,
+      high: 1285,
+      low: 1260,
+      open: 1268,
+      prevClose: 1268,
+      tradeDate: '2026-09-11',
+    }],
+    fetchEastmoney: async () => [{
+      code: '600519',
+      name: '贵州茅台',
+      source: '东方财富',
+      price: 1279.5,
+      pct: 0.9,
+      turnover: 0.42,
+      volRatio: 1.2,
+      mainInflow: 100_000_000,
+      retailInflow: -50_000_000,
+      tradeDate: '2026-09-11',
+      industry: '白酒',
+    }],
+    fetchTencent: async () => {
+      tencentCalls += 1
+      return []
+    },
+  })
+
+  assert.equal(tencentCalls, 0)
+  assert.equal(list[0].price, 1280)
+  assert.equal(list[0].source, '同花顺扶摇')
+  assert.equal(list[0].name, '贵州茅台')
+  assert.equal(list[0].industry, '白酒')
+  assert.equal(list[0].turnover, 0.42)
+  assert.equal(list[0].mainInflow, 100_000_000)
+  assert.equal(list[0].isLivePrice, true)
+})

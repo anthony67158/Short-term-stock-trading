@@ -1548,7 +1548,7 @@ export default function StockDetail({ stock, onClose }) {
           )}
 
           <div className="ai-disclaimer" style={{ padding: '10px 4px 0' }}>
-            数据来源：东方财富公开接口 · 仅供研究参考，非投资建议
+            数据来源：同花顺扶摇 / 东方财富 / 腾讯财经 · 仅供研究参考，非投资建议
           </div>
         </div>
 

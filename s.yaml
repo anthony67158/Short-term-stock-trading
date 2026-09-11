@@ -41,6 +41,8 @@ resources:
         DAILY_MODEL: Qwen3-Max-A
         # ---- 第三方数据 ----
         FINNHUB_KEY: ${env('FINNHUB_KEY')}
+        # 同花顺扶摇：A股报价与日K优先源；未配置时自动跳过。
+        FUYAO_API_KEY: ${env('FUYAO_API_KEY')}
         # 豆包搜索 Global版：军师个股/行业/舆情补盲，设 false 可立即停用。
         DOUBAO_SEARCH_API_KEY: ${env('DOUBAO_SEARCH_API_KEY')}
         DOUBAO_SEARCH_KEY_NAME: ${env('DOUBAO_SEARCH_KEY_NAME')}
