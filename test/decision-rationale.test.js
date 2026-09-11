@@ -159,3 +159,41 @@ test('持仓依据使用持有减仓退出价值且不输出买入成交概率',
   assert.match(result.modelBoundary, /不是独立训练的卖出概率/)
   assert.doesNotMatch(JSON.stringify(result), /成交概率|pFill/)
 })
+
+test('未持仓观望仍展示候选价格路径而不是持仓动作', () => {
+  const selected = scoredPlan('BREAKOUT', 56.1, -0.08)
+  const result = buildDecisionRationale({
+    advice: {
+      selectedDecisionPlan: selected,
+      decisionPaths: [selected],
+      actionValues: {
+        actions: [{
+          action: 'BUY',
+          route: 'BREAKOUT',
+          feasible: true,
+          actionUtilityR: -0.016,
+        }],
+      },
+    },
+    decisionPlan: {
+      mode: 'buy_advice',
+      action: 'WATCH',
+      actionability: 'WATCH',
+      prices: {
+        current: 55.39,
+        reference: 56.1,
+        stop: 53.5,
+        target: 60.9,
+      },
+      quantity: { lots: 0 },
+      entryBudget: { lots: 0 },
+      risk: {},
+      costs: {},
+    },
+  })
+
+  assert.equal(result.context, 'ENTRY')
+  assert.equal(result.pathComparison.length, 1)
+  assert.equal(result.actionComparison.length, 0)
+  assert.match(result.summary, /突破确认候选价56\.10元/)
+})

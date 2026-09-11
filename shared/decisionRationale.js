@@ -191,7 +191,10 @@ export function buildDecisionRationale({
   decisionPlan = {},
 } = {}) {
   const action = text(decisionPlan.action, 24).toUpperCase()
-  const entryContext = ['BUY', 'ADD'].includes(action)
+  const entryContext = (
+    decisionPlan.mode === 'buy_advice'
+    || ['BUY', 'ADD'].includes(action)
+  )
   const context = entryContext ? 'ENTRY' : 'POSITION'
   const selected = advice.selectedDecisionPlan || {}
   const selectedRoute = text(selected.route, 24).toUpperCase()
