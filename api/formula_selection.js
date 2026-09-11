@@ -43,6 +43,10 @@ import {
   OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
   buildOpportunityScoreInput,
 } from '../shared/opportunityScoreContract.js'
+import {
+  resolveStrategyPatternCapabilities,
+  strategyPatternCapabilityKey,
+} from '../shared/strategyPatternCapabilities.js'
 
 export const FORMULA_SELECTION_SCHEMA_VERSION = 'formula-selection.v1'
 
@@ -213,6 +217,8 @@ export function runFormulaSelection({
   collectMarketContext = collectTailPickMarketContext,
   readTrainingStatus = () =>
     opportunityTrainingStatusStore.readStatus(),
+  strategyPatternCapabilities =
+    resolveStrategyPatternCapabilities(process.env),
   now = Date.now,
 } = {}) {
   const normalized = normalizedMode(mode)
@@ -222,7 +228,10 @@ export function runFormulaSelection({
   const timestamp = Number(now()) || Date.now()
   const tradeDate = beijingDayKey(timestamp)
   const slot = modeSlot(normalized, timestamp)
-  const flightKey = `${tradeDate}:${normalized}:${slot}`
+  const patternCapabilityKey =
+    strategyPatternCapabilityKey(strategyPatternCapabilities)
+  const flightKey =
+    `${tradeDate}:${normalized}:${slot}:${patternCapabilityKey}`
   if (runFlights.has(flightKey)) return runFlights.get(flightKey)
 
   const promise = (async () => {
@@ -238,6 +247,8 @@ export function runFormulaSelection({
       && existing?.decisionScoring?.usagePolicy === 'DIRECT'
       && existing?.decisionScoring?.inputContextVersion
         === OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION
+      && existing?.strategyPatternCapabilityKey
+        === patternCapabilityKey
       && (
         !activeModelVersion
         || resultModelVersion(existing) === activeModelVersion
@@ -289,6 +300,7 @@ export function runFormulaSelection({
         marketContext,
         now: timestamp,
         onProgress: reportProgress,
+        strategyPatternCapabilities,
       })
       const marketBlocker =
         marketContext?.marketGate?.blockers?.[0]
@@ -432,6 +444,8 @@ export function runFormulaSelection({
         slot,
         generatedAt: timestamp,
         dataAsOf: timestamp,
+        strategyPatternCapabilityKey: patternCapabilityKey,
+        strategyPatternCapabilities,
         validationState,
         marketGate: marketContext?.marketGate || null,
         universe: scanned.universe,

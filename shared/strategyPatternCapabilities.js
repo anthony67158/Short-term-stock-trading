@@ -67,3 +67,12 @@ export function strategyPatternAnalysisEnabled(capabilities = {}) {
     'modelFeatures',
   ].some((key) => capabilities[key] === true)
 }
+
+export function strategyPatternCapabilityKey(capabilities = {}) {
+  return [
+    STRATEGY_PATTERN_CAPABILITIES_VERSION,
+    ...Object.keys(CAPABILITY_ENV).map((key) =>
+      `${key}:${capabilities[key] === true ? 1 : 0}`
+    ),
+  ].join('|')
+}

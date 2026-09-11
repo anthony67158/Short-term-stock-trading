@@ -19,6 +19,10 @@ import {
 import {
   formulaSelectionTimerBody,
 } from '../api/_advice_timer.js'
+import {
+  resolveStrategyPatternCapabilities,
+  strategyPatternCapabilityKey,
+} from '../shared/strategyPatternCapabilities.js'
 
 function candles() {
   return Array.from({ length: 40 }, (_, index) => {
@@ -847,6 +851,75 @@ test('生产模型或评分输入口径换版后同日公式结果必须重算',
     now: () => Date.UTC(2026, 7, 28, 7, 5),
   })
   assert.equal(scanCalls, 2)
+})
+
+test('五策略产品能力变化后同日公式结果必须重算', async () => {
+  let scanCalls = 0
+  let saved = null
+  let scannedCapabilities = null
+  const inactive = resolveStrategyPatternCapabilities({})
+  const active = resolveStrategyPatternCapabilities({
+    STRATEGY_PATTERN_RECALL: 'ACTIVE',
+    STRATEGY_PATTERN_PRICE_ANCHORS: 'ACTIVE',
+    STRATEGY_PATTERN_CONFIRMATION: 'ACTIVE',
+    STRATEGY_PATTERN_DISPLAY: 'ACTIVE',
+  })
+  const store = {
+    readLatest: async () => ({
+      tradeDate: '2026-08-28',
+      slot: '1505',
+      strategyPatternCapabilityKey:
+        strategyPatternCapabilityKey(inactive),
+      decisionScoring: {
+        usagePolicy: 'DIRECT',
+        inputContextVersion: 'opportunity-score-input-context.v4',
+        modelVersion: 'current-model',
+      },
+      candidates: [],
+    }),
+    saveRun: async (_mode, value) => { saved = value },
+    saveProgress: async () => {},
+    claimRun: async () => ({ acquired: true, owner: 'owner' }),
+    releaseRun: async () => true,
+  }
+
+  const result = await runFormulaSelection({
+    mode: 'close',
+    store,
+    strategyPatternCapabilities: active,
+    readTrainingStatus: async () => ({
+      enabled: true,
+      usagePolicy: 'DIRECT',
+      modelVersion: 'current-model',
+    }),
+    scan: async (options) => {
+      scanCalls += 1
+      scannedCapabilities = options.strategyPatternCapabilities
+      return {
+        universe: {
+          total: 5500,
+          inspectedCount: 5500,
+          tradeDate: '2026-08-28',
+        },
+        formulas: [],
+        candidates: [],
+        candidateEvents: [],
+      }
+    },
+    collectMarketContext: async () => ({
+      marketGate: { allowed: true },
+    }),
+    now: () => Date.UTC(2026, 7, 28, 7, 5),
+  })
+
+  assert.equal(scanCalls, 1)
+  assert.equal(result.reused, undefined)
+  assert.deepEqual(scannedCapabilities, active)
+  assert.equal(
+    saved.strategyPatternCapabilityKey,
+    strategyPatternCapabilityKey(active),
+  )
+  assert.deepEqual(saved.strategyPatternCapabilities, active)
 })
 
 test('公式选股进度按模式独立持久化并可恢复读取', async () => {
