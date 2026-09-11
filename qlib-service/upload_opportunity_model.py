@@ -16,6 +16,9 @@ from opportunity_model import (
 from model_lib import _oss_bucket
 
 
+RELEASE_DECISION_SCHEMA_VERSION = "opportunity-selective-release.v1"
+
+
 def _bucket():
     target = _oss_bucket()
     if target is None:
@@ -48,6 +51,23 @@ def _load_metadata(directory):
     return metadata, run_id, artifact_filenames_for_metadata(metadata)
 
 
+def _validate_release_decision(value, run_id):
+    if not isinstance(value, dict):
+        raise ValueError("V3发布决策无效")
+    if (
+        value.get("schemaVersion")
+        != RELEASE_DECISION_SCHEMA_VERSION
+        or value.get("action") != "PUBLISH"
+        or value.get("eligible") is not True
+        or str(value.get("selectedVersion") or "") != run_id
+        or not isinstance(value.get("promotedComponents"), list)
+        or not value["promotedComponents"]
+        or (value.get("compatibility") or {}).get("passed") is not True
+    ):
+        raise ValueError("V3发布决策未通过完整验证")
+    return value
+
+
 def publish_opportunity_release(
     target_bucket,
     directory,
@@ -55,9 +75,15 @@ def publish_opportunity_release(
     prefix="opportunitymodel/",
     activated_at=None,
     activate_baseline=False,
+    release_decision=None,
 ):
     source = os.path.abspath(directory)
     metadata, run_id, artifact_filenames = _load_metadata(source)
+    decision = (
+        _validate_release_decision(release_decision, run_id)
+        if release_decision is not None
+        else None
+    )
     normalized_prefix = str(prefix or "opportunitymodel/").strip("/")
     release_prefix = f"{normalized_prefix}/runs/{run_id}/"
     manifest_files = {}
@@ -97,6 +123,31 @@ def publish_opportunity_release(
         ),
         "files": manifest_files,
     }
+    if decision is not None:
+        decision_payload = json.dumps(
+            decision,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        decision_key = (
+            f"{normalized_prefix}/release-history/{run_id}.json"
+        )
+        target_bucket.put_object(
+            decision_key,
+            decision_payload,
+            headers={"x-oss-forbid-overwrite": "true"},
+        )
+        manifest["releaseManagement"] = {
+            "strategy": decision.get("releaseMode"),
+            "parentRunId": decision.get("championVersion"),
+            "challengerRunId": decision.get("challengerVersion"),
+            "promotedComponents": decision["promotedComponents"],
+            "decisionKey": decision_key,
+            "decisionSha256": hashlib.sha256(
+                decision_payload
+            ).hexdigest(),
+        }
     target_bucket.put_object(
         f"{normalized_prefix}/manifest.json",
         json.dumps(
@@ -125,12 +176,21 @@ def main():
         action="store_true",
         help="将当前最佳组合设为DIRECT基准，但不伪造生产门槛结果",
     )
+    parser.add_argument(
+        "--release-decision",
+        help="通过整体兼容性验证的选择性发布决策JSON",
+    )
     args = parser.parse_args()
+    decision = None
+    if args.release_decision:
+        with open(args.release_decision, encoding="utf-8") as handle:
+            decision = json.load(handle)
     manifest = publish_opportunity_release(
         _bucket(),
         args.directory,
         prefix=args.prefix,
         activate_baseline=args.activate_baseline,
+        release_decision=decision,
     )
     print(json.dumps({
         "ok": True,
