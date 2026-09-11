@@ -599,7 +599,7 @@ test('非硬止损V3清仓先观察并重评而不是直接推送卖出', () => 
   assert.equal(data.alerts[0].phase, 'armed')
   assert.equal(data.alerts[0].op, 'lte')
   assert.equal(data.alerts[0].value, 53.47)
-  assert.equal(data.alerts[0].decisionEngine, 'V3')
+  assert.equal(data.alerts[0].decisionEngine, 'MULTI_TASK')
 })
 
 test('T+1导致减仓降级为持有时不生成方向相反的加仓复核提醒', () => {

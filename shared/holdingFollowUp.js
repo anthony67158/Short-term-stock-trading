@@ -1,3 +1,7 @@
+import {
+  isDecisionEngineAdvice,
+} from './decisionEngineSource.js'
+
 export const HOLDING_FOLLOW_UP_VERSION = 'holding-follow-up.v1'
 
 function finite(value) {
@@ -15,7 +19,57 @@ function compactReasons(values = []) {
 }
 
 export function holdingAddReviewPlan(advice = {}) {
-  if (advice?.reviewDecision?.terminal === true || advice?.monitoringPlan) return null
+  if (advice?.reviewDecision?.terminal === true) return null
+  const v3Plan = advice?.holdingAddPlan
+  if (
+    isDecisionEngineAdvice(advice)
+    && v3Plan?.schemaVersion === 'holding-add-plan.v1'
+  ) {
+    const budget = advice?.decisionPlan?.entryBudget
+    const route = String(v3Plan.route || '')
+    const watchPrice = finite(v3Plan.price)
+    if (
+      budget?.state !== 'ESTIMATED'
+      || !(Number(budget.lots) > 0)
+      || !['PULLBACK', 'BREAKOUT'].includes(route)
+      || watchPrice == null
+    ) return null
+    const probe = v3Plan.plannedAction === 'PROBE_ADD'
+    return {
+      schemaVersion: HOLDING_FOLLOW_UP_VERSION,
+      status: 'ENTRY_CONFIRMATION',
+      paths: [{
+        key: route === 'PULLBACK'
+          ? 'holding_add_pullback'
+          : 'holding_add_breakout',
+        label: route === 'PULLBACK'
+          ? '回踩加仓复核'
+          : '突破加仓复核',
+        price: watchPrice,
+        direction: route === 'PULLBACK' ? 'LTE' : 'GTE',
+      }],
+      reasons: compactReasons([
+        advice.quantNote,
+        advice.actionPlan,
+      ]),
+      summary: probe
+        ? 'V3加仓方向已通过，到价后确认小仓加仓'
+        : 'V3加仓方向已通过，到价后确认加仓',
+      reviewIntent: {
+        mode: 'ENTRY_CONFIRMATION',
+        plannedAction: probe ? 'PROBE_ADD' : 'ADD',
+        actionLabel: probe ? '条件小仓加仓' : '条件加仓',
+        directionApproved: true,
+        maxPositionPct: Math.min(
+          probe ? 5 : 20,
+          finite(v3Plan.maxPositionPct) || (probe ? 5 : 20),
+        ),
+        manualConfirmationOnly:
+          v3Plan.manualConfirmationOnly === true,
+      },
+    }
+  }
+  if (advice?.monitoringPlan) return null
   const action = String(
     advice?.decisionPlan?.action
     || advice?.action

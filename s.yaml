@@ -31,7 +31,7 @@ resources:
         ADVICE_FC_REGION: ${vars.region}
         ADVICE_FC_FUNCTION_NAME: ${vars.functionName}
         ADVICE_ASYNC_WORKER: "true"
-        V3_DECISION_CONCURRENCY: "4"
+        DECISION_CONCURRENCY: "4"
         # ---- 大模型（保持原样，不迁百炼）----
         LLM_BASE_URL: ${env('LLM_BASE_URL')}
         LLM_API_KEY: ${env('LLM_API_KEY')}

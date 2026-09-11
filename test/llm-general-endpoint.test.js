@@ -3,9 +3,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 import {
+  DECISION_CONCURRENCY,
   MODEL_TEST_TIMEOUT_MS,
   resolveLlmConfigTarget,
-  V3_DECISION_CONCURRENCY,
 } from '../api/llm_config.js'
 
 const frontend = readFileSync(
@@ -48,9 +48,9 @@ const roleConfig = {
   },
 }
 
-test('V3主评估默认使用四路独立并发', () => {
-  assert.equal(V3_DECISION_CONCURRENCY, 4)
-  assert.match(serverless, /V3_DECISION_CONCURRENCY:\s*"4"/)
+test('主决策评估默认使用四路独立并发', () => {
+  assert.equal(DECISION_CONCURRENCY, 4)
+  assert.match(serverless, /DECISION_CONCURRENCY:\s*"4"/)
 })
 
 test('角色端点可按角色和槽位复用已保存Key', () => {

@@ -86,7 +86,7 @@ import {
   adviceCompleteness,
   adviceConcurrency,
   generationOptions,
-  resolveV3DecisionConcurrency,
+  resolveDecisionConcurrency,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js';
 import {
@@ -105,7 +105,7 @@ import {
 import { attachAdviceDailyReport } from '../shared/adviceDailyReportPolicy.js';
 import { adviceEntryMatchesMode } from '../shared/adviceModeContext.js';
 import aiHandler from './ai.js';
-import { runV3Decision } from './_v3_decision.js';
+import { runDecision } from './_decision_orchestrator.js';
 import quoteHandler from './quote.js';
 import { sendPush } from './_push_send.js';
 import {
@@ -122,6 +122,10 @@ import {
   isContinuousTrading,
   nextTradingDayLabel,
 } from '../shared/tradingCalendar.js';
+import {
+  DECISION_ENGINE_ID,
+  isDecisionEngineAdvice,
+} from '../shared/decisionEngineSource.js';
 
 export const PROGRESS_SAVE_INTERVAL_MS = 5000;
 export const CANCEL_POLL_INTERVAL_MS = 1000;
@@ -211,10 +215,10 @@ function endWorkerResponse(res, payload) {
   return res.end(`event: result\ndata: ${JSON.stringify(payload)}\n\n`);
 }
 
-// V3使用独立计算容量，LLM端点是否配置不影响决策与复核。
+// 决策引擎使用独立计算容量，LLM端点是否配置不影响决策与复核。
 function advisorConcurrency() {
-  return resolveV3DecisionConcurrency(
-    process.env.V3_DECISION_CONCURRENCY,
+  return resolveDecisionConcurrency(
+    process.env.DECISION_CONCURRENCY,
   );
 }
 
@@ -1450,14 +1454,20 @@ async function runJobGen(
     throw error;
   }
   const startedAt = Date.now();
-  const result = await runV3Decision({
+  const result = await runDecision({
     book: data, code, signal,
     reviewEvent,
     onProgress: (phase, stage) => onProgress?.({
-      phase, stage, model: 'V3', decisionEngine: 'V3',
+      phase, stage,
+      model: DECISION_ENGINE_ID,
+      decisionEngine: DECISION_ENGINE_ID,
     }),
   });
-  onProgress?.({ stage: 'finalize', phase: 'V3评估完成，正在核验账本并保存', model: 'V3' });
+  onProgress?.({
+    stage: 'finalize',
+    phase: '模块化决策完成，正在核验账本并保存',
+    model: DECISION_ENGINE_ID,
+  });
   const cacheItem = buildAdviceCacheEntry(previousEntry, {
     mode,
     advice: result.result,
@@ -1469,7 +1479,7 @@ async function runJobGen(
   }, result.updatedAt);
   cacheItem.generationMetrics = {
     schemaVersion: 'advice-generation-metrics.v1',
-    profile: 'V3',
+    profile: 'DECISION',
     durationMs: Date.now() - startedAt,
     mainLlmCalls: 0,
   };
@@ -1488,7 +1498,8 @@ async function runJobGen(
       expectancy: adviceExpectancySnapshot(result.result),
       planId: result.result.continuity.planId,
       planRevision: result.result.continuity.revision,
-      tacticalTriggerPath: result.result.selectedV3Plan?.route || 'NONE',
+      tacticalTriggerPath:
+        result.result.selectedDecisionPlan?.route || 'NONE',
       decisionSource: result.result.decisionSource,
     },
     quantScore: null,
@@ -1622,7 +1633,7 @@ async function persistServer(nick, workingAcc) {
     const cur = fa[k];
     if (!cur || (v.at || 0) > (cur.at || 0)) fa[k] = v;
     const effective = fa[k];
-    if (effective?.advice?.decisionSource?.engine === 'V3') {
+    if (isDecisionEngineAdvice(effective?.advice)) {
       projectAdviceAlerts(fdata, k, effective.advice, {
         adviceAt: Math.max(
           Number(effective.updatedAt) || 0,
@@ -2833,7 +2844,7 @@ export default async function handler(req, res) {
           accepted: false,
           queued: false,
           code: 'ADVISOR_CAPACITY_FULL',
-          error: 'V3评估容量已满，请等待当前任务完成',
+          error: '决策评估容量已满，请等待当前任务完成',
           busy: admission.busy,
           concurrency: admission.capacity,
           progress: jobsToProgress(

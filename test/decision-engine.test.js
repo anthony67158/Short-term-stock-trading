@@ -1,13 +1,22 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildV3Action } from '../shared/adaptiveAdvicePolicy.js'
-import { evaluateV3Decision } from '../api/_v3_decision.js'
+import { buildDecisionAction } from '../shared/decisionEnginePolicy.js'
+import { evaluateDecision } from '../api/_decision_orchestrator.js'
 import { adviceCompleteness } from '../shared/adviceBatchPolicy.js'
 import { readFileSync } from 'node:fs'
 import { buildAdviceCacheEntry } from '../shared/adviceContinuity.js'
-import { projectAdviceAlerts, isCurrentDecisionAlert, v3ActionAlertMessage } from '../shared/adviceAlerts.js'
+import {
+  decisionActionAlertMessage,
+  isCurrentDecisionAlert,
+  projectAdviceAlerts,
+} from '../shared/adviceAlerts.js'
 
-const payload = { todayQuote: { price: 10, live: true }, holdQty: 0 }
+const payload = {
+  code: '600001',
+  name: '测试股份',
+  todayQuote: { price: 10, live: true },
+  holdQty: 0,
+}
 const plan = {
   route: 'IMMEDIATE',
   entryPlan: { price: 10 },
@@ -21,8 +30,8 @@ const plan = {
 }
 
 test('V3选定动作不接受LLM手数或结论', () => {
-  const first = buildV3Action({ payload, plans: [plan], now: 1 })
-  const second = buildV3Action({
+  const first = buildDecisionAction({ payload, plans: [plan], now: 1 })
+  const second = buildDecisionAction({
     payload: { ...payload, previousAdvice: { action: '清仓', planQty: 99 } },
     plans: [plan], now: 1,
   })
@@ -33,7 +42,7 @@ test('V3选定动作不接受LLM手数或结论', () => {
 })
 
 test('直接使用模式不要求模型通过晋级', () => {
-  const result = buildV3Action({
+  const result = buildDecisionAction({
     payload,
     plans: [{ ...plan, opportunityScore: {
       ...plan.opportunityScore, productionEligible: false, shadowOnly: true, usagePolicy: 'DIRECT',
@@ -45,7 +54,7 @@ test('直接使用模式不要求模型通过晋级', () => {
 })
 
 test('直接使用模型的分布外提示不再伪装成未就绪', () => {
-  const result = buildV3Action({
+  const result = buildDecisionAction({
     payload, plans: [{ ...plan, opportunityScore: {
       ...plan.opportunityScore, productionEligible: false, shadowOnly: true,
       usagePolicy: 'DIRECT', outOfDistribution: true,
@@ -58,8 +67,8 @@ test('直接使用模型的分布外提示不再伪装成未就绪', () => {
 
 test('没有持仓模型时仍保留止损和T+1保护', () => {
   const holding = { ...payload, holdQty: 2, holdingStopPrice: 10.2 }
-  const locked = buildV3Action({ payload: { ...holding, sellableTodayQty: 0 } })
-  const sellable = buildV3Action({ payload: { ...holding, sellableTodayQty: 1 } })
+  const locked = buildDecisionAction({ payload: { ...holding, sellableTodayQty: 0 } })
+  const sellable = buildDecisionAction({ payload: { ...holding, sellableTodayQty: 1 } })
   assert.equal(locked.action, '持有')
   assert.match(locked.actionPlan, /T\+1/)
   assert.equal(sellable.action, '减仓')
@@ -67,21 +76,83 @@ test('没有持仓模型时仍保留止损和T+1保护', () => {
   assert.equal(sellable.decisionSource.state, 'MODEL_ERROR')
 })
 
-test('V3使用剩余价格路径价值管理持仓而不调用旧加权公式', () => {
+test('模块化引擎使用统一动作价值管理持仓而不调用旧加权公式', () => {
   const held = { ...payload, holdQty: 2, sellableTodayQty: 2, holdingStopPrice: 9 }
-  const positive = buildV3Action({ payload: held, plans: [plan] })
-  const negative = buildV3Action({
+  const positive = buildDecisionAction({ payload: held, plans: [plan] })
+  const negative = buildDecisionAction({
     payload: held,
     plans: [{ ...plan, opportunityScore: { ...plan.opportunityScore, expectedNetR: -0.2 } }],
   })
   assert.equal(positive.action, '持有')
   assert.equal(negative.action, '清仓')
-  assert.equal(negative.adaptiveAction.economics.source, 'V3_PATH_MODEL')
+  assert.equal(
+    negative.actionValues.schemaVersion,
+    'action-value-vector.v1',
+  )
+})
+
+test('持仓V3为正时保留当前仓位并生成单一路径加仓观察价', () => {
+  const held = {
+    ...payload,
+    holdQty: 2,
+    sellableTodayQty: 2,
+    holdingStopPrice: 9,
+  }
+  const pullback = {
+    ...plan,
+    route: 'PULLBACK',
+    entryPlan: { ...plan.entryPlan, price: 9.8 },
+    opportunityScore: {
+      ...plan.opportunityScore,
+      expectedNetR: 0.5,
+      priceContract: {
+        entryPrice: 9.8,
+        stopPrice: 9,
+        targetPrice: 12,
+      },
+    },
+  }
+  const result = buildDecisionAction({
+    payload: held,
+    plans: [plan, pullback],
+  })
+
+  assert.equal(result.action, '持有')
+  assert.equal(result.pullbackWatchPrice, 9.8)
+  assert.equal(result.breakoutWatchPrice, null)
+  assert.equal(result.holdingAddPlan.route, 'PULLBACK')
+  assert.equal(result.holdingAddPlan.plannedAction, 'PROBE_ADD')
+})
+
+test('持仓加仓观察价复核通过后V3输出ADD请求', () => {
+  const result = buildDecisionAction({
+    payload: {
+      ...payload,
+      holdQty: 2,
+      sellableTodayQty: 2,
+      holdingStopPrice: 9,
+      reviewEvent: {
+        kind: 'price-review',
+        reviewMode: 'ENTRY_CONFIRMATION',
+        plannedAction: 'PROBE_ADD',
+        actionLabel: '条件小仓加仓',
+        directionApproved: true,
+        maxPositionPct: 5,
+      },
+    },
+    plans: [plan],
+  })
+
+  assert.equal(result.action, '加仓')
+  assert.equal(result.addPrice, 10)
+  assert.equal(result.buyPrice, null)
+  assert.equal(result.holdingAddPlan, null)
+  assert.match(result.actionPlan, /加仓/)
 })
 
 test('完整V3评估在模型未就绪时独立返回明确状态与零LLM调用', async () => {
   let calls = 0
-  const result = await evaluateV3Decision({
+  const result = await evaluateDecision({
     code: '600001',
     book: { account: { totalAssets: 100000, cash: 100000 }, holding: [], closed: [] },
     quotes: [{ code: '600001', price: 10, isLivePrice: false }],
@@ -95,7 +166,7 @@ test('完整V3评估在模型未就绪时独立返回明确状态与零LLM调用
   assert.equal(result.meta.llmCalls, 0)
   assert.equal(result.result.decisionSource.state, 'MODEL_ERROR')
   assert.equal(result.result.decisionPlan.quantity.lots, 0)
-  assert.match(result.result.actionPlan, /V3模型调用失败/)
+  assert.match(result.result.actionPlan, /决策模型不可用/)
   assert.equal(adviceCompleteness(result.result, result.mode).complete, true)
 })
 
@@ -117,22 +188,157 @@ function scenario(overrides = {}) {
 }
 
 test('V3完整编译保留同一路径价格与概率，保存恢复不依赖LLM', async () => {
-  const result = await evaluateV3Decision(scenario())
+  const result = await evaluateDecision(scenario())
   const decision = result.result.decisionPlan
   assert.equal(decision.action, 'BUY')
   assert.equal(decision.actionability, 'READY')
   assert.ok(decision.quantity.lots > 0)
   assert.equal(decision.risk.tradeExpectancy.source, 'OPPORTUNITY_MODEL')
-  assert.equal(decision.prices.reference, result.result.selectedV3Plan.entryPlan.price)
+  assert.equal(
+    decision.prices.reference,
+    result.result.selectedDecisionPlan.entryPlan.price,
+  )
   const entry = buildAdviceCacheEntry(null, { mode: result.mode, advice: result.result }, now)
   const restored = JSON.parse(JSON.stringify(entry))
   assert.deepEqual(restored.advice.decisionPlan, decision)
   assert.equal(adviceCompleteness(restored.advice, result.mode).complete, true)
 })
 
+test('持仓V3初评生成加仓观察价并保留账户核定预算', async () => {
+  const result = await evaluateDecision(scenario({
+    book: {
+      account: { totalAssets: 100000, cash: 60000 },
+      closed: [],
+      executionPlans: [],
+      holding: [{
+        code: '600001',
+        qty: 2,
+        buyPrice: 9.5,
+        sl: 9,
+        buyAt: now - 86400000,
+      }],
+    },
+    score: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      expectedNetR: input.dimensions.route === 'PULLBACK'
+        ? 0.7
+        : input.dimensions.route === 'IMMEDIATE' ? 0.3 : 0.2,
+    }]]),
+  }))
+
+  assert.equal(result.result.decisionPlan.action, 'HOLD')
+  assert.equal(result.result.decisionPlan.actionability, 'WATCH')
+  assert.ok(result.result.decisionPlan.entryBudget.lots > 0)
+  assert.ok(result.result.pullbackWatchPrice > 0)
+  assert.equal(result.result.holdingAddPlan.route, 'PULLBACK')
+
+  const data = {
+    holding: result.result.decisionPlan.quantity.holdingLots
+      ? [{ code: '600001', qty: 2, sl: 9 }]
+      : [],
+    closed: [],
+    plan: [],
+    alerts: [],
+    settings: {},
+    advice: { '600001': { mode: 'hold_advice', advice: result.result } },
+  }
+  projectAdviceAlerts(data, '600001', result.result, {
+    now,
+    adviceAt: result.updatedAt,
+    requirePriceContract: true,
+    t1Status: { liveQty: 2, sellableToday: 2 },
+  })
+  assert.ok(data.alerts.some((alert) =>
+    alert.reviewOnly === true
+    && alert.reviewCategory === 'holding-add'
+  ))
+
+  const blocked = await evaluateDecision(scenario({
+    ...scenario(),
+    book: {
+      account: { totalAssets: 100000, cash: 0 },
+      closed: [],
+      executionPlans: [],
+      holding: [{
+        code: '600001',
+        qty: 2,
+        buyPrice: 9.5,
+        sl: 9,
+        buyAt: now - 86400000,
+      }],
+    },
+    score: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      expectedNetR: input.dimensions.route === 'PULLBACK'
+        ? 0.7
+        : 0.3,
+    }]]),
+  }))
+  assert.equal(blocked.result.decisionPlan.entryBudget.state, 'BLOCKED')
+  assert.equal(blocked.result.holdingAddPlan, null)
+  assert.equal(blocked.result.pullbackWatchPrice, null)
+  assert.equal(blocked.result.breakoutWatchPrice, null)
+})
+
+test('持仓加仓到价后由V3和账户风控共同核定手数', async () => {
+  const addEvent = {
+    kind: 'price-review',
+    reviewMode: 'ENTRY_CONFIRMATION',
+    plannedAction: 'PROBE_ADD',
+    actionLabel: '条件小仓加仓',
+    directionApproved: true,
+    maxPositionPct: 5,
+    direction: 'lte',
+    threshold: 10,
+    price: 10,
+    at: now - 60_000,
+  }
+  const input = scenario({
+    book: {
+      account: { totalAssets: 100000, cash: 60000 },
+      closed: [],
+      executionPlans: [],
+      holding: [{
+        code: '600001',
+        qty: 2,
+        buyPrice: 9.5,
+        sl: 9,
+        buyAt: now - 86400000,
+      }],
+    },
+    reviewEvent: addEvent,
+    score: async ([row]) => new Map([[row.code, {
+      ...plan.opportunityScore,
+      expectedNetR: row.dimensions.route === 'IMMEDIATE' ? 0.6 : 0.1,
+    }]]),
+  })
+  const result = await evaluateDecision(input)
+
+  assert.equal(result.result.decisionPlan.action, 'ADD')
+  assert.equal(result.result.decisionPlan.actionability, 'READY')
+  assert.ok(result.result.decisionPlan.quantity.lots > 0)
+  assert.equal(result.result.addPrice, 10)
+  assert.equal(result.result.reviewDecision.terminal, true)
+  assert.equal(
+    result.result.reviewDecision.quantity,
+    result.result.decisionPlan.quantity.lots,
+  )
+
+  const blocked = await evaluateDecision({
+    ...input,
+    book: {
+      ...input.book,
+      account: { totalAssets: 100000, cash: 0 },
+    },
+  })
+  assert.notEqual(blocked.result.decisionPlan.action, 'ADD')
+  assert.equal(blocked.result.decisionPlan.quantity.lots, 0)
+  assert.equal(blocked.result.reviewDecision.quantity, 0)
+})
+
 test('单股直接评估使用训练集已有的探索召回语义', async () => {
   const inputs = []
-  await evaluateV3Decision(scenario({
+  await evaluateDecision(scenario({
     score: async (values) => {
       inputs.push(...values)
       return new Map(values.map((input) => [input.code, {
@@ -154,7 +360,7 @@ test('单股直接评估使用训练集已有的探索召回语义', async () =>
 })
 
 test('V3结果固化本次使用的技术、五日资金和板块证据', async () => {
-  const result = await evaluateV3Decision(scenario({
+  const result = await evaluateDecision(scenario({
     trends: Array.from({ length: 6 }, (_, index) => ({
       time: `10:${String(index).padStart(2, '0')}`,
       price: 9.9 + index * 0.02,
@@ -184,7 +390,7 @@ test('V3结果固化本次使用的技术、五日资金和板块证据', async 
   }))
 
   const evidence = result.result.decisionEvidence
-  assert.equal(evidence.schemaVersion, 'v3-decision-evidence.v1')
+  assert.equal(evidence.schemaVersion, 'decision-evidence.v1')
   assert.equal(evidence.availability.completeFundHistory, true)
   assert.equal(evidence.availability.sectorContext, true)
   assert.equal(evidence.availability.intradayTechnical, true)
@@ -204,8 +410,8 @@ test('触发后路径特征只在复核事件中生成', async () => {
       { time: '10:12', price: 10.12, avg: 10.03, volume: 200 },
     ],
   }
-  const initial = await evaluateV3Decision(scenario({ trends }))
-  const review = await evaluateV3Decision(scenario({
+  const initial = await evaluateDecision(scenario({ trends }))
+  const review = await evaluateDecision(scenario({
     trends,
     reviewEvent: {
       kind: 'price-review',
@@ -229,8 +435,8 @@ test('触发后路径特征只在复核事件中生成', async () => {
 
 test('预留买入现金、单票预留和模型尾损均约束V3手数', async () => {
   const input = scenario()
-  const normal = await evaluateV3Decision(input)
-  const pending = await evaluateV3Decision({
+  const normal = await evaluateDecision(input)
+  const pending = await evaluateDecision({
     ...input, book: { ...input.book, executionPlans: [{
       code: '600001', side: 'BUY', status: 'USER_CONFIRMED',
       reservedCash: 99500, targetLots: 99, remainingLots: 99,
@@ -239,7 +445,7 @@ test('预留买入现金、单票预留和模型尾损均约束V3手数', async 
   })
   assert.equal(pending.result.decisionPlan.quantity.lots, 0)
   assert.notEqual(pending.result.decisionPlan.actionability, 'READY')
-  const stressed = await evaluateV3Decision({ ...input,
+  const stressed = await evaluateDecision({ ...input,
     score: async ([row]) => new Map([[row.code, { ...plan.opportunityScore,
       expectedNetR: row.dimensions.route === 'IMMEDIATE' ? 0.8 : 0.1,
       expectedShortfall10: -20,
@@ -249,18 +455,18 @@ test('预留买入现金、单票预留和模型尾损均约束V3手数', async 
 })
 
 test('过时报价和缺失资金不产生V3买入指令', async () => {
-  const stale = await evaluateV3Decision(scenario({
+  const stale = await evaluateDecision(scenario({
     quotes: [{ code: '600001', price: 10, isLivePrice: true, tradeDate: '2026-09-09' }],
   }))
   assert.equal(stale.result.decisionPlan.quantity.lots, 0)
-  const missing = await evaluateV3Decision(scenario({ fund: null }))
+  const missing = await evaluateDecision(scenario({ fund: null }))
   assert.equal(missing.result.decisionSource.state, 'EVIDENCE_INCOMPLETE')
   assert.equal(missing.result.decisionPlan.quantity.lots, 0)
   assert.ok(missing.result.decisionSource.missingEvidence.includes('主力与小单资金'))
 })
 
 test('模型缺失及资金故障不能阻断持仓硬止损', async () => {
-  const result = await evaluateV3Decision(scenario({
+  const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [],
       holding: [{ code: '600001', qty: 2, buyPrice: 10, sl: 10.1, buyAt: now - 86400000 }],
     },
@@ -273,7 +479,7 @@ test('模型缺失及资金故障不能阻断持仓硬止损', async () => {
 })
 
 test('其他持仓风险不完整不阻断V3负期望仓位退出', async () => {
-  const result = await evaluateV3Decision(scenario({
+  const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [], holding: [
       { code: '600001', qty: 2, buyPrice: 10, sl: 9, buyAt: now - 86400000 },
       { code: '600002', qty: 1, buyPrice: 10, buyAt: now - 86400000 },
@@ -288,7 +494,7 @@ test('其他持仓风险不完整不阻断V3负期望仓位退出', async () => 
 })
 
 test('只有真实触及账本止损才允许V3退出直接进入可执行态', async () => {
-  const result = await evaluateV3Decision(scenario({
+  const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [], holding: [
       { code: '600001', qty: 2, buyPrice: 10, sl: 10.1, buyAt: now - 86400000 },
     ] },
@@ -330,7 +536,7 @@ test('退出前复核用最新V3结果撤销反弹后的旧清仓或确认新价
       volume: 1000 + index * 100,
     })),
   }
-  const initial = await evaluateV3Decision(scenario({
+  const initial = await evaluateDecision(scenario({
     ...marketData,
     book: holdingBook,
     quotes: [{
@@ -347,7 +553,7 @@ test('退出前复核用最新V3结果撤销反弹后的旧清仓或确认新价
   assert.equal(initial.result.decisionPlan.action, 'EXIT')
   assert.equal(initial.result.decisionPlan.actionability, 'CONDITIONAL')
 
-  const rebound = await evaluateV3Decision(scenario({
+  const rebound = await evaluateDecision(scenario({
     ...marketData,
     book: holdingBook,
     quotes: [{
@@ -370,7 +576,7 @@ test('退出前复核用最新V3结果撤销反弹后的旧清仓或确认新价
   assert.equal(rebound.result.reviewDecision.terminal, true)
   assert.equal(rebound.meta.llmCalls, 0)
 
-  const confirmedExit = await evaluateV3Decision(scenario({
+  const confirmedExit = await evaluateDecision(scenario({
     ...marketData,
     book: holdingBook,
     quotes: [{
@@ -394,17 +600,17 @@ test('退出前复核用最新V3结果撤销反弹后的旧清仓或确认新价
 })
 
 test('V3换版期间不得混用三条路径的模型概率', () => {
-  const result = buildV3Action({ payload, plans: [plan, {
+  const result = buildDecisionAction({ payload, plans: [plan, {
     ...plan, route: 'PULLBACK',
     opportunityScore: { ...plan.opportunityScore, modelVersion: 'different-v3' },
   }] })
-  assert.equal(result.selectedV3Plan, null)
+  assert.equal(result.selectedDecisionPlan, null)
   assert.equal(result.planQty, 0)
 })
 
 test('到价复核终态采用账户核定后的动作而不是核定前买入', async () => {
   const input = scenario()
-  const result = await evaluateV3Decision({ ...input, reviewEvent: { kind: 'price_event' },
+  const result = await evaluateDecision({ ...input, reviewEvent: { kind: 'price_event' },
     book: { ...input.book, account: { cash: 0 } },
   })
   const advice = result.result
@@ -417,27 +623,27 @@ test('到价复核终态采用账户核定后的动作而不是核定前买入',
 })
 
 test('单股入口和任务worker的决策主链不调用LLM', () => {
-  const service = readFileSync(new URL('../api/_v3_decision.js', import.meta.url), 'utf8')
+  const service = readFileSync(new URL('../api/_decision_orchestrator.js', import.meta.url), 'utf8')
   assert.doesNotMatch(service, /callChat|_llm|ensureConfig/)
   const source = readFileSync(new URL('../api/ai.js', import.meta.url), 'utf8')
   const api = source.slice(source.indexOf('export default async function handler'))
-  assert.ok(api.indexOf('return finishV3(await runV3Decision') < api.indexOf('ensureConfig()'))
+  assert.ok(api.indexOf('return finishDecision(await runDecision') < api.indexOf('ensureConfig()'))
   const cron = readFileSync(new URL('../api/cron_advice.js', import.meta.url), 'utf8')
   const worker = cron.slice(cron.indexOf('async function runJobGen('), cron.indexOf('export function mergeExternalJobs'))
-  assert.match(worker, /await runV3Decision/)
+  assert.match(worker, /await runDecision/)
   assert.doesNotMatch(worker, /genOne\(|callChat/)
 })
 
 test('V3可执行提醒无需LLM二次裁决且过期或换版即失效', async () => {
-  const result = await evaluateV3Decision(scenario())
+  const result = await evaluateDecision(scenario())
   const data = { holding: [], plan: [{ code: '600001' }], alerts: [], settings: {} }
   projectAdviceAlerts(data, '600001', result.result, { now, requirePriceContract: true })
   assert.equal(data.alerts.length, 1)
   const alert = data.alerts[0]
-  assert.equal(alert.decisionEngine, 'V3')
+  assert.equal(alert.decisionEngine, 'MULTI_TASK')
   assert.equal(alert.phase, null)
-  assert.ok(v3ActionAlertMessage(alert, { price: 10 }))
-  assert.equal(v3ActionAlertMessage(alert, { price: 8 }), null)
+  assert.ok(decisionActionAlertMessage(alert, { price: 10 }))
+  assert.equal(decisionActionAlertMessage(alert, { price: 8 }), null)
   assert.equal(isCurrentDecisionAlert(alert, result.result, now), true)
   assert.equal(isCurrentDecisionAlert(alert, result.result, now + 86400000), false)
   assert.equal(isCurrentDecisionAlert(alert, { decisionSource: { engine: 'V3' },
@@ -449,7 +655,7 @@ test('V3可执行提醒无需LLM二次裁决且过期或换版即失效', async 
 test('模型未就绪时不把缺失的模型价位回写并清空账本止损', async () => {
   const { planStore, advicePlan } = await import('../src/planStore.js')
   const { saveAdvice } = await import('../src/adviceCache.js')
-  const result = await evaluateV3Decision(scenario({
+  const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [],
       holding: [{ code: '600001', qty: 2, buyPrice: 10, sl: 9, buyAt: now - 86400000 }],
     },

@@ -509,7 +509,8 @@ export function compileDecisionPlan({
     payload,
     evidenceSnapshot,
     action: governedAction,
-    trustedPricePlan: deterministicPolicy ? payload.v3PricePlan : null,
+    trustedPricePlan:
+      deterministicPolicy ? payload.decisionPricePlan : null,
   })
   const suppliedPriceContract = advice.priceContract?.schemaVersion
     === ADVICE_PRICE_CONTRACT_SCHEMA_VERSION
@@ -712,7 +713,10 @@ export function compileDecisionPlan({
       account: {
         ...account,
         maxStockWeight: actionPolicy.riskTier === 'PROBE'
-          ? Math.min(5, positive(actionPolicy.maxPositionPct) || 5,
+          ? Math.min(5, positive(
+              actionPolicy.maxStockWeightPct
+              ?? actionPolicy.maxPositionPct,
+            ) || 5,
               positive(account.maxStockWeight) || 20)
           : account.maxStockWeight,
         cash: Math.max(0, Math.min(
@@ -727,7 +731,12 @@ export function compileDecisionPlan({
       },
       market: deterministicPolicy ? {
         ...market,
-        targetPositionPct: { max: deterministicPolicy.maxPositionPct ?? 85 },
+        targetPositionPct: {
+          max:
+            deterministicPolicy.maxPortfolioPositionPct
+            ?? deterministicPolicy.maxPositionPct
+            ?? 85,
+        },
         riskMultiplier: deterministicPolicy.riskMultiplier ?? 1,
       } : market,
       slippageBps,
@@ -779,7 +788,10 @@ export function compileDecisionPlan({
   ) {
     const probePositionLimitPct = Math.min(
       5,
-      positive(actionPolicy.maxPositionPct) || 5,
+      positive(
+        actionPolicy.maxStockWeightPct
+        ?? actionPolicy.maxPositionPct,
+      ) || 5,
     )
     const oneLotGross = executionPrice(
       referencePrice,

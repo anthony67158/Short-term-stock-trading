@@ -1,7 +1,10 @@
 import { useSyncExternalStore } from 'react'
 import { computeTFlows, planStore, t1StatusOf } from './planStore.js'
 import { getAdvice } from './adviceCache.js'
-import { isCurrentDecisionAlert, v3ActionAlertMessage } from '../shared/adviceAlerts.js'
+import {
+  decisionActionAlertMessage,
+  isCurrentDecisionAlert,
+} from '../shared/adviceAlerts.js'
 import { api } from './apiBase.js'
 import { accountRequestHeaders } from './quantModel.js'
 import {
@@ -164,7 +167,11 @@ function hit(a, q, now = Date.now()) {
     const price = Number(q?.price)
     return price > 0 ? `现价 ${price}，开始退出前复核` : null
   }
-  if (a.decisionEngine === 'V3' && !a.reviewOnly && a.type === 'price') return v3ActionAlertMessage(a, q)
+  if (
+    ['MULTI_TASK', 'V3'].includes(a.decisionEngine)
+    && !a.reviewOnly
+    && a.type === 'price'
+  ) return decisionActionAlertMessage(a, q)
   // 数值型字段统一取有限数:接口异常/字符串/NaN 时返回 null(不判定),
   // 避免后续 .toFixed 在字符串上抛错(会中断整个 evaluate 预警循环)或渲染出字面 "NaN"。
   const fin = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null }

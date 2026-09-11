@@ -21,13 +21,13 @@ import {
 } from './_account_auth.js';
 import { assertSafeRemoteUrl } from './_safe_remote_url.js';
 import {
-  resolveV3DecisionConcurrency,
+  resolveDecisionConcurrency,
 } from '../shared/adviceBatchPolicy.js';
 
 export const MODEL_TEST_TIMEOUT_MS = 120000;
-export const V3_DECISION_CONCURRENCY =
-  resolveV3DecisionConcurrency(
-    process.env.V3_DECISION_CONCURRENCY,
+export const DECISION_CONCURRENCY =
+  resolveDecisionConcurrency(
+    process.env.DECISION_CONCURRENCY,
   );
 
 const normalizeBaseUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
@@ -185,7 +185,7 @@ export default async function handler(req, res) {
         roles: ROLES,
         roleSlots: ROLE_ENDPOINT_SLOTS,
         pool: poolStatus(config),
-        concurrency: V3_DECISION_CONCURRENCY,
+        concurrency: DECISION_CONCURRENCY,
       }));
     }
     if (!isRuntimeConfigAdmin(accountAuth.account)) {

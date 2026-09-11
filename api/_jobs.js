@@ -21,15 +21,15 @@
 import {
   generationOptions,
   isCompleteAdviceEntry,
-  resolveV3DecisionConcurrency,
+  resolveDecisionConcurrency,
 } from '../shared/adviceBatchPolicy.js';
 import {
   isTriggeredReviewEvent,
   triggeredReviewMonitoringWindow,
 } from '../shared/triggeredReviewDecision.js';
 
-export const CONCURRENCY = resolveV3DecisionConcurrency(
-  process.env.V3_DECISION_CONCURRENCY
+export const CONCURRENCY = resolveDecisionConcurrency(
+  process.env.DECISION_CONCURRENCY
   || process.env.ADVICE_CONCURRENCY,
 );
 export const LEASE_MS = 270 * 1000;      // 单只运行租约:大于批量单股 225s 护栏；Worker 每 20s 续租，中断后约 4.5 分钟可回收

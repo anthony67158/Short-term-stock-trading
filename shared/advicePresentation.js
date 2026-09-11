@@ -898,7 +898,7 @@ function executionPlanSummary(plan) {
   }
 }
 
-export function compileAdvicePresentationV3(advice = {}) {
+export function compileDecisionPresentation(advice = {}) {
   const displayAdvice = humanizeAdviceTextFields(advice)
   const view = buildLegacyAdvicePresentation(displayAdvice)
   return {
@@ -956,5 +956,5 @@ export function buildAdvicePresentation(advice = {}) {
       executionPlan: executionPlanSummary(displayAdvice.executionPlan),
     }
   }
-  return compileAdvicePresentationV3(displayAdvice)
+  return compileDecisionPresentation(displayAdvice)
 }

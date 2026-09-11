@@ -48,7 +48,7 @@ import {
 import { reconcileAdviceNumbers } from '../shared/adviceValidation.js';
 import { normalizePickDecision } from '../shared/stockRanking.js';
 import { authorizePaidRequest } from './_account_auth.js';
-import { runV3Decision } from './_v3_decision.js';
+import { runDecision } from './_decision_orchestrator.js';
 import {
   continuityEvidenceFromPayload,
   reconcileAdviceContinuity,
@@ -61,14 +61,8 @@ import { isCurrentDailyReportSummary } from '../shared/adviceDailyReportPolicy.j
 import { buildAdviceDecisionContext } from '../shared/adviceModeContext.js';
 import {
   attachShortHorizonSummary,
-  buildShortHorizonTactical,
-  deriveShortHorizonActionPolicy,
 } from '../shared/shortHorizonTactical.js';
-import { applyPortfolioRiskPolicy } from '../shared/portfolioRiskPolicy.js';
 import { readAccountRiskContext } from './_portfolio.js';
-import {
-  applyShortHorizonExitPolicy,
-} from '../shared/exitManagement.js';
 import { applyTActionAdvicePolicy } from '../shared/tAdvicePolicy.js';
 import {
   classifyPriceLimit,
@@ -121,19 +115,10 @@ import {
   evaluateAccountCircuitBreaker,
 } from '../shared/accountCircuitBreaker.js';
 import {
-  buildMarketOpportunityContext,
-} from '../shared/marketOpportunityContext.js';
+  isDecisionEngineAdvice,
+} from '../shared/decisionEngineSource.js';
 import {
-  chooseAdaptivePricePlan,
-} from '../shared/adaptivePricePlans.js';
-import {
-  evaluateHoldingActions,
-} from '../shared/holdingActionValue.js';
-import {
-  applyAdaptiveAdvicePolicy,
-} from '../shared/adaptiveAdvicePolicy.js';
-import {
-  compileAdvicePresentationV3,
+  compileDecisionPresentation,
 } from '../shared/advicePresentation.js';
 import {
   quantInputReadiness,
@@ -1055,7 +1040,7 @@ export default async function handler(req, res) {
     const advice = accountAuth.account?.data?.advice?.[code]?.advice;
     const plan = advice?.decisionPlan;
     const valid = (
-      advice?.decisionSource?.engine === 'V3'
+      isDecisionEngineAdvice(advice)
       && advice?.decisionSource?.state === 'READY'
       && plan?.decisionId
       && Date.parse(plan.validUntil) > Date.now()
@@ -1064,7 +1049,7 @@ export default async function handler(req, res) {
       return finish({
         ok: false,
         mode,
-        error: '当前没有有效V3持仓决策，请先更新V3决策',
+        error: '当前没有有效持仓决策，请先更新决策',
       });
     }
     const stage = String(payload.tContext?.stage || 'idle');
@@ -1072,7 +1057,7 @@ export default async function handler(req, res) {
     const target = Number(plan.prices?.target) || null;
     let result = {
       dir: 'none',
-      dirLabel: '遵循当前V3决策',
+      dirLabel: '遵循当前系统决策',
       suggestQty: 0,
       actionPlan: advice.actionPlan,
       plain: '做T页面只负责记录真实买卖腿，不另行生成方向、价格或手数。',
@@ -1095,7 +1080,7 @@ export default async function handler(req, res) {
     return finish({
       ok: true,
       mode,
-      model: advice.decisionSource.modelVersion || 'V3',
+      model: advice.decisionSource.modelVersion || 'MULTI_TASK',
       updatedAt: Date.now(),
       result,
       meta: {
@@ -1109,7 +1094,7 @@ export default async function handler(req, res) {
     return res.status(410).send(JSON.stringify({
       ok: false,
       mode,
-      error: '旧交易计划生成入口已停用，请使用当前V3决策',
+      error: '旧交易计划生成入口已停用，请使用当前系统决策',
     }));
   }
   if (['buy_advice', 'hold_advice', 'review'].includes(mode)) {
@@ -1117,7 +1102,7 @@ export default async function handler(req, res) {
     res.setHeader('Content-Type', streaming
       ? 'text/event-stream; charset=utf-8' : 'application/json; charset=utf-8');
     res.setHeader('Cache-Control', 'no-store');
-    const finishV3 = (value) => {
+    const finishDecision = (value) => {
       if (streaming) {
         res.write(`event: result\ndata: ${JSON.stringify(value)}\n\n`);
         return res.end();
@@ -1125,10 +1110,10 @@ export default async function handler(req, res) {
       return res.status(200).send(JSON.stringify(value));
     };
     if (!accountAuth.account?.data) {
-      return finishV3({ ok: false, error: '缺少已鉴权的账户账本，未执行V3评估' });
+      return finishDecision({ ok: false, error: '缺少已鉴权的账户账本，未执行系统评估' });
     }
     try {
-      return finishV3(await runV3Decision({
+      return finishDecision(await runDecision({
         req,
         book: accountAuth.account.data,
         code: String(body?.payload?.code || ''),
@@ -1138,7 +1123,7 @@ export default async function handler(req, res) {
         },
       }));
     } catch (error) {
-      return finishV3({ ok: false, error: String(error?.message || 'V3评估失败') });
+      return finishDecision({ ok: false, error: String(error?.message || '系统评估失败') });
     }
   }
   const useRole = llmRoleForAdviceMode(
@@ -2243,82 +2228,6 @@ export default async function handler(req, res) {
     }
 
     const isAdvisor = isAdvisorMode(mode);
-    if (isAdvisor) {
-      const tactical = buildShortHorizonTactical(payload);
-      payload.shortHorizonTactical = {
-        ...tactical,
-        actionPolicy: deriveShortHorizonActionPolicy({
-          mode,
-          tactical,
-          reviewEvent: payload.reviewEvent,
-        }),
-      };
-      payload.marketOpportunityContext = buildMarketOpportunityContext({
-        market: payload.market || {},
-        marketGate: { regime: payload.marketEnv || {} },
-      });
-      if (Number(payload.holdQty) > 0) {
-        const deterministicHoldingPlan = {
-          ...(payload.previousAdvice || {}),
-          stopPrice:
-            payload.holdingStopPrice
-            ?? tactical.prices?.stopReference
-            ?? tactical.prices?.support
-            ?? payload.previousAdvice?.stopPrice
-            ?? null,
-          targetPrice:
-            tactical.prices?.targetReference
-            ?? tactical.prices?.quantTargetHigh
-            ?? tactical.prices?.resistance
-            ?? payload.previousAdvice?.targetPrice
-            ?? null,
-        };
-        payload.adaptiveAction = evaluateHoldingActions({
-          payload,
-          advice: deterministicHoldingPlan,
-        });
-      } else {
-        payload.adaptiveAction = chooseAdaptivePricePlan({
-          candidate: {
-            code: payload.code,
-            name: payload.name,
-            quote: payload.todayQuote || {},
-            fund: payload.stockFund || {},
-            sector: payload.sectorOpportunity?.sector || null,
-            sectorOpportunity: payload.sectorOpportunity,
-            technical: payload.tech,
-            opportunityScore: payload.opportunityScore,
-          },
-          candles: advisorDailyCandles,
-          trends: advisorTrends,
-          marketContext: payload.marketOpportunityContext,
-        });
-      }
-      if (triggeredPriceReview) {
-        payload.reviewDecisionPacket = buildReviewDecisionPacket({
-          channel: 'FAST_REVIEW',
-          code: payload.code,
-          name: payload.name,
-          priorAdvice: payload.previousAdvice || {},
-          event: payload.reviewEvent || {},
-          current: {
-            quote: payload.todayQuote,
-            funds: payload.stockFund,
-            intradayFromOpen: payload.intradayOpenSummary,
-            technical: payload.tech,
-            tactical: payload.shortHorizonTactical,
-            position: {
-              liveQty: Number(payload.holdQty) || 0,
-              sellableToday:
-                Number(payload.sellableTodayQty) || 0,
-              boughtToday:
-                Number(payload.boughtTodayQty) || 0,
-            },
-            account: payload.account,
-          },
-        });
-      }
-    }
     if (isAdvisor && payload.realOutcomeLearning) {
       payload.realOutcomeContext = realOutcomeContext(
         payload.realOutcomeLearning,
@@ -2920,28 +2829,8 @@ export default async function handler(req, res) {
         payload,
       });
     }
-    if (
-      mode === 'buy_advice'
-      && result
-      && typeof result === 'object'
-      && !result.raw
-    ) {
-      result = applyAdaptiveAdvicePolicy({
-        mode,
-        result,
-        payload,
-      });
-    }
     if (['buy_advice', 'hold_advice', 'review', 't_advice'].includes(mode) && result && typeof result === 'object' && !result.raw) {
       result = reconcileAdviceNumbers({ mode, result, payload }).result;
-    }
-    if (
-      ['buy_advice', 'hold_advice'].includes(mode)
-      && result
-      && typeof result === 'object'
-      && !result.raw
-    ) {
-      result = applyPortfolioRiskPolicy({ mode, result, payload }).result;
     }
     if (
       ['t_advice', 'hold_advice', 'review'].includes(mode)
@@ -2950,24 +2839,6 @@ export default async function handler(req, res) {
       && !result.raw
     ) {
       result = applyTActionAdvicePolicy({ mode, result, payload });
-    }
-    if (
-      ['hold_advice', 'review'].includes(mode)
-      && result
-      && typeof result === 'object'
-      && !result.raw
-    ) {
-      const positions = (accountAuth.account?.data?.holding || [])
-        .filter((item) => item.code === payload.code);
-      payload.holdingStartedAt = positions.map((item) => Number(item.buyAt))
-        .filter((at) => at > 0).sort((a, b) => a - b)[0] || null;
-      payload.holdingStopPrice = positions.map((item) => Number(item.sl))
-        .filter((price) => price > 0).sort((a, b) => b - a)[0] || null;
-      result = applyShortHorizonExitPolicy({
-        mode,
-        result,
-        payload,
-      });
     }
     if (
       ['buy_advice', 'hold_advice'].includes(mode)
@@ -3163,7 +3034,7 @@ export default async function handler(req, res) {
           usedRag: !!ragText,
           searchReference,
         });
-        result.presentation = compileAdvicePresentationV3(result);
+        result.presentation = compileDecisionPresentation(result);
       }
     }
     return finish({

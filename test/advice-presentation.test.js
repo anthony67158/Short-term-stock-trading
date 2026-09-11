@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildAdvicePresentation,
-  compileAdvicePresentationV3,
+  compileDecisionPresentation,
   trustCalibrationText,
 } from '../shared/advicePresentation.js'
 
@@ -103,7 +103,7 @@ test('后端展示契约携带人工执行计划摘要且前端优先消费该�
       slices: [{ lots: 1 }],
     },
   }
-  const contract = compileAdvicePresentationV3(advice)
+  const contract = compileDecisionPresentation(advice)
   const consumed = buildAdvicePresentation({
     ...advice,
     title: '不应覆盖服务端契约',

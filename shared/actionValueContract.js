@@ -2,6 +2,9 @@ import {
   ACTION_ELIGIBILITY_SCHEMA_VERSION,
   actionIsEligible,
 } from './actionEligibility.js'
+import {
+  isExecutableOpportunityScore,
+} from './opportunityScoreContract.js'
 
 export const ACTION_VALUE_VECTOR_SCHEMA_VERSION =
   'action-value-vector.v1'
@@ -60,8 +63,7 @@ export function actionValueFromOpportunityScore({
     modelVersion: text(score?.modelVersion, 120) || null,
     usagePolicy: text(score?.usagePolicy, 24) || null,
     ready: (
-      score?.state === 'READY'
-      && score?.usagePolicy === 'DIRECT'
+      isExecutableOpportunityScore(score)
       && score?.serverVerified === true
       && expectedNetR != null
       && q10R != null

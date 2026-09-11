@@ -1,5 +1,8 @@
 import { buildAccountRiskContext } from './accountRiskBudget.js'
-import { v3DecisionPresentation } from './v3DecisionPresentation.js'
+import { decisionPresentation } from './decisionPresentation.js'
+import {
+  isDecisionEngineAdvice,
+} from './decisionEngineSource.js'
 import { t1StatusOf } from './portfolioAccounting.js'
 import { isContinuousTrading } from './tradingCalendar.js'
 import {
@@ -93,7 +96,8 @@ export function buildTodayCommandList({
     const entry = !isHolding && !managedWatchCodes.has(String(item.code))
       ? null
       : adviceFor(item.code, mode)
-    const advice = entry?.advice?.decisionSource?.engine === 'V3' ? entry.advice : null
+    const advice = isDecisionEngineAdvice(entry?.advice)
+      ? entry.advice : null
     const quote = quoteMap[item.code] || {}
     const currentPrice = Number(quote.price) || null
     const alerts = (book.alerts || []).filter((alert) =>
@@ -114,7 +118,7 @@ export function buildTodayCommandList({
     let keyPrice = null
     let view = null
     if (advice) {
-      view = v3DecisionPresentation({
+      view = decisionPresentation({
         advice, currentPrice, now,
         holdingLots: isHolding ? t1StatusOf(holding, book.closed || [], item.code, now).liveQty : 0,
         sellableLots: isHolding ? t1StatusOf(holding, book.closed || [], item.code, now).sellableToday : 0,
@@ -129,7 +133,7 @@ export function buildTodayCommandList({
       }
     } else if (!isHolding) {
       kind = 'none'
-      actionLabel = '等待V3评估'
+      actionLabel = '等待决策评估'
     }
     const executionPlan = executionPlanForCode(
       book.executionPlans || [],
@@ -226,7 +230,7 @@ export function buildTodayCommandList({
         ? `现价${currentPrice}元已到止损${stop}元；今日可卖${sellable || 0}手，不加仓摊平`
         : planConflict
           ? '执行队列与最新决策方向相反，请先核对已有计划'
-          : executionPlan?.trigger || (view ? `${view.headline}；${view.reason}` : '请更新V3决策'),
+          : executionPlan?.trigger || (view ? `${view.headline}；${view.reason}` : '请更新系统决策'),
       stopPrice: executionPlan?.stopPrice
         ?? advice?.decisionPlan?.prices?.stop
         ?? null,
@@ -242,7 +246,8 @@ export function buildTodayCommandList({
       executionPlanId: executionPlan?.planId || null,
       actionValue: advice?.decisionSource?.state !== 'READY' ? null : isHolding
         ? finite(
-            advice?.selectedV3Plan?.opportunityScore?.expectedNetR,
+            advice?.selectedDecisionPlan
+              ?.opportunityScore?.expectedNetR,
           )
         : watchlistActionValue(entry)?.utility ?? null,
       priority: 0,
@@ -291,7 +296,7 @@ export function buildTodayCommandList({
 function adviceForAccount(book = {}, code = '', mode = '') {
   const entry = book.advice?.[code]
   if (!entry) return null
-  if (entry.advice?.decisionSource?.engine !== 'V3') return null
+  if (!isDecisionEngineAdvice(entry.advice)) return null
   if (mode && entry.mode && entry.mode !== mode) return null
   return entry
 }

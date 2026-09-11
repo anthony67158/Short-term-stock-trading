@@ -1324,10 +1324,8 @@ export function buildDecisionPortfolioAnalysis({
         const advice = adviceByCode?.[stock.code]?.advice
           || adviceByCode?.[stock.code]
           || {}
-        const score = (
-          advice.selectedDecisionPlan
-          ?? advice.selectedV3Plan
-        )?.opportunityScore || {}
+        const score =
+          advice.selectedDecisionPlan?.opportunityScore || {}
         return [stock.code, {
           quantScore: nullableNumber(score.pWinGivenFill) == null
             ? null

@@ -112,11 +112,8 @@ export function currentDecisionAdvice(accountData, code, decisionId) {
 }
 
 export function cachedDecisionExplanation(advice, decisionId) {
-  const value = advice?.decisionExplanation ?? advice?.v3Explanation
-  return [
-    DECISION_EXPLANATION_SCHEMA_VERSION,
-    'v3-explanation.v2',
-  ].includes(value?.schemaVersion)
+  const value = advice?.decisionExplanation
+  return value?.schemaVersion === DECISION_EXPLANATION_SCHEMA_VERSION
     && value.decisionId === decisionId
     && ['ready', 'failed', 'running'].includes(value.status)
     ? value
@@ -125,10 +122,7 @@ export function cachedDecisionExplanation(advice, decisionId) {
 
 export function buildDecisionExplanationPacket(advice = {}) {
   const plan = advice.decisionPlan || {}
-  const score = (
-    advice.selectedDecisionPlan
-    ?? advice.selectedV3Plan
-  )?.opportunityScore || {}
+  const score = advice.selectedDecisionPlan?.opportunityScore || {}
   const evidence = projectDecisionEvidence(advice.decisionEvidence)
   const knownGaps = evidence?.knownGaps
     || evidenceGaps(advice.decisionSource?.missingEvidence)

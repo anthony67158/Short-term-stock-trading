@@ -105,15 +105,15 @@ test('军师历史表现只从服务端账户账本重算并携带净R校准', (
   assert.match(aiSource, /delete payload\.advisorTrack/)
 })
 
-test('军师在模型调用前用鉴权账户覆盖客户端仓位与现金', () => {
-  const riskRead = aiSource.indexOf(
-    'authoritativeAccountRisk = await readAccountRiskContext',
+test('决策编排在执行前完成账户鉴权且不读取客户端账本', () => {
+  const authorization = aiSource.indexOf(
+    'const accountAuth = await authorizePaidRequest(req)',
   )
-  const actionValue = aiSource.indexOf(
-    'payload.adaptiveAction = evaluateHoldingActions',
+  const orchestration = aiSource.indexOf(
+    'return finishDecision(await runDecision',
   )
-  assert.ok(riskRead > 0)
-  assert.ok(actionValue > riskRead)
+  assert.ok(authorization > 0)
+  assert.ok(orchestration > authorization)
   assert.match(
     aiSource,
     /payload\.account = \{\s*totalAssets,\s*cash,\s*position: authoritativeAccountRisk\.positionPct/s,

@@ -14,8 +14,8 @@ function buyAdvice(code, utility) {
     mode: 'buy_advice',
     at: now,
     advice: {
-      decisionSource: { engine: 'V3', state: 'READY' },
-      selectedV3Plan: {
+      decisionSource: { engine: 'MULTI_TASK', state: 'READY' },
+      selectedDecisionPlan: {
         route: 'IMMEDIATE',
         opportunityScore: { pFill: 0.8, expectedNetR: utility, netRLowerBound: 0.05 },
       },

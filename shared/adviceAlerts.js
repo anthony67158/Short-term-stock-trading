@@ -1,4 +1,8 @@
 import { applyT1ToAlert } from './t1AdvicePolicy.js'
+import {
+  DECISION_ENGINE_ID,
+  isDecisionEngineAdvice,
+} from './decisionEngineSource.js'
 import { adviceSupportsIntent, buildJudgeAdviceContext } from './judgeAdviceContext.js'
 import {
   adviceObservationLevels,
@@ -23,12 +27,15 @@ function defaultId() {
 export function isCurrentDecisionAlert(alert, entry, now = Date.now()) {
   if (!alert?.candCode && !alert?.actCode) return true
   const advice = entry?.advice || entry
-  if (advice?.decisionSource?.engine !== 'V3' || alert.decisionEngine !== 'V3') return false
+  if (
+    !isDecisionEngineAdvice(advice)
+    || ![DECISION_ENGINE_ID, 'V3'].includes(alert.decisionEngine)
+  ) return false
   return alert.decisionId === advice.decisionPlan?.decisionId
     && Date.parse(alert.validUntil) > now
 }
 
-export function v3ActionAlertMessage(alert, quote) {
+export function decisionActionAlertMessage(alert, quote) {
   const price = Number(quote?.price)
   const reference = Number(alert.value)
   if (!(price > 0 && reference > 0)) return null
@@ -37,10 +44,10 @@ export function v3ActionAlertMessage(alert, quote) {
   return alert.timing || alert.judgeContext?.actionPlan || null
 }
 
-function v3Alert(alert, advice) {
-  if (advice.decisionSource?.engine !== 'V3') return alert
+function decisionAlert(alert, advice) {
+  if (!isDecisionEngineAdvice(advice)) return alert
   return {
-    ...alert, decisionEngine: 'V3',
+    ...alert, decisionEngine: DECISION_ENGINE_ID,
     decisionId: advice.decisionPlan.decisionId,
     validUntil: advice.decisionPlan.validUntil,
     actionSide: ['BUY', 'ADD'].includes(advice.decisionPlan.action) ? 'BUY' : 'SELL',
@@ -118,10 +125,10 @@ function reviewIntentOf(advice = {}) {
   }
 }
 
-export function v3ExitReviewOf(advice = {}) {
+export function decisionExitReviewOf(advice = {}) {
   const action = String(advice.decisionPlan?.action || '').toUpperCase()
   if (
-    advice.decisionSource?.engine !== 'V3'
+    !isDecisionEngineAdvice(advice)
     || advice.decisionSource?.hardProtection === true
     || advice.decisionSource?.exitReviewRequired === false
     || advice.reviewDecision?.terminal === true
@@ -162,6 +169,66 @@ function refreshReviewAlert(previous, next, adviceAt) {
   }
 }
 
+function holdingAddReviewAlerts({
+  advice,
+  adviceAt,
+  alerts,
+  code,
+  idFactory,
+  judgeContext,
+  name,
+  now,
+}) {
+  const followUp = holdingAddReviewPlan(advice)
+  if (!followUp?.paths?.length) return []
+  return followUp.paths.flatMap((path) => {
+    const op = path.direction === 'LTE' ? 'lte' : 'gte'
+    const reviewPrice = roundPrice(path.price)
+    if (reviewPrice == null) return []
+    const previous = alerts.find((alert) =>
+      alert?.actCode === code
+      && alert.reviewOnly === true
+      && alert.reviewKey === path.key
+    )
+    const samePlan = !!(
+      previous?.judgeContext?.planId
+      && judgeContext.planId
+      && previous.judgeContext.planId === judgeContext.planId
+    )
+    if (
+      previous
+      && samePlan
+      && Number(previous.value) === reviewPrice
+      && previous.op === op
+    ) {
+      return [refreshReviewAlert(previous, {
+        ...previous,
+        note: path.label,
+        judgeContext,
+        reviewIntent: followUp.reviewIntent,
+      }, adviceAt)]
+    }
+    return [{
+      ...baseAlert({
+        idFactory,
+        now,
+        code,
+        name,
+        op,
+        value: reviewPrice,
+        note: path.label,
+      }),
+      actCode: code,
+      reviewOnly: true,
+      reviewKey: path.key,
+      reviewCategory: 'holding-add',
+      judgeContext,
+      reviewIntent: followUp.reviewIntent,
+      phase: 'armed',
+    }]
+  })
+}
+
 export function projectAdviceAlerts(data, code, advice, options = {}) {
   if (!data || !code || !advice) return false
   const now = options.now ?? Date.now()
@@ -197,13 +264,30 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   }
   const owner = liveHolder || candidate || {}
   const name = advice.name || owner.name || code
+  const judgeContext = buildJudgeAdviceContext(advice)
+  const holdingAddReviews = liveHolder
+    ? holdingAddReviewAlerts({
+        advice,
+        adviceAt,
+        alerts,
+        code,
+        idFactory,
+        judgeContext,
+        name,
+        now,
+      })
+    : []
   if (liveHolder && monitoringPlanOf(advice)) {
     const retained = rest.filter((alert) => !(
       alert.code === code && alert.planId === liveHolder.id
       && !(alert.op === 'lte' ? liveHolder.slManual : liveHolder.tpManual)
     ))
-    const next = [...retained, ...monitoringAlerts(data, code, advice, now)
-      .map((alert) => v3Alert(alert, advice))]
+    const next = [
+      ...retained,
+      ...monitoringAlerts(data, code, advice, now)
+        .map((alert) => decisionAlert(alert, advice)),
+      ...holdingAddReviews.map((alert) => decisionAlert(alert, advice)),
+    ]
     const changed = JSON.stringify(alerts) !== JSON.stringify(next)
     data.alerts = next
     return changed
@@ -223,7 +307,6 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     data.alerts = rest
     return changed || rest.length !== alerts.length
   }
-  const judgeContext = buildJudgeAdviceContext(advice)
   const reviewIntent = reviewIntentOf(advice)
   const priceContract = sanitizedAdvicePriceContract(advice)
   const oldProjected = alerts.filter(isOwnedAutoAlert)
@@ -420,66 +503,10 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
     }
   }
 
-  const holdingFollowUp = liveHolder
-    ? holdingAddReviewPlan(advice)
-    : null
-  if (holdingFollowUp?.paths?.length) {
-    for (const path of holdingFollowUp.paths) {
-      const op = path.direction === 'LTE' ? 'lte' : 'gte'
-      const reviewPrice = roundPrice(path.price)
-      if (reviewPrice == null) continue
-      const previous = alerts.find((alert) =>
-        alert?.actCode === code
-        && alert.reviewOnly === true
-        && alert.reviewKey === path.key
-      )
-      const samePlan = !!(
-        previous?.judgeContext?.planId
-        && judgeContext.planId
-        && previous.judgeContext.planId === judgeContext.planId
-      )
-      if (
-        previous
-        && samePlan
-        && Number(previous.value) === reviewPrice
-        && previous.op === op
-      ) {
-        const refreshed = refreshReviewAlert(previous, {
-          ...previous,
-          note: path.label,
-          judgeContext,
-          reviewIntent: holdingFollowUp.reviewIntent,
-        }, adviceAt)
-        if (JSON.stringify(refreshed) !== JSON.stringify(previous)) {
-          changed = true
-        }
-        projected.push(refreshed)
-        continue
-      }
-      projected.push({
-        ...baseAlert({
-          idFactory,
-          now,
-          code,
-          name,
-          op,
-          value: reviewPrice,
-          note: path.label,
-        }),
-        actCode: code,
-        reviewOnly: true,
-        reviewKey: path.key,
-        reviewCategory: 'holding-add',
-        judgeContext,
-        reviewIntent: holdingFollowUp.reviewIntent,
-        phase: 'armed',
-      })
-      changed = true
-    }
-  }
+  projected.push(...holdingAddReviews)
 
   const exitReview = liveHolder
-    ? v3ExitReviewOf(advice)
+    ? decisionExitReviewOf(advice)
     : null
   let exitReviewProjected = false
   if (exitReview) {
@@ -645,7 +672,9 @@ export function projectAdviceAlerts(data, code, advice, options = {}) {
   }
 
   if (oldProjected.length !== projected.length) changed = true
-  const finalProjected = projected.map((alert) => v3Alert(alert, advice))
+  const finalProjected = projected.map((alert) =>
+    decisionAlert(alert, advice)
+  )
   if (JSON.stringify(finalProjected) !== JSON.stringify(oldProjected)) changed = true
   data.alerts = [...finalProjected, ...rest]
   return changed

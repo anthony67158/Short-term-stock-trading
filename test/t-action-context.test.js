@@ -213,7 +213,7 @@ test('三类军师提示词都明确消费做T阶段而不是重新猜测动作'
   )
 })
 
-test('做T策略入口只读取当前V3决策且不再调用模型生成方向', () => {
+test('做T策略入口只读取当前系统决策且不再调用模型生成方向', () => {
   const api = readFileSync(
     new URL('../api/ai.js', import.meta.url),
     'utf8',
@@ -227,11 +227,11 @@ test('做T策略入口只读取当前V3决策且不再调用模型生成方向',
     'utf8',
   )
 
-  assert.match(branch, /decisionSource\?\.engine === 'V3'/)
+  assert.match(branch, /isDecisionEngineAdvice\(advice\)/)
   assert.match(branch, /applyTActionAdvicePolicy/)
   assert.match(branch, /llmCalls:\s*0/)
   assert.doesNotMatch(branch, /callChat|ensureConfig|getModel/)
-  assert.match(frontend, /查看当前V3做T边界/)
+  assert.match(frontend, /查看当前决策边界/)
   assert.doesNotMatch(frontend, /按历史规律生成做T策略/)
   assert.doesNotMatch(frontend, /生成做T参考/)
 })

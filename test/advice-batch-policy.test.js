@@ -9,9 +9,9 @@ import {
   adviceConcurrency,
   batchConcurrency,
   completeAdviceHorizonFields,
-  DEFAULT_V3_DECISION_CONCURRENCY,
+  DEFAULT_DECISION_CONCURRENCY,
   generationOptions,
-  resolveV3DecisionConcurrency,
+  resolveDecisionConcurrency,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
 
@@ -25,6 +25,10 @@ const stockDetail = readFileSync(
 )
 const adviceGate = readFileSync(
   new URL('../src/adviceGate.js', import.meta.url),
+  'utf8',
+)
+const adviceBatch = readFileSync(
+  new URL('../src/adviceBatch.js', import.meta.url),
   'utf8',
 )
 
@@ -48,17 +52,17 @@ test('深度批量允许全选，不限制总股票数量', () => {
   })
 })
 
-test('V3批量不再受旧深度端点限制并默认四路', () => {
-  assert.equal(DEFAULT_V3_DECISION_CONCURRENCY, 4)
-  assert.equal(resolveV3DecisionConcurrency(undefined), 4)
-  assert.equal(resolveV3DecisionConcurrency(6), 6)
-  assert.equal(resolveV3DecisionConcurrency(99), 8)
+test('系统批量决策不受解释端点限制并默认四路', () => {
+  assert.equal(DEFAULT_DECISION_CONCURRENCY, 4)
+  assert.equal(resolveDecisionConcurrency(undefined), 4)
+  assert.equal(resolveDecisionConcurrency(6), 6)
+  assert.equal(resolveDecisionConcurrency(99), 8)
   assert.equal(batchConcurrency(4, true), 4)
   assert.equal(batchConcurrency(1, true), 1)
   assert.equal(batchConcurrency(4, false), 4)
 })
 
-test('单股与批量V3评估使用同一独立容量', () => {
+test('单股与批量决策评估使用同一独立容量', () => {
   assert.equal(adviceConcurrency(4, {
     deepMode: true,
     batchRequest: false,
@@ -153,12 +157,24 @@ test('深度模式使用有界预算且不整轮自动重试', () => {
   })
 })
 
-test('持仓页移除一次性生成并由单股作战入口承接生成状态', () => {
+test('持仓页复用现有任务链批量更新V3决策', () => {
   assert.doesNotMatch(planTab, /普通生成（\{selCount\}）/)
   assert.doesNotMatch(planTab, /深度生成（2路并行）/)
   assert.doesNotMatch(planTab, /className="batch-bar"/)
+  assert.match(planTab, /function DecisionBatchControl/)
+  assert.match(planTab, /runManualAdviceRefresh\('both', quote \|\| \{\}\)/)
+  assert.match(planTab, /批量更新决策 · \$\{count\}只/)
+  assert.match(planTab, /<DecisionBatchProgress quote=\{quote\} \/>/)
+  assert.match(planTab, /aria-label="V3批量更新进度"/)
   assert.match(planTab, />\s*纳入作战\s*</)
   assert.match(planTab, /<AdviceGenerationStatus code=\{p\.code\}/)
+})
+
+test('新批次提交期间不被上一批云端终态覆盖', () => {
+  assert.match(
+    adviceBatch,
+    /state\._submissionPromise[\s\S]*?state\.running[\s\S]*?state\.serverMode[\s\S]*?cloudBatchId !== state\.batchId[\s\S]*?return/,
+  )
 })
 
 test('所有任务只有完整AI建议才能计为成功', () => {

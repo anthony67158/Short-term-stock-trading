@@ -24,10 +24,10 @@ import { ensureConfig } from './_llm_config.js';
 import { judgeConfirmation, sideOf } from './_confirm.js';
 import { actionLabelOf } from '../shared/judgeAdviceContext.js';
 import {
+  decisionActionAlertMessage,
+  decisionExitReviewOf,
   isCurrentDecisionAlert,
   projectAdviceAlerts,
-  v3ActionAlertMessage,
-  v3ExitReviewOf,
 } from '../shared/adviceAlerts.js';
 import {
   positionGateForAlert,
@@ -132,7 +132,11 @@ function hit(a, q, now = Date.now()) {
     const price = Number(q?.price);
     return price > 0 ? `现价 ${price}，开始退出前复核` : null;
   }
-  if (a.decisionEngine === 'V3' && !a.reviewOnly && a.type === 'price') return v3ActionAlertMessage(a, q);
+  if (
+    ['MULTI_TASK', 'V3'].includes(a.decisionEngine)
+    && !a.reviewOnly
+    && a.type === 'price'
+  ) return decisionActionAlertMessage(a, q);
   const cmp = (v, op, t) => (op === 'lte' ? v <= t : v >= t);
   switch (a.type) {
     case 'price': {
@@ -330,7 +334,7 @@ export function migrateV3ExitReviewAlerts(
   let changed = false;
   for (const [code, entry] of Object.entries(data?.advice || {})) {
     const advice = entry?.advice;
-    if (!v3ExitReviewOf(advice)) continue;
+    if (!decisionExitReviewOf(advice)) continue;
     const alreadyProjected = (data.alerts || []).some((alert) =>
       alert?.code === code
       && alert.reviewCategory === 'holding-exit'

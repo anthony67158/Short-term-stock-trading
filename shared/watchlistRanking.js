@@ -1,3 +1,7 @@
+import {
+  isDecisionEngineAdvice,
+} from './decisionEngineSource.js'
+
 const finite = (value) => {
   if (value == null || value === '') return null
   const number = Number(value)
@@ -81,14 +85,17 @@ function adaptiveDecision(advice = {}) {
 export function watchlistActionValue(entry) {
   const advice = entry?.advice || entry
   if (!advice || typeof advice !== 'object') return null
-  if (advice.decisionSource?.engine === 'V3') {
-    const score = advice.selectedV3Plan?.opportunityScore
+  if (isDecisionEngineAdvice(advice)) {
+    const selected = advice.selectedDecisionPlan
+    const score = selected?.opportunityScore
     if (advice.decisionSource.state !== 'READY' || finite(score?.expectedNetR) == null) return null
     const utility = score.pFill * score.expectedNetR
     return {
       score: rounded(utility * 100, 2), utility: rounded(utility, 4),
       expectedNetR: score.expectedNetR, lowerNetR: score.netRLowerBound,
-      pFill: score.pFill, route: advice.selectedV3Plan.route, tier: '',
+      pFill: score.pFill,
+      route: selected?.route,
+      tier: '',
     }
   }
   const adaptive = adaptiveDecision(advice)

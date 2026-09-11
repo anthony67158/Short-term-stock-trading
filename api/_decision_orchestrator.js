@@ -12,7 +12,7 @@ import { scoreOpportunityPlaybooks } from '../shared/opportunityPlaybooks.js'
 import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatures.js'
 import { buildOpportunityReviewFeatureInput } from '../shared/opportunityReviewFeatures.js'
 import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
-import { buildV3Action } from '../shared/adaptiveAdvicePolicy.js'
+import { buildDecisionAction } from '../shared/decisionEnginePolicy.js'
 import { compileDecisionPlan, applyCompiledDecisionPlan } from '../shared/decisionPlan.js'
 import { compileExecutionPlan } from '../shared/executionPlan.js'
 import { deriveMarketRegime } from '../shared/marketRegime.js'
@@ -111,7 +111,7 @@ function buildDecisionEvidence({
   const sectorValue = sector?.sector || {}
   const completeHistory = availability.completeFundHistory
   return {
-    schemaVersion: 'v3-decision-evidence.v1',
+    schemaVersion: 'decision-evidence.v1',
     asOf: now,
     availability,
     technical: {
@@ -179,7 +179,7 @@ function buildDecisionEvidence({
   }
 }
 
-export async function evaluateV3Decision({
+export async function evaluateDecision({
   code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
   score = (inputs) => fetchOpportunityScores(inputs, { timeoutMs: 8000 }),
   reviewEvent = null,
@@ -244,13 +244,19 @@ export async function evaluateV3Decision({
     evidenceIncomplete: missingEvidence.length > 0,
   }
   if (holding.length && payload.holdingStopPrice > 0) {
-    plans = plans.filter((plan) => plan.route === 'IMMEDIATE')
-      .map((plan) => ({
+    plans = plans
+      .map((plan) => {
+        const hardStopPrice = Math.max(
+          Number(plan.exitPlan.hardStopPrice) || 0,
+          payload.holdingStopPrice,
+        )
+        return {
         ...plan,
-        exitPlan: { ...plan.exitPlan, hardStopPrice: payload.holdingStopPrice },
+        exitPlan: { ...plan.exitPlan, hardStopPrice },
         riskReward: (plan.exitPlan.takeProfitPrice - plan.entryPlan.price)
-          / (plan.entryPlan.price - payload.holdingStopPrice),
-      }))
+          / (plan.entryPlan.price - hardStopPrice),
+        }
+      })
       .filter((plan) => plan.entryPlan.price > plan.exitPlan.hardStopPrice)
   }
   const shadowFeatures = buildOpportunityShadowFeatures({
@@ -309,7 +315,10 @@ export async function evaluateV3Decision({
       },
     }
   }))
-  let advice = { ...buildV3Action({ payload, plans: evaluated, now }), fundNote: '' }
+  let advice = {
+    ...buildDecisionAction({ payload, plans: evaluated, now }),
+    fundNote: '',
+  }
   const reviewScoreInput = isTriggeredReviewEvent(reviewEvent)
     ? buildOpportunityReviewFeatureInput({
         code,
@@ -322,13 +331,14 @@ export async function evaluateV3Decision({
           ?? reviewEvent.plannedAction,
         rows: postTriggerRows(trendRows, reviewEvent.at),
         initialScore:
-          advice.selectedV3Plan?.opportunityScore,
+          advice.selectedDecisionPlan?.opportunityScore,
       })
     : null
   if (reviewScoreInput) payload.reviewScoreInput = reviewScoreInput
   if (reviewEvent) {
     advice.pullbackWatchPrice = null
     advice.breakoutWatchPrice = null
+    advice.holdingAddPlan = null
     advice.reviewDecision = {
       schemaVersion: 'triggered-review-decision.v1',
       terminal: true,
@@ -337,15 +347,51 @@ export async function evaluateV3Decision({
       quantity: Number(advice.opQty.match(/\d+/)?.[0]) || 0,
     }
   }
-  payload.opportunityScore = advice.selectedV3Plan?.opportunityScore || null
-  payload.v3PricePlan = advice.selectedV3Plan
-  const action = { 清仓: 'EXIT', 减仓: 'REDUCE', 持有: 'HOLD', 立即买入: 'BUY', 观望: 'WATCH' }[advice.action]
+  payload.opportunityScore =
+    advice.selectedDecisionPlan?.opportunityScore || null
+  payload.decisionPricePlan = advice.selectedDecisionPlan
+  const action = {
+    清仓: 'EXIT',
+    减仓: 'REDUCE',
+    持有: 'HOLD',
+    加仓: 'ADD',
+    立即买入: 'BUY',
+    观望: 'WATCH',
+  }[advice.action]
   const mode = holding.length ? 'hold_advice' : 'buy_advice'
   advice.fundNote = buildStockFundNote(fund || {}) || '资金数据暂缺，未据此推断资金方向'
+  const plannedReviewAction = String(
+    reviewEvent?.plannedAction || '',
+  ).toUpperCase()
+  const fullAddReview = (
+    action === 'ADD'
+    && plannedReviewAction === 'ADD'
+    && reviewEvent?.directionApproved === true
+  )
+  const conditionalAdd = (
+    action === 'HOLD'
+    && advice.holdingAddPlan?.schemaVersion === 'holding-add-plan.v1'
+  )
+  const addRiskTier = (
+    action === 'ADD' || conditionalAdd
+  ) ? (
+      fullAddReview
+      || advice.holdingAddPlan?.plannedAction === 'ADD'
+        ? 'FULL'
+        : 'PROBE'
+    ) : null
+  const requestedAddPositionPct = finite(
+    reviewEvent?.maxPositionPct
+    ?? advice.holdingAddPlan?.maxPositionPct,
+  )
+  const maxStockWeightPct = addRiskTier === 'PROBE'
+    ? Math.min(5, requestedAddPositionPct || 5)
+    : Math.min(20, requestedAddPositionPct || 20)
   const decisionPlan = compileDecisionPlan({
     mode, advice, payload, now, accountCircuitBreaker: accountRisk.breaker,
     deterministicPolicy: {
-      effectiveAction: action, riskTier: action === 'BUY' ? 'FULL' : 'NONE',
+      effectiveAction: action,
+      riskTier: action === 'BUY' ? 'FULL' : addRiskTier || 'NONE',
       executionOpen: payload.todayQuote.live,
       hardProtection: advice.decisionSource.hardProtection,
       exitConfirmed: (
@@ -353,11 +399,23 @@ export async function evaluateV3Decision({
         && isTriggeredReviewEvent(reviewEvent)
       ),
       riskMultiplier: context.baseRiskPct / 0.6,
-      maxPositionPct: 85,
+      maxStockWeightPct,
+      maxPortfolioPositionPct: 85,
     },
   })
   const sourceInstruction = advice.actionPlan
   advice = applyCompiledDecisionPlan({ ...advice, decisionPlan })
+  if (
+    advice.holdingAddPlan
+    && decisionPlan.entryBudget?.state !== 'ESTIMATED'
+  ) {
+    advice = {
+      ...advice,
+      holdingAddPlan: null,
+      pullbackWatchPrice: null,
+      breakoutWatchPrice: null,
+    }
+  }
   if (!['BUY', 'ADD'].includes(decisionPlan.action) && !decisionPlan.blockedReasons?.length) {
     advice.actionPlan = sourceInstruction
     advice.nextAction = sourceInstruction
@@ -390,7 +448,9 @@ export async function evaluateV3Decision({
   }
   return {
     ok: true, mode, result: advice, updatedAt: now,
-    model: advice.decisionSource.modelVersion || 'V3_MODEL_UNAVAILABLE',
+    model:
+      advice.decisionSource.modelVersion
+      || 'DECISION_MODEL_UNAVAILABLE',
     meta: {
       todayQuote: payload.todayQuote,
       decisionSource: advice.decisionSource,
@@ -401,10 +461,10 @@ export async function evaluateV3Decision({
   }
 }
 
-export async function runV3Decision({ req, book, code, onProgress = () => {}, signal, reviewEvent = null }) {
+export async function runDecision({ req, book, code, onProgress = () => {}, signal, reviewEvent = null }) {
   if (!/^\d{6}$/.test(String(code || ''))) throw new Error('股票代码无效')
   signal?.throwIfAborted()
-  onProgress('采集行情、账户与V3特征', 'collect')
+  onProgress('采集行情、账户与决策特征', 'collect')
   const codes = [...new Set([code, ...accountRiskCodes(book)])]
   const [quotes, detail, trends, fund, sector, market] = await Promise.all([
     bounded(fetchQuotes(codes), []),
@@ -415,8 +475,8 @@ export async function runV3Decision({ req, book, code, onProgress = () => {}, si
     bounded(readMarket(req), null),
   ])
   signal?.throwIfAborted()
-  onProgress('V3评估三条价格路径与账户风险', 'quant')
-  const result = await evaluateV3Decision({ code, book, quotes, detail, trends, fund, sector, market, reviewEvent })
+  onProgress('评估三条价格路径与账户风险', 'quant')
+  const result = await evaluateDecision({ code, book, quotes, detail, trends, fund, sector, market, reviewEvent })
   signal?.throwIfAborted()
   return result
 }

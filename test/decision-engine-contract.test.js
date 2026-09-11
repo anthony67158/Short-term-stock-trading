@@ -5,6 +5,9 @@ import {
   buildActionEligibility,
 } from '../shared/actionEligibility.js'
 import {
+  arbitrateActionValues,
+} from '../shared/actionValueArbiter.js'
+import {
   actionValueFromOpportunityScore,
   buildActionValueVector,
   isActionValueVector,
@@ -143,4 +146,50 @@ test('动作价值合同拒绝路由到非法动作', () => {
   })
 
   assert.equal(action.feasible, false)
+})
+
+test('统一仲裁器按账户状态选择买入加仓与退出', () => {
+  const openState = buildDecisionState({
+    code: '600001',
+    asOf: 1,
+    quote: { price: 10, live: true },
+    position: { totalLots: 0 },
+    account: { complete: true },
+    evidence: { complete: true },
+    model: { ready: true },
+    paths: [path()],
+  })
+  const buy = arbitrateActionValues({
+    state: openState,
+    plans: [{ ...path(), opportunityScore: score() }],
+  })
+  const heldState = buildDecisionState({
+    code: '600001',
+    asOf: 1,
+    quote: { price: 10, live: true },
+    position: { totalLots: 2, sellableLots: 2 },
+    account: { complete: true },
+    evidence: { complete: true },
+    model: { ready: true },
+    paths: [path()],
+    review: {
+      kind: 'price-review',
+      plannedAction: 'ADD',
+    },
+  })
+  const add = arbitrateActionValues({
+    state: heldState,
+    plans: [{ ...path(), opportunityScore: score() }],
+  })
+  const exit = arbitrateActionValues({
+    state: heldState,
+    plans: [{
+      ...path(),
+      opportunityScore: score(-0.2),
+    }],
+  })
+
+  assert.equal(buy.action, 'BUY')
+  assert.equal(add.action, 'ADD')
+  assert.equal(exit.action, 'EXIT')
 })

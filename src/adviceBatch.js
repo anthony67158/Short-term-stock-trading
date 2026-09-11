@@ -25,9 +25,9 @@ import {
 } from '../shared/adviceUiState.js'
 import {
   batchConcurrency,
-  DEFAULT_V3_DECISION_CONCURRENCY,
+  DEFAULT_DECISION_CONCURRENCY,
   generationOptions,
-  resolveV3DecisionConcurrency,
+  resolveDecisionConcurrency,
   validateBatchMode,
 } from '../shared/adviceBatchPolicy.js'
 import {
@@ -65,17 +65,17 @@ const state = {
   _canceledBatchIds: new Set(),
   _cancelBatchPromise: null,
   _cancelOnePromises: new Map(),
-  concurrency: DEFAULT_V3_DECISION_CONCURRENCY,
+  concurrency: DEFAULT_DECISION_CONCURRENCY,
 }
 const subs = new Set()
 function notify() { subs.forEach((fn) => { try { fn() } catch { /* ignore */ } }) }
 export function subscribeBatch(fn) { subs.add(fn); return () => subs.delete(fn) }
-// V3 决策并发与 LLM 端点数量无关。首屏默认4路，之后由服务端进度回灌权威值。
+// 决策并发与 LLM 端点数量无关。首屏默认4路，之后由服务端进度回灌权威值。
 export function getConcurrency() {
-  return resolveV3DecisionConcurrency(state.concurrency)
+  return resolveDecisionConcurrency(state.concurrency)
 }
 export function seedConcurrency(n) {
-  state.concurrency = resolveV3DecisionConcurrency(n)
+  state.concurrency = resolveDecisionConcurrency(n)
   notify()
 }
 // 同步窥视V3容量占用(供批量入口 UI 先行门控)。
@@ -326,6 +326,13 @@ export function applyCloudBatch(bp, force = false) {
   if (!bp || typeof bp !== 'object') return
   const at = Number(bp.at || 0)
   const cloudBatchId = String(bp.batchId || '')
+  if (
+    state._submissionPromise
+    && state.running
+    && state.serverMode
+    && state.batchId
+    && cloudBatchId !== state.batchId
+  ) return
   if (
     cloudBatchId
     && state._canceledBatchIds.has(cloudBatchId)
