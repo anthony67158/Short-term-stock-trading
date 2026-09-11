@@ -93,9 +93,9 @@ test('公式候选只允许加入自选且展示唯一主价位', () => {
   assert.doesNotMatch(selection, /planStore\.buy/)
 })
 
-test('个股详情只展示V3决策且不并列旧公式价格', () => {
+test('个股详情只展示系统决策且不并列旧公式价格', () => {
   assert.doesNotMatch(detail, /<FormulaPrice/)
-  assert.match(detail, /<V3DecisionSummary/)
+  assert.match(detail, /<DecisionSummary/)
   assert.match(price, /公式价位/)
   assert.match(price, /effectiveWeight/)
   assert.match(price, /唯一/)
@@ -152,13 +152,13 @@ test('公式扫描响应中断但任务仍运行时继续轮询', async () => {
     {
       loadProgress: async () => ({
         status: 'RUNNING',
-        stage: 'V3_SCORING',
+        stage: 'DECISION_SCORING',
       }),
     },
   )
 
   assert.equal(recovered.running, true)
-  assert.equal(recovered.task.stage, 'V3_SCORING')
+  assert.equal(recovered.task.stage, 'DECISION_SCORING')
 })
 
 test('公式价位旧快照按账号隔离且只在临时故障时回退', () => {

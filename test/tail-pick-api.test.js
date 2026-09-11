@@ -426,7 +426,7 @@ test('大盘环境风险只作提示，仍完整扫描并返回公式结果', as
   assert.equal(tasks.at(-1).status, 'DONE')
 })
 
-test('尾盘候选保存前统一使用生产V3评分', async () => {
+test('尾盘候选保存前统一使用生产决策评分', async () => {
   let scored = 0
   const store = {
     readRun: async () => null,
@@ -456,7 +456,7 @@ test('尾盘候选保存前统一使用生产V3评分', async () => {
       },
       candidates: [{
         code: '600001',
-        name: 'V3尾盘样本',
+        name: '决策模型尾盘样本',
         formula: { matched: true, signals: [] },
         stockGate: { passed: true, evidence: [], blockers: [] },
         intraday: { passed: true, price: 10, vwap: 9.96 },
@@ -503,7 +503,7 @@ test('尾盘候选保存前统一使用生产V3评分', async () => {
     'DIRECT',
   )
   assert.equal(
-    result.result.v3Scoring.inputContextVersion,
+    result.result.decisionScoring.inputContextVersion,
     'opportunity-score-input-context.v2',
   )
   assert.equal(result.result.candidates[0].entryPlan.price, 10)

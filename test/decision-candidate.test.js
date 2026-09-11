@@ -2,8 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  scoreCandidatesWithDirectV3,
-} from '../api/_opportunity_candidate_v3.js'
+  scoreCandidatesWithDecisionModel,
+} from '../api/_decision_candidate.js'
 
 const NOW = Date.parse('2026-09-10T10:20:00+08:00')
 
@@ -69,7 +69,7 @@ function directScore(input, overrides = {}) {
     schemaVersion: 'opportunity-score.v1',
     state: 'READY',
     usagePolicy: 'DIRECT',
-    modelVersion: 'v3-production',
+    modelVersion: 'decision-production',
     code: input.code,
     formulaId: input.formulaId,
     pFill: 0.7,
@@ -82,9 +82,9 @@ function directScore(input, overrides = {}) {
   }
 }
 
-test('今日作战候选使用生产V3比较价格路径并保留同源分数', async () => {
+test('今日作战候选使用生产决策模型比较价格路径并保留同源分数', async () => {
   const calls = []
-  const [result] = await scoreCandidatesWithDirectV3([candidate()], {
+  const [result] = await scoreCandidatesWithDecisionModel([candidate()], {
     now: NOW,
     mode: 'INTRADAY',
     marketGate: { allowed: true, riskTier: 'STANDARD' },
@@ -102,14 +102,14 @@ test('今日作战候选使用生产V3比较价格路径并保留同源分数', 
   assert.equal(calls.length, 2)
   assert.equal(result.entryPlan.type, 'PULLBACK')
   assert.equal(result.opportunityScore.usagePolicy, 'DIRECT')
-  assert.equal(result.opportunityScore.modelVersion, 'v3-production')
+  assert.equal(result.opportunityScore.modelVersion, 'decision-production')
   assert.equal(result.opportunityScore.priceContract.entryPrice, 9.9)
-  assert.equal(result.adaptive.estimate.source, 'V3_DIRECT')
-  assert.equal(result.v3Scoring.scoredRoutes, 2)
+  assert.equal(result.adaptive.estimate.source, 'DECISION_DIRECT')
+  assert.equal(result.decisionScoring.scoredRoutes, 2)
 })
 
 test('今日作战拒绝影子分数且不生成研究先验概率', async () => {
-  const [result] = await scoreCandidatesWithDirectV3([candidate()], {
+  const [result] = await scoreCandidatesWithDecisionModel([candidate()], {
     now: NOW,
     mode: 'INTRADAY',
     marketGate: { allowed: true, riskTier: 'STANDARD' },
@@ -123,7 +123,7 @@ test('今日作战拒绝影子分数且不生成研究先验概率', async () =>
   })
 
   assert.equal(result.state, 'AVOID')
-  assert.equal(result.adaptive.estimate.source, 'V3_UNAVAILABLE')
+  assert.equal(result.adaptive.estimate.source, 'DECISION_UNAVAILABLE')
   assert.equal(result.adaptive.estimate.pWinGivenFill, null)
-  assert.match(result.blockers.join('；'), /V3评分不可用/)
+  assert.match(result.blockers.join('；'), /决策评分不可用/)
 })

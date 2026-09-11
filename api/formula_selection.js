@@ -22,8 +22,8 @@ import {
   fetchOpportunityScores,
 } from './_opportunity_score.js'
 import {
-  scoreCandidatesWithDirectV3,
-} from './_opportunity_candidate_v3.js'
+  scoreCandidatesWithDecisionModel,
+} from './_decision_candidate.js'
 import {
   collectTailPickMarketContext,
 } from './_tail_pick_data.js'
@@ -59,7 +59,7 @@ function normalizedMode(value) {
   return ['intraday', 'close', 'tail'].includes(mode) ? mode : null
 }
 
-function directV3Score(value, modelVersion = '') {
+function directDecisionScore(value, modelVersion = '') {
   return value?.state === 'READY'
     && value?.usagePolicy === 'DIRECT'
     && (
@@ -69,7 +69,7 @@ function directV3Score(value, modelVersion = '') {
 }
 
 function resultModelVersion(value = {}) {
-  const declared = String(value?.v3Scoring?.modelVersion || '')
+  const declared = String(value?.decisionScoring?.modelVersion || '')
   if (declared) return declared
   const versions = new Set(
     (Array.isArray(value?.candidates) ? value.candidates : [])
@@ -94,9 +94,9 @@ function verifiedScore(score, candidate) {
   }
 }
 
-function v3Utility(candidate) {
+function decisionUtility(candidate) {
   const score = candidate?.opportunityScore
-  if (!directV3Score(score)) return -Infinity
+  if (!directDecisionScore(score)) return -Infinity
   return (
     Number(score.pFill) * Number(score.expectedNetR)
     + Math.min(
@@ -106,9 +106,9 @@ function v3Utility(candidate) {
   )
 }
 
-function v3RankingScore(candidate) {
+function decisionRankingScore(candidate) {
   const score = candidate?.opportunityScore
-  if (!directV3Score(score) || !(Number(score.expectedNetR) > 0)) {
+  if (!directDecisionScore(score) || !(Number(score.expectedNetR) > 0)) {
     return -Infinity
   }
   const ranking = Number(score.rankingScore)
@@ -138,9 +138,9 @@ function scoredDecision(base = {}, candidate = {}) {
     validUntil:
       Number(candidate.entryPlan?.validUntil) || base.validUntil,
     priceContractValid: true,
-    executionState: directV3Score(candidate.opportunityScore)
-      ? candidate.adaptive?.tier || 'V3_DIRECT'
-      : 'V3_UNAVAILABLE',
+    executionState: directDecisionScore(candidate.opportunityScore)
+      ? candidate.adaptive?.tier || 'DECISION_DIRECT'
+      : 'DECISION_UNAVAILABLE',
     blockers: candidate.blockers || [],
   }
 }
@@ -234,8 +234,8 @@ export function runFormulaSelection({
     if (
       existing?.tradeDate === tradeDate
       && existing?.slot === slot
-      && existing?.v3Scoring?.usagePolicy === 'DIRECT'
-      && existing?.v3Scoring?.inputContextVersion
+      && existing?.decisionScoring?.usagePolicy === 'DIRECT'
+      && existing?.decisionScoring?.inputContextVersion
         === OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION
       && (
         !activeModelVersion
@@ -321,13 +321,13 @@ export function runFormulaSelection({
         )
         return {
           ...candidate,
-          validationState: directV3Score(score, activeModelVersion)
-            ? 'V3_DIRECT'
-            : 'V3_UNAVAILABLE',
+          validationState: directDecisionScore(score, activeModelVersion)
+            ? 'DECISION_DIRECT'
+            : 'DECISION_UNAVAILABLE',
           opportunityScore: score,
         }
       })
-      const selectedCandidates = await scoreCandidatesWithDirectV3(
+      const selectedCandidates = await scoreCandidatesWithDecisionModel(
         initiallyScoredCandidates,
         {
           mode: normalized.toUpperCase(),
@@ -351,15 +351,15 @@ export function runFormulaSelection({
           candidate.exitPlan?.hardStopPrice ?? candidate.stopPrice,
         targetPrice:
           candidate.exitPlan?.takeProfitPrice ?? candidate.targetPrice,
-        validationState: directV3Score(
+        validationState: directDecisionScore(
           candidate.opportunityScore,
           activeModelVersion,
         )
-          ? 'V3_DIRECT'
-          : 'V3_UNAVAILABLE',
+          ? 'DECISION_DIRECT'
+          : 'DECISION_UNAVAILABLE',
       })).sort((left, right) =>
-        v3RankingScore(right) - v3RankingScore(left)
-        || v3Utility(right) - v3Utility(left)
+        decisionRankingScore(right) - decisionRankingScore(left)
+        || decisionUtility(right) - decisionUtility(left)
         || Number(right.score || 0) - Number(left.score || 0)
         || String(left.code).localeCompare(String(right.code))
       )
@@ -397,7 +397,10 @@ export function runFormulaSelection({
         }
       })
       const readyScores = scoredCandidates.filter((candidate) =>
-        directV3Score(candidate.opportunityScore, activeModelVersion)
+        directDecisionScore(
+          candidate.opportunityScore,
+          activeModelVersion,
+        )
       ).length
       const scoreVersions = new Set(
         scoredCandidates
@@ -409,8 +412,10 @@ export function runFormulaSelection({
       const validationState = !scoredCandidates.length
         ? 'NO_CANDIDATE'
         : readyScores === scoredCandidates.length
-          ? 'V3_DIRECT'
-          : readyScores > 0 ? 'V3_PARTIAL' : 'V3_UNAVAILABLE'
+          ? 'DECISION_DIRECT'
+          : readyScores > 0
+            ? 'DECISION_PARTIAL'
+            : 'DECISION_UNAVAILABLE'
       const result = {
         ok: true,
         schemaVersion: FORMULA_SELECTION_SCHEMA_VERSION,
@@ -424,7 +429,7 @@ export function runFormulaSelection({
         universe: scanned.universe,
         formulas: scanned.formulas,
         candidates: scoredCandidates,
-        v3Scoring: {
+        decisionScoring: {
           usagePolicy: 'DIRECT',
           inputContextVersion:
             OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,

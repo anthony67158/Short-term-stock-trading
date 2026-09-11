@@ -2,7 +2,8 @@ import {
   scoreOpportunityPlaybooks,
 } from './opportunityPlaybooks.js'
 
-export const ADAPTIVE_OPPORTUNITY_VERSION = 'adaptive-opportunity.v1'
+export const SELECTION_ACTION_VALUE_VERSION =
+  'selection-action-value.v1'
 
 const HARD_BLOCKER_PATTERNS = [
   /行情.*(?:不完整|过期|不可用)/,
@@ -48,7 +49,7 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value))
 }
 
-function directV3Score(value) {
+function directDecisionScore(value) {
   return value?.state === 'READY' && value?.usagePolicy === 'DIRECT'
 }
 
@@ -100,7 +101,7 @@ function pricePlan(candidate = {}) {
 }
 
 function executionProbability(candidate) {
-  if (!directV3Score(candidate.opportunityScore)) return null
+  if (!directDecisionScore(candidate.opportunityScore)) return null
   const supplied = finite(candidate.opportunityScore.pFill)
   return supplied == null ? null : clamp(supplied, 0.02, 0.98)
 }
@@ -121,7 +122,7 @@ function scoreMatchesPlan(score, plan) {
   })
 }
 
-function v3Estimate(candidate, plan) {
+function decisionEstimate(candidate, plan) {
   const score = candidate.opportunityScore || {}
   const suppliedWin = finite(score.pWinGivenFill)
   const suppliedNetR = finite(score.expectedNetR)
@@ -130,14 +131,14 @@ function v3Estimate(candidate, plan) {
     ?? score.netRLowerBound,
   )
   if (
-    directV3Score(score)
+    directDecisionScore(score)
     &&
     suppliedWin != null
     && suppliedNetR != null
     && scoreMatchesPlan(score, plan)
   ) {
     return {
-      source: 'V3_DIRECT',
+      source: 'DECISION_DIRECT',
       pWinGivenFill: clamp(suppliedWin, 0.02, 0.98),
       expectedNetR: suppliedNetR,
       lowerNetR: suppliedLower,
@@ -149,7 +150,7 @@ function v3Estimate(candidate, plan) {
     }
   }
   return {
-    source: 'V3_UNAVAILABLE',
+    source: 'DECISION_UNAVAILABLE',
     pWinGivenFill: null,
     expectedNetR: null,
     lowerNetR: null,
@@ -221,7 +222,7 @@ function riskBudget({
   }
 }
 
-export function evaluateAdaptiveOpportunity(
+export function evaluateSelectionActionValue(
   candidate = {},
   marketContext = {},
 ) {
@@ -236,25 +237,25 @@ export function evaluateAdaptiveOpportunity(
   )
   if (!plan.valid) hardBlockers.push('买卖价格合同不完整')
   const estimate = plan.valid
-    ? v3Estimate(
+    ? decisionEstimate(
         candidate,
         plan,
       )
     : {
-        source: 'V3_UNAVAILABLE',
+        source: 'DECISION_UNAVAILABLE',
         pWinGivenFill: null,
         expectedNetR: null,
         lowerNetR: null,
         productionReady: false,
         sampleCount: 0,
       }
-  if (estimate.source !== 'V3_DIRECT') {
-    hardBlockers.push('V3评分不可用，当前不执行')
+  if (estimate.source !== 'DECISION_DIRECT') {
+    hardBlockers.push('决策评分不可用，当前不执行')
   }
   if (
-    estimate.source === 'V3_DIRECT'
+    estimate.source === 'DECISION_DIRECT'
     && !(estimate.expectedNetR > 0)
-  ) hardBlockers.push('V3费后期望不大于0')
+  ) hardBlockers.push('决策模型费后期望不大于0')
   const tier = tierFor({
     plan,
     estimate,
@@ -275,7 +276,7 @@ export function evaluateAdaptiveOpportunity(
         + Math.min(0, estimate.lowerNetR || 0) * 0.35
       )
   return {
-    schemaVersion: ADAPTIVE_OPPORTUNITY_VERSION,
+    schemaVersion: SELECTION_ACTION_VALUE_VERSION,
     tier,
     action: tier === 'ATTACK'
       ? 'EXECUTE'
@@ -313,13 +314,16 @@ export function evaluateAdaptiveOpportunity(
   }
 }
 
-export function rankAdaptiveOpportunities(
+export function rankSelectionOpportunities(
   candidates = [],
   marketContext = {},
 ) {
   return (Array.isArray(candidates) ? candidates : [])
     .map((candidate) => {
-      const adaptive = evaluateAdaptiveOpportunity(candidate, marketContext)
+      const adaptive = evaluateSelectionActionValue(
+        candidate,
+        marketContext,
+      )
       const state = adaptive.tier === 'ATTACK'
         ? 'READY'
         : adaptive.tier === 'AVOID'

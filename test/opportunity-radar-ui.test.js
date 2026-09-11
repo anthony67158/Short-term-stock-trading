@@ -59,8 +59,8 @@ test('机会候选同时展示入场仓位和完整退出计划', () => {
   assert.match(content, /只有同时给出入场价/)
   assert.match(opportunityUi, /成交率/)
   assert.match(opportunityUi, /净盈利率/)
-  assert.match(opportunityUi, /生产V3估计/)
-  assert.match(opportunityUi, /生产V3评分不可用，本次不执行/)
+  assert.match(opportunityUi, /生产决策估计/)
+  assert.match(opportunityUi, /生产决策评分不可用，本次不执行/)
   assert.doesNotMatch(opportunityUi, /研究先验|研究估计|样本仍在积累/)
   assert.match(opportunityUi, /启动观察分/)
   assert.match(opportunityUi, /尚未定价/)
@@ -236,7 +236,7 @@ test('盘前次日关注只读昨晚计划且不启动生成任务', async () =>
   assert.deepEqual(calls, [])
 })
 
-test('盘前次日关注遇到旧V3来源时重新生成过期来源', async () => {
+test('盘前次日关注遇到旧模型来源时重新生成过期来源', async () => {
   const calls = []
   await refreshOpportunityRadar({
     lane: 'next',
@@ -339,7 +339,7 @@ test('次日计划按定时源状态自动等待或追踪最新结果', () => {
   assert.match(content, /待生成|更新中|等待结果/)
 })
 
-test('V3候选自动采样且尾盘14:50任务继续启用', () => {
+test('决策候选自动采样且尾盘14:50任务继续启用', () => {
   assert.match(deployment, /triggerName:\s*formula-selection-intraday-am-timer/)
   assert.match(deployment, /triggerName:\s*formula-selection-intraday-pm-timer/)
   assert.match(deployment, /triggerName:\s*formula-selection-close-timer/)
@@ -367,7 +367,7 @@ test('机会雷达展示组合层去重与风险预算但不改个股结论', ()
   assert.match(candidate, /portfolioState|portfolioReason|portfolioNote/)
   // 板块集中/预算受限提示文案
   assert.match(candidate, /板块|预算|集中/)
-  // 组合视图不写回个股 state；生产 V3 不可用时只在展示层降级
+  // 组合视图不写回个股 state；生产决策模型不可用时只在展示层降级
   assert.match(candidate, /STATE_VIEW\[displayState\]/)
   assert.match(candidate, /modelReady \? opportunity\.state : 'AVOID'/)
 })

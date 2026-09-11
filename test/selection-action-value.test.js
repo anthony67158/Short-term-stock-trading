@@ -2,9 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
-  evaluateAdaptiveOpportunity,
-  rankAdaptiveOpportunities,
-} from '../shared/adaptiveOpportunity.js'
+  evaluateSelectionActionValue,
+  rankSelectionOpportunities,
+} from '../shared/selectionActionValue.js'
 import {
   buildMarketOpportunityContext,
 } from '../shared/marketOpportunityContext.js'
@@ -57,7 +57,7 @@ function candidate(overrides = {}) {
 }
 
 test('market and sector objections become sizing cautions, not hard blockers', () => {
-  const result = evaluateAdaptiveOpportunity(candidate(), market)
+  const result = evaluateSelectionActionValue(candidate(), market)
 
   assert.equal(result.hardBlockers.length, 0)
   assert.equal(result.cautions.length, 2)
@@ -67,7 +67,7 @@ test('market and sector objections become sizing cautions, not hard blockers', (
 })
 
 test('invalid execution prices remain a hard blocker', () => {
-  const result = evaluateAdaptiveOpportunity(candidate({
+  const result = evaluateSelectionActionValue(candidate({
     exitPlan: { hardStopPrice: 10.2, takeProfitPrice: 10.6 },
   }), market)
 
@@ -77,7 +77,7 @@ test('invalid execution prices remain a hard blocker', () => {
 })
 
 test('calibrated negative expectation cannot be promoted by a strong playbook', () => {
-  const result = evaluateAdaptiveOpportunity(candidate({
+  const result = evaluateSelectionActionValue(candidate({
     blockers: [],
     opportunityScore: {
       state: 'READY',
@@ -98,7 +98,7 @@ test('calibrated negative expectation cannot be promoted by a strong playbook', 
 })
 
 test('score for a different price route is not reused as calibrated evidence', () => {
-  const result = evaluateAdaptiveOpportunity(candidate({
+  const result = evaluateSelectionActionValue(candidate({
     blockers: [],
     opportunityScore: {
       state: 'READY',
@@ -119,14 +119,14 @@ test('score for a different price route is not reused as calibrated evidence', (
     },
   }), market)
 
-  assert.equal(result.estimate.source, 'V3_UNAVAILABLE')
+  assert.equal(result.estimate.source, 'DECISION_UNAVAILABLE')
   assert.equal(result.estimate.pWinGivenFill, null)
   assert.equal(result.estimate.productionReady, false)
   assert.equal(result.tier, 'AVOID')
 })
 
 test('ranking uses action value rather than source formula score', () => {
-  const rows = rankAdaptiveOpportunities([
+  const rows = rankSelectionOpportunities([
     candidate({
       code: '000001',
       score: 98,

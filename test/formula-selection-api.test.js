@@ -173,7 +173,7 @@ test('市场扫描从完整股票池生成最多五个带唯一价位的观察�
   assert.equal(result.universe.inspectedCount, 5500)
   assert.equal(result.candidates.length, 1)
   assert.equal(result.candidates[0].action, 'WATCH_BUY')
-  assert.equal(result.candidates[0].validationState, 'V3_PENDING')
+  assert.equal(result.candidates[0].validationState, 'DECISION_PENDING')
   assert.ok(result.candidates[0].primaryPrice > 0)
   assert.equal(result.candidateEvents.length, 1)
   assert.equal(result.candidateEvents[0].stageReached, 'DISPLAYED')
@@ -704,7 +704,7 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
     savedLedger.events[0].scoreInput.schemaVersion,
     'opportunity-score-feature.v5',
   )
-  assert.deepEqual(result.v3Scoring, {
+  assert.deepEqual(result.decisionScoring, {
     usagePolicy: 'DIRECT',
     inputContextVersion: 'opportunity-score-input-context.v2',
     modelVersion: 'v3-production',
@@ -713,7 +713,7 @@ test('公式结果使用LightGBM动作门槛和CatBoost排序分组合排序', a
     unavailable: 0,
     appliedToOrder: true,
   })
-  assert.equal(result.validationState, 'V3_DIRECT')
+  assert.equal(result.validationState, 'DECISION_DIRECT')
   assert.equal(result.shadowRanking, undefined)
 })
 
@@ -729,7 +729,7 @@ test('生产模型或评分输入口径换版后同日公式结果必须重算',
     readLatest: async () => ({
       tradeDate: '2026-08-28',
       slot: '1505',
-      v3Scoring: existingScoring,
+      decisionScoring: existingScoring,
       candidates: [],
     }),
     saveRun: async (_mode, value) => { saved = value },
@@ -767,8 +767,8 @@ test('生产模型或评分输入口径换版后同日公式结果必须重算',
 
   assert.equal(scanCalls, 1)
   assert.equal(result.reused, undefined)
-  assert.equal(result.v3Scoring.modelVersion, 'current-model')
-  assert.equal(saved.v3Scoring.modelVersion, 'current-model')
+  assert.equal(result.decisionScoring.modelVersion, 'current-model')
+  assert.equal(saved.decisionScoring.modelVersion, 'current-model')
 
   existingScoring = {
     usagePolicy: 'DIRECT',

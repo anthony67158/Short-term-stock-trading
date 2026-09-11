@@ -119,7 +119,7 @@ function formulaResult(mode, candidates, {
     tradeDate,
     generatedAt: dataAsOf,
     dataAsOf,
-    v3Scoring: {
+    decisionScoring: {
       usagePolicy: 'DIRECT',
       inputContextVersion:
         OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
@@ -150,7 +150,7 @@ test('交易阶段决定机会雷达默认视图', () => {
   }).defaultLane, 'next')
 })
 
-test('生产V3盘中机会保留完整退出计划并按动作价值小仓验证', () => {
+test('生产决策模型盘中机会保留完整退出计划并按动作价值小仓验证', () => {
   const result = buildOpportunityRadar({
     now: NOW,
     sector: {
@@ -221,7 +221,7 @@ test('机会雷达不复用旧评分输入口径的同版本结果', () => {
     'INTRADAY',
     [formulaCandidate()],
   )
-  delete source.v3Scoring.inputContextVersion
+  delete source.decisionScoring.inputContextVersion
   source.candidates = source.candidates.map((candidate) => {
     const next = structuredClone(candidate)
     delete next.opportunityScore.inputContextVersion
@@ -885,7 +885,7 @@ test('今日手动尾盘试算优先于昨日正式版进入次日计划', () =>
   assert.equal(manualRow.exitPlan, null)
   assert.match(
     manualRow.blockers.join('；'),
-    /手动试算仅供观察|V3评分不可用/,
+    /手动试算仅供观察|决策评分不可用/,
   )
 })
 

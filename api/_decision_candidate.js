@@ -1,6 +1,6 @@
 import {
-  evaluateAdaptiveOpportunity,
-} from '../shared/adaptiveOpportunity.js'
+  evaluateSelectionActionValue,
+} from '../shared/selectionActionValue.js'
 import {
   buildAdaptivePricePlans,
 } from '../shared/adaptivePricePlans.js'
@@ -201,7 +201,7 @@ function scoredPlan(candidate, plan, score, marketContext) {
       targetPrice: finite(plan.exitPlan?.takeProfitPrice),
     },
   }
-  const adaptive = evaluateAdaptiveOpportunity({
+  const adaptive = evaluateSelectionActionValue({
     ...candidate,
     entryPlan: plan.entryPlan,
     exitPlan: plan.exitPlan,
@@ -220,7 +220,7 @@ function planPriority(value) {
   return Number(value.adaptive?.utility ?? -Infinity)
 }
 
-export async function scoreCandidatesWithDirectV3(
+export async function scoreCandidatesWithDecisionModel(
   candidates = [],
   {
     mode = 'INTRADAY',
@@ -290,16 +290,16 @@ export async function scoreCandidatesWithDirectV3(
     )
     const selected = evaluated[0]
     if (!selected) {
-      const adaptive = evaluateAdaptiveOpportunity(candidate, context)
+      const adaptive = evaluateSelectionActionValue(candidate, context)
       return {
         ...publicCandidate,
         state: 'AVOID',
-        stateLabel: 'V3评分不可用',
+        stateLabel: '决策评分不可用',
         blockers: adaptive.hardBlockers,
         cautions: adaptive.cautions,
         adaptive,
         opportunityScore: null,
-        v3Scoring: {
+        decisionScoring: {
           usagePolicy: 'DIRECT',
           scoredRoutes: 0,
           directRoutes: 0,
@@ -326,7 +326,7 @@ export async function scoreCandidatesWithDirectV3(
       blockers: selected.adaptive.hardBlockers,
       cautions: selected.adaptive.cautions,
       actionAlternatives: evaluated.slice(1),
-      v3Scoring: {
+      decisionScoring: {
         usagePolicy: 'DIRECT',
         scoredRoutes: evaluated.length,
         directRoutes,

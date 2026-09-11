@@ -10,8 +10,8 @@ import {
   scanTailPickCandidates,
 } from './_tail_pick_data.js'
 import {
-  scoreCandidatesWithDirectV3,
-} from './_opportunity_candidate_v3.js'
+  scoreCandidatesWithDecisionModel,
+} from './_decision_candidate.js'
 import {
   OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
 } from '../shared/opportunityScoreContract.js'
@@ -81,7 +81,7 @@ function publicCandidate(candidate) {
     opportunityScore: candidate.opportunityScore || null,
     adaptive: candidate.adaptive || null,
     actionAlternatives: candidate.actionAlternatives || [],
-    v3Scoring: candidate.v3Scoring || null,
+    decisionScoring: candidate.decisionScoring || null,
   }
 }
 
@@ -155,7 +155,7 @@ export function runTailPickScan({
   store = tailPickStore,
   collectMarketContext = collectTailPickMarketContext,
   scanCandidates = scanTailPickCandidates,
-  scoreCandidates = scoreCandidatesWithDirectV3,
+  scoreCandidates = scoreCandidatesWithDecisionModel,
   rankCandidates = rankTailPickCandidates,
   now = Date.now,
   mode = 'manual',
@@ -176,8 +176,8 @@ export function runTailPickScan({
     })
     if (
       existing
-      && existing.result?.v3Scoring?.usagePolicy === 'DIRECT'
-      && existing.result?.v3Scoring?.inputContextVersion
+      && existing.result?.decisionScoring?.usagePolicy === 'DIRECT'
+      && existing.result?.decisionScoring?.inputContextVersion
         === OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION
     ) {
       return {
@@ -311,7 +311,7 @@ export function runTailPickScan({
         marketGate: marketContext.marketGate,
         result: {
           ...ranked,
-          v3Scoring: {
+          decisionScoring: {
             usagePolicy: 'DIRECT',
             inputContextVersion:
               OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,

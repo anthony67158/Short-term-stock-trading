@@ -1,6 +1,6 @@
 import {
-  evaluateAdaptiveOpportunity,
-} from './adaptiveOpportunity.js'
+  evaluateSelectionActionValue,
+} from './selectionActionValue.js'
 import {
   scoreOpportunityPlaybooks,
 } from './opportunityPlaybooks.js'
@@ -268,7 +268,7 @@ export function chooseAdaptivePricePlan({
     }
     return {
       ...candidatePlan,
-      adaptive: evaluateAdaptiveOpportunity(enriched, marketContext),
+      adaptive: evaluateSelectionActionValue(enriched, marketContext),
     }
   }).sort((left, right) =>
     Number(right.adaptive.utility ?? -Infinity)

@@ -20,14 +20,14 @@ function rounded(value, digits = 2) {
   return number == null ? null : +number.toFixed(digits)
 }
 
-function v3Priority(candidate) {
+function decisionPriority(candidate) {
   return candidate?.opportunityScore?.state === 'READY'
     && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
     ? finite(candidate.adaptive?.utility) ?? -Infinity
     : -Infinity
 }
 
-function v3RankPriority(candidate) {
+function decisionRankPriority(candidate) {
   return candidate?.opportunityScore?.state === 'READY'
     && candidate?.opportunityScore?.usagePolicy === 'DIRECT'
     && Number(candidate.opportunityScore.expectedNetR) > 0
@@ -215,8 +215,8 @@ export function rankTailPickCandidates(
       ...candidateScore(item),
     }))
     .sort((left, right) =>
-      v3RankPriority(right) - v3RankPriority(left)
-      || v3Priority(right) - v3Priority(left)
+      decisionRankPriority(right) - decisionRankPriority(left)
+      || decisionPriority(right) - decisionPriority(left)
       || Number(left.decisionWarnings.length)
         - Number(right.decisionWarnings.length)
       || Number(right.score) - Number(left.score)
@@ -254,8 +254,8 @@ export function rankTailPickNearCandidates(
       ...nearCandidateScore(item),
     }))
     .sort((left, right) =>
-      v3RankPriority(right) - v3RankPriority(left)
-      || v3Priority(right) - v3Priority(left)
+      decisionRankPriority(right) - decisionRankPriority(left)
+      || decisionPriority(right) - decisionPriority(left)
       || Number(left.nearMatch?.failedRules?.length || 99)
         - Number(right.nearMatch?.failedRules?.length || 99)
       || Number(left.decisionWarnings.length)

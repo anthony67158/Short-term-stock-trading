@@ -11,8 +11,8 @@ import {
   fetchCninfoAnnouncements,
 } from './_pre_catalyst_data.js'
 import {
-  scoreCandidatesWithDirectV3,
-} from './_opportunity_candidate_v3.js'
+  scoreCandidatesWithDecisionModel,
+} from './_decision_candidate.js'
 import {
   fetchAiSearchReference,
 } from './_ai_search.js'
@@ -95,7 +95,7 @@ export function runPreCatalystScan({
   store = preCatalystStore,
   collect = collectProductionSnapshot,
   collectMarketContext = collectTailPickMarketContext,
-  scoreCandidates = scoreCandidatesWithDirectV3,
+  scoreCandidates = scoreCandidatesWithDecisionModel,
   force = false,
   now = Date.now,
 } = {}) {
@@ -162,9 +162,9 @@ export function runPreCatalystScan({
         })),
       ])
       await report({
-        stage: 'V3_SCORING',
+        stage: 'DECISION_SCORING',
         percent: 94,
-        message: '正在使用生产V3比较价格路径',
+        message: '正在使用生产决策模型比较价格路径',
       })
       const candidates = await scoreCandidates(collected.candidates, {
         mode: isContinuousTrading(timestamp) ? 'INTRADAY' : 'CLOSE',

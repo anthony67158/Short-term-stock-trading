@@ -15,8 +15,8 @@ import {
   buildMarketOpportunityContext,
 } from './marketOpportunityContext.js'
 import {
-  rankAdaptiveOpportunities,
-} from './adaptiveOpportunity.js'
+  rankSelectionOpportunities,
+} from './selectionActionValue.js'
 import {
   OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
 } from './opportunityScoreContract.js'
@@ -54,7 +54,7 @@ function finite(value) {
   return Number.isFinite(number) ? number : null
 }
 
-function directV3Score(value) {
+function directDecisionScore(value) {
   return value?.state === 'READY' && value?.usagePolicy === 'DIRECT'
 }
 
@@ -122,8 +122,8 @@ function sourceState(value, {
 
 function sourceModelVersions(value = {}) {
   const declared = [
-    value?.v3Scoring?.modelVersion,
-    value?.result?.v3Scoring?.modelVersion,
+    value?.decisionScoring?.modelVersion,
+    value?.result?.decisionScoring?.modelVersion,
     value?.model?.version,
   ].map((item) => String(item || '')).filter(Boolean)
   const candidates = [
@@ -147,8 +147,8 @@ function sourceModelVersions(value = {}) {
 
 function sourceInputContextVersions(value = {}) {
   const declared = [
-    value?.v3Scoring?.inputContextVersion,
-    value?.result?.v3Scoring?.inputContextVersion,
+    value?.decisionScoring?.inputContextVersion,
+    value?.result?.decisionScoring?.inputContextVersion,
     value?.model?.inputContextVersion,
   ].map((item) => String(item || '')).filter(Boolean)
   const candidates = [
@@ -445,7 +445,7 @@ function formulaOpportunity(candidate, {
   ]
   const opportunityScore = candidate.opportunityScore
   if (
-    directV3Score(opportunityScore)
+    directDecisionScore(opportunityScore)
     && (
       finite(opportunityScore.expectedNetR) <= 0
       || (
@@ -527,17 +527,19 @@ function tailOpportunity(candidate, {
   const execution = candidate.execution || {}
   const quotePrice = finite(candidate.quote?.price)
   const vwap = finite(candidate.intraday?.vwap)
-  const v3Entry = candidate.entryPlan || null
-  const v3Exit = candidate.exitPlan || null
-  const entryPrice = finite(v3Entry?.price) ?? (
+  const decisionEntry = candidate.entryPlan || null
+  const decisionExit = candidate.exitPlan || null
+  const entryPrice = finite(decisionEntry?.price) ?? (
     quotePrice == null
       ? null
       : +(
         Math.max(quotePrice, vwap || quotePrice) * 1.003
       ).toFixed(2)
   )
-  const stop = finite(v3Exit?.hardStopPrice ?? execution.stopPrice)
-  const target = finite(v3Exit?.takeProfitPrice)
+  const stop = finite(
+    decisionExit?.hardStopPrice ?? execution.stopPrice,
+  )
+  const target = finite(decisionExit?.takeProfitPrice)
   const blockers = unique([
     ...(candidate.blockers || []),
     ...(candidate.decisionWarnings || []),
@@ -587,7 +589,7 @@ function tailOpportunity(candidate, {
     actionAlternatives: candidate.actionAlternatives || [],
     entryPlan: contractComplete
       ? {
-          ...(v3Entry || {}),
+          ...(decisionEntry || {}),
           type: 'TAIL_REVERSAL',
           price: entryPrice,
           window: formal
@@ -601,7 +603,7 @@ function tailOpportunity(candidate, {
             5,
             Math.max(
               0,
-              finite(v3Entry?.maxPositionPct)
+              finite(decisionEntry?.maxPositionPct)
               ?? finite(execution.maxPositionPct)
               ?? 5,
             ),
@@ -611,7 +613,7 @@ function tailOpportunity(candidate, {
       : null,
     exitPlan: contractComplete
       ? {
-          ...(v3Exit || {}),
+          ...(decisionExit || {}),
           hardStopPrice: stop,
           takeProfitPrice: target,
           timeStopDate:
@@ -707,7 +709,7 @@ function sortedRows(rows) {
   const modelMetric = (row, key, fallback) => {
     const score = row?.opportunityScore
     if (
-      !directV3Score(score)
+      !directDecisionScore(score)
     ) return fallback
     return finite(score[key]) ?? fallback
   }
@@ -1006,7 +1008,7 @@ export function buildOpportunityRadar({
   const lanes = Object.fromEntries(
     Object.entries({ layout, intraday, next }).map(([key, rows]) => [
       key,
-      rankAdaptiveOpportunities(rows, opportunityContext),
+      rankSelectionOpportunities(rows, opportunityContext),
     ]),
   )
   const portfolios = {

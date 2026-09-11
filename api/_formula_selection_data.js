@@ -334,7 +334,7 @@ function candidateEvent(quote, cheapScore, recall = {}) {
 function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
   const adaptive = selectedPlan.adaptive
   const planningBlockers = (adaptive.hardBlockers || []).filter(
-    (item) => item !== 'V3评分不可用，当前不执行',
+    (item) => item !== '决策评分不可用，当前不执行',
   )
   return {
     schemaVersion: 'formula-price-decision.v1',
@@ -366,7 +366,7 @@ function adaptiveDecisionFromPlan(code, formula, selectedPlan) {
     hardStopTriggered: false,
     executionState: planningBlockers.length
       ? 'BLOCKED'
-      : 'V3_PENDING',
+      : 'DECISION_PENDING',
     sellableQty: null,
     evidence: adaptive.playbook?.evidence || [],
     blockers: planningBlockers,
@@ -380,7 +380,7 @@ function publicCandidate(item, rank) {
     rank,
     score: item.score,
     formulaId: item.decision.formulaId,
-    validationState: 'V3_PENDING',
+    validationState: 'DECISION_PENDING',
     action: item.decision.action,
     executionState: item.decision.executionState,
     marketAllowsRisk: item.decision.marketAllowsRisk,

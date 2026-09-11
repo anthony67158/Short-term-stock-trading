@@ -309,7 +309,7 @@ function tacticalQuantRule(tactical = {}) {
   }
   rules.push(
     '36因子日线辅助模型禁止把盘中支撑压力或实时执行价带冒充同日模型预测；'
-    + '交易动作、价格、手数和风险只服从服务端V3决策',
+    + '交易动作、价格、手数和风险只服从服务端系统决策',
   )
   return rules.length
     ? `【量化使用纪律】${rules.join('；')}`
