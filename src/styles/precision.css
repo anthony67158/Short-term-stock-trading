@@ -17030,6 +17030,16 @@ html[data-theme="light"] .plan-cand.starred {
   overflow-wrap: anywhere;
 }
 
+.strategy-pattern-confirmation {
+  flex-basis: 100%;
+  color: var(--color-muted);
+}
+
+.strategy-pattern-confirmation strong {
+  color: var(--color-ink-2);
+  font-weight: 650;
+}
+
 .aw-opportunity > .strategy-pattern-evidence {
   grid-column: 1 / -1;
 }

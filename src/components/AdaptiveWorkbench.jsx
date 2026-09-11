@@ -268,7 +268,12 @@ export function OpportunityRow({
           />
         </button>
       </div>
-      <StrategyPatternEvidence pattern={opportunity.strategyPattern} />
+      <StrategyPatternEvidence
+        pattern={opportunity.strategyPattern}
+        confirmation={
+          opportunity.entryPlan?.strategyPatternConfirmation
+        }
+      />
       {(adaptive.cautions || []).length > 0 && (
         <p className="aw-caution">
           {adaptive.cautions.slice(0, 2).join('；')}

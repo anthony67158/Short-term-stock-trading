@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { evaluateDecision } from '../api/_decision_orchestrator.js'
 import { buildStrategyPatternAnalysis } from '../shared/strategyPatternFeatures.js'
+import {
+  resolveStrategyPatternCapabilities,
+} from '../shared/strategyPatternCapabilities.js'
 import { buildRealOutcomeLearning } from '../shared/realOutcomeLearning.js'
 
 assert.ok(process.argv.includes('--online'), 'Use --online for real quotes and quant inference')
@@ -23,6 +26,8 @@ const report = {
   schemaVersion: 'strategy-runtime-acceptance.v1',
   startedAt: Date.now(),
   scope: 'real-public-quotes-with-isolated-fixture-no-cloud-account-writes',
+  strategyPatternCapabilities:
+    resolveStrategyPatternCapabilities(process.env),
   cases: [], failures: [],
 }
 const market = await get('/api/market')
@@ -49,7 +54,33 @@ for (const code of codes) {
     assert.ok(plans.every((p) => p.opportunityScore?.state === 'READY'), 'Quant inference unavailable')
     assert.ok(plans.every((p) => Number.isFinite(p.opportunityScore.expectedNetR)))
     assert.equal(result.meta.llmCalls, 0)
-    assert.equal(advice.strategyPattern, null, 'Research patterns affected production advice')
+    assert.equal(
+      advice.strategyPatternCapabilities?.playbookBlend,
+      false,
+      'Product pattern tools enabled playbook blending',
+    )
+    assert.equal(
+      advice.strategyPatternCapabilities?.modelFeatures,
+      false,
+      'Product pattern tools enabled model features',
+    )
+    if (advice.strategyPattern) {
+      assert.ok(
+        advice.strategyPattern.score >= 70,
+        'Displayed pattern did not meet evidence threshold',
+      )
+    }
+    for (const plan of plans) {
+      const confirmation =
+        plan.entryPlan?.strategyPatternConfirmation
+      if (!confirmation) continue
+      assert.equal(
+        confirmation.patternId,
+        plan.patternContext?.id,
+        'Confirmation contract does not match route pattern',
+      )
+      assert.match(confirmation.summary, /持续观察满60秒/)
+    }
     assert.notEqual(advice.decisionPlan.actionability, 'READY', 'Closed-market instruction must not execute')
     assert.equal(JSON.stringify(fixture), before, 'Read-only evaluation mutated the ledger')
     report.cases.push({

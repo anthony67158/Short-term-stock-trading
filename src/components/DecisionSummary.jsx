@@ -91,7 +91,13 @@ export default function DecisionSummary({
           </button>
           {expanded && (
             <div className="decision-evidence">
-              <StrategyPatternEvidence pattern={advice?.strategyPattern} />
+              <StrategyPatternEvidence
+                pattern={advice?.strategyPattern}
+                confirmation={
+                  advice?.selectedDecisionPlan?.entryPlan
+                    ?.strategyPatternConfirmation
+                }
+              />
               <p>成交概率 {probability(score?.pFill)} · 成交后盈利概率 {probability(score?.pWinGivenFill)}</p>
               {score?.expectedNetR != null && <p>费后期望 {score.expectedNetR}R · 尾部损失参考 {score.expectedShortfall10}R</p>}
               <p>{advice?.quantNote || '尚无决策模型结果。'}</p>

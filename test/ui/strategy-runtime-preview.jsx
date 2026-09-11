@@ -5,6 +5,9 @@ import '../../src/styles.css'
 import '../../src/styles/precision.css'
 import DecisionSummary from '../../src/components/DecisionSummary.jsx'
 import { OpportunityRow } from '../../src/components/AdaptiveWorkbench.jsx'
+import {
+  buildStrategyPatternConfirmation,
+} from '../../shared/strategyPatternConfirmation.js'
 
 function Preview() {
   const [data, setData] = useState(null)
@@ -20,9 +23,20 @@ function Preview() {
   if (!data) return <p role="status">{error || '正在读取验收快照'}</p>
   const pattern = data.patterns.patterns.find((item) => item.matched)
   const plan = data.advice.selectedDecisionPlan
+  const confirmation = buildStrategyPatternConfirmation({
+    pattern,
+    route: plan.route,
+  })
+  const selectedPlan = {
+    ...plan,
+    entryPlan: {
+      ...plan.entryPlan,
+      strategyPatternConfirmation: confirmation,
+    },
+  }
   const opportunity = {
     code: data.code, name: data.quote.name, stateLabel: '本次不买入',
-    entryPlan: plan.entryPlan, exitPlan: plan.exitPlan,
+    entryPlan: selectedPlan.entryPlan, exitPlan: selectedPlan.exitPlan,
     strategyPattern: pattern,
     adaptive: {
       tier: 'AVOID', actionLabel: '本次不买入',
@@ -39,7 +53,11 @@ function Preview() {
       </div>
       <DecisionSummary
         code={data.code}
-        advice={{ ...data.advice, strategyPattern: pattern }}
+        advice={{
+          ...data.advice,
+          strategyPattern: pattern,
+          selectedDecisionPlan: selectedPlan,
+        }}
         holdingLots={10}
         sellableLots={10}
         detailed
