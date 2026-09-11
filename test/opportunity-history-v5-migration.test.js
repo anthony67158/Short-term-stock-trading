@@ -62,7 +62,7 @@ const fundRows = [
   retailNetYi,
 }))
 
-test('V4收盘样本按历史资金升级为当前合同', () => {
+test('V4资金迁移只升级到V5，不把缺失形态补零冒充V6', () => {
   const result = migrateOpportunityHistoryV5(
     { outcomes: [legacyOutcome()] },
     fundRows,
@@ -72,9 +72,11 @@ test('V4收盘样本按历史资金升级为当前合同', () => {
 
   assert.equal(
     result.outcomes[0].scoreInput.schemaVersion,
-    'opportunity-score-feature.v6',
+    'opportunity-score-feature.v5',
   )
-  assert.deepEqual(Object.keys(factors), OPPORTUNITY_SCORE_FEATURE_NAMES)
+  const patterns = new Set(contract.legacyDefaultsByVersion['opportunity-score-feature.v5'])
+  assert.deepEqual(Object.keys(factors), OPPORTUNITY_SCORE_FEATURE_NAMES.filter((n) => !patterns.has(n)))
+  assert.equal('patternHistoryCoverage' in factors, false)
   assert.equal(factors.fundCurrentAvailable, 1)
   assert.equal(factors.fundHistoryComplete, 1)
   assert.equal(factors.main5dYi, 19)

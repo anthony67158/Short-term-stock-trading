@@ -808,6 +808,21 @@ def _project_dataset_for_metadata(data, metadata):
     }
 
 
+def challenger_validation_blockers(metadata):
+    validation = metadata.get("ensembleValidation") or {}
+    blockers = []
+    if (
+        validation.get("calibrationHoldoutSeparated") is not True
+        or not validation.get("calibrationEndDate")
+        or not validation.get("holdoutStartDate")
+        or validation["calibrationEndDate"] >= validation["holdoutStartDate"]
+    ):
+        blockers.append("挑战者缺少校准与最终留出集严格隔离的证明")
+    if validation.get("walkForwardPassed") is not True:
+        blockers.append("挑战者尚未通过三个滚动样本外窗口")
+    return blockers
+
+
 def select_release(
     dataset_path,
     champion_directory,
@@ -859,14 +874,24 @@ def select_release(
         or tuple(champion_metadata.get("featureNames") or ())
         != tuple(challenger_metadata.get("featureNames") or ())
     )
-    component_decisions = [
-        component_decision(
-            component,
-            champion_evaluation,
-            challenger_evaluation,
-        )
-        for component in COMPONENTS
-    ]
+    validation_blockers = challenger_validation_blockers(challenger_metadata)
+    component_decisions = []
+    individual_evaluations = {}
+    for component in COMPONENTS:
+        if schema_changed:
+            evaluation = challenger_evaluation
+        else:
+            models, metadata = compose_release(
+                champion_models, champion_metadata,
+                challenger_models, challenger_metadata, (component,),
+            )
+            evaluation = evaluate_release(
+                models, metadata, data, holdout, benchmark_repeats=0,
+            )
+            individual_evaluations[component] = evaluation
+        component_decisions.append(component_decision(
+            component, champion_evaluation, evaluation,
+        ))
     candidates = []
     if schema_changed:
         compatibility = compatibility_gate(
@@ -890,22 +915,6 @@ def select_release(
             for item in component_decisions
             if item["improved"]
         ]
-        individual_evaluations = {}
-        for component in improved:
-            models, metadata = compose_release(
-                champion_models,
-                champion_metadata,
-                challenger_models,
-                challenger_metadata,
-                (component,),
-            )
-            individual_evaluations[component] = evaluate_release(
-                models,
-                metadata,
-                data,
-                holdout,
-                benchmark_repeats=0,
-            )
         combinations = (
             itertools.combinations(improved, size)
             for size in range(1, len(improved) + 1)
@@ -939,6 +948,10 @@ def select_release(
                     "compatibility": compatibility,
                     "fullBundle": False,
                 })
+    for candidate in candidates:
+        candidate["compatibility"]["blockers"].extend(validation_blockers)
+        if validation_blockers:
+            candidate["compatibility"]["passed"] = False
     accepted = [
         item
         for item in candidates
@@ -952,7 +965,7 @@ def select_release(
         ),
         default=None,
     )
-    final_validation_blockers = []
+    final_validation_blockers = list(validation_blockers)
     if selected:
         if selected.get("fullBundle"):
             models = challenger_models

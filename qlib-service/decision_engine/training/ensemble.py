@@ -322,24 +322,25 @@ def train_decision_ensemble(
     poc_report_path=None,
 ):
     report = train_decision_model(dataset_path, output_directory)
+    if not report.get("readiness", {}).get("ready"):
+        return report
     data = load_decision_dataset(dataset_path)
-    train, calibration, holdout, _ = three_way_purged_split(
+    train, calibration, holdout, split = three_way_purged_split(
         data["dates"],
         calibration_fraction=0.15,
         holdout_fraction=0.15,
         purge_dates=5,
     )
-    development = np.sort(np.concatenate([train, calibration]))
     members = [
-        _fit_member(data, development, holdout, seed)
+        _fit_member(data, train, calibration, seed)
         for seed in seeds
     ]
     predictions = [
         _member_predictions(
             member,
-            data["X"][holdout],
-            playbook_ids=data["playbook_ids"][holdout],
-            routes=data["routes"][holdout],
+            data["X"][calibration],
+            playbook_ids=data["playbook_ids"][calibration],
+            routes=data["routes"][calibration],
         )
         for member in members
     ]
@@ -356,14 +357,14 @@ def train_decision_ensemble(
         )
         for member, value in zip(members, predictions)
     ], axis=0)
-    actual = np.nan_to_num(data["y_net_r"][holdout], nan=0.0)
+    actual = np.nan_to_num(data["y_net_r"][calibration], nan=0.0)
     blend_weight, blend_trials = select_ensemble_blend(
         action_value,
         rank_value,
         rank_score,
         actual,
-        data["dates"][holdout],
-        data["codes"][holdout],
+        data["dates"][calibration],
+        data["codes"][calibration],
     )
     ensemble_expected = (
         (1 - blend_weight) * action_value
@@ -429,19 +430,31 @@ def train_decision_ensemble(
         "calibration": {
             "pFill": {"method": "seed-ensemble"},
             "pWinGivenFill": {"method": "seed-ensemble"},
-            "pFillSampleCount": int(len(holdout)),
+            "pFillSampleCount": int(len(calibration)),
             "pWinGivenFillSampleCount": int(
-                np.isfinite(data["y_net_r"][holdout]).sum()
+                np.isfinite(data["y_net_r"][calibration]).sum()
             ),
+        },
+        "ensembleValidation": {
+            "schemaVersion": "ensemble-validation.v2",
+            "calibrationHoldoutSeparated": True,
+            "walkForwardPassed": (
+                report.get("walkForward", {}).get("shadowEligible") is True
+                and report.get("walkForward", {}).get("folds", 0) >= 3
+            ),
+            "trainingEndDate": str(data["dates"][train][-1]),
+            "calibrationEndDate": str(data["dates"][calibration][-1]),
+            "holdoutStartDate": str(data["dates"][holdout][0]),
+            "split": split,
         },
         "seedEnsemblePoc": compact_poc_report(poc_report),
     })
-    filled_holdout = np.isfinite(data["y_net_r"][holdout])
+    filled_calibration = np.isfinite(data["y_net_r"][calibration])
     metadata["risk"] = {
         **(metadata.get("risk") or {}),
         "q10Coverage": round(float(np.mean(
-            data["y_net_r"][holdout][filled_holdout]
-            >= q10_prediction[filled_holdout]
+            data["y_net_r"][calibration][filled_calibration]
+            >= q10_prediction[filled_calibration]
         )), 6),
     }
     validate_decision_metadata(metadata)
@@ -483,7 +496,7 @@ def main():
         poc_report_path=args.poc_report,
     )
     print(json.dumps({
-        "modelVersion": report["modelVersion"],
+        "modelVersion": report.get("modelVersion"),
         "state": report["state"],
     }, ensure_ascii=False))
 

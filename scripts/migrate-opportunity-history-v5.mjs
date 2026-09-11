@@ -6,10 +6,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import {
-  OPPORTUNITY_SCORE_FEATURE_NAMES,
-  OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
-} from '../shared/opportunityScoreContract.js'
-import {
   buildOpportunityFundFeatures,
 } from '../shared/opportunityShadowFeatures.js'
 import {
@@ -17,6 +13,7 @@ import {
 } from './lib/stockdb-backfill-runtime.mjs'
 
 const SCRIPT = fileURLToPath(import.meta.url)
+const TARGET_SCHEMA = 'opportunity-score-feature.v5'
 const CONTRACT_PATH = new URL(
   '../qlib-service/contracts/opportunity-score-features.json',
   import.meta.url,
@@ -135,7 +132,7 @@ export function migrateOpportunityOutcomeV5(
   const schemaVersion = String(scoreInput?.schemaVersion || '')
   const sourceNames = expectedNames(contract, schemaVersion)
   assertFactors(scoreInput?.factors, sourceNames)
-  if (schemaVersion === OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION) {
+  if (schemaVersion === TARGET_SCHEMA || schemaVersion === contract.featureSchemaVersion) {
     return structuredClone(value)
   }
   const tradeDate = compactDate(value.tradeDate)
@@ -169,7 +166,7 @@ export function migrateOpportunityOutcomeV5(
     ...inferredAvailability(value, scoreInput.factors),
   }
   const factors = Object.fromEntries(
-    OPPORTUNITY_SCORE_FEATURE_NAMES.map((name) => [
+    expectedNames(contract, TARGET_SCHEMA).map((name) => [
       name,
       finite(additions[name])
         ?? finite(scoreInput.factors[name])
@@ -180,7 +177,7 @@ export function migrateOpportunityOutcomeV5(
     ...value,
     scoreInput: {
       ...scoreInput,
-      schemaVersion: OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
+      schemaVersion: TARGET_SCHEMA,
       factors,
     },
   }
@@ -236,7 +233,7 @@ export function migrateOpportunityHistoryV5(
     schemaVersion: 'opportunity-outcome-export.v1',
     migratedAt: Date.now(),
     migration: {
-      featureSchemaVersion: OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
+      featureSchemaVersion: TARGET_SCHEMA,
       sourceSchemas: before,
       funds: fundRows.length,
       coverage,

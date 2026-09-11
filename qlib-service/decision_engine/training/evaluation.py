@@ -268,8 +268,8 @@ def ranking_metrics(
         if net_returns else None,
         f"max_drawdown_r_at_{k}": (
             round(float(max(
-                np.maximum.accumulate(np.cumsum(net_returns))
-                - np.cumsum(net_returns)
+                np.maximum.accumulate(np.cumsum([0.0, *net_returns]))
+                - np.cumsum([0.0, *net_returns])
             )), 6)
             if net_returns else None
         ),
