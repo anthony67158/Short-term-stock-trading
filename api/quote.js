@@ -136,14 +136,22 @@ function previousCloseQuote(
   )
     ? fuyao
     : null;
+  const tencentHistorical = (
+    positive(tencent?.price) != null
+    && String(tencent?.tradeDate || '').slice(0, 10) !== today
+  )
+    ? tencent
+    : null;
+  const supplemental = eastmoneyHistorical || tencentHistorical;
+  const beforeOpen = (
+    isTradingDayAt(now)
+    && beijingMinutes(now) < 570
+  );
   const sourceTradeDate = (
     fuyaoHistorical?.tradeDate
     || eastmoneyHistorical?.tradeDate
-    || (
-      String(tencent?.tradeDate || '').slice(0, 10) !== today
-        ? tencent?.tradeDate || null
-        : null
-    )
+    || tencentHistorical?.tradeDate
+    || null
   );
   return withPriceLimitState({
     ...(eastmoney || {}),
@@ -151,28 +159,51 @@ function previousCloseQuote(
     code,
     name: eastmoney?.name || tencent?.name || '',
     industry: eastmoney?.industry || tencent?.industry || null,
-    source: fuyaoHistorical
+    source: positive(fuyao?.price) != null
       ? '同花顺扶摇·最近收盘'
       : eastmoneyHistorical
         ? '东方财富·最近收盘'
-      : tencent
+      : tencentHistorical
         ? '腾讯财经·最近收盘'
         : '东方财富·昨收',
     price,
-    pct: fuyaoHistorical?.pct ?? eastmoneyHistorical?.pct ?? 0,
-    chg: fuyaoHistorical?.chg ?? eastmoneyHistorical?.chg ?? 0,
-    turnover: positive(eastmoneyHistorical?.turnover),
-    volRatio: positive(eastmoneyHistorical?.volRatio),
+    pct: beforeOpen ? 0 : (
+      fuyaoHistorical?.pct
+        ?? eastmoneyHistorical?.pct
+        ?? tencentHistorical?.pct
+        ?? fuyao?.pct
+        ?? 0
+    ),
+    chg: beforeOpen ? 0 : (
+      fuyaoHistorical?.chg
+        ?? eastmoneyHistorical?.chg
+        ?? tencentHistorical?.chg
+        ?? fuyao?.chg
+        ?? 0
+    ),
+    turnover: positive(supplemental?.turnover),
+    volRatio: positive(supplemental?.volRatio),
     mainInflow: eastmoneyHistorical?.mainInflow ?? null,
     retailInflow: eastmoneyHistorical?.retailInflow ?? null,
     main5dInflow: eastmoneyHistorical?.main5dInflow ?? null,
     retail5dInflow: eastmoneyHistorical?.retail5dInflow ?? null,
     mainRatio: eastmoneyHistorical?.mainRatio ?? null,
-    amount: positive(eastmoneyHistorical?.amount),
-    high: positive(eastmoneyHistorical?.high),
-    low: positive(eastmoneyHistorical?.low),
-    open: positive(eastmoneyHistorical?.open),
-    prevClose: positive(eastmoneyHistorical?.prevClose) || price,
+    amount:
+      positive(fuyao?.amount)
+      || positive(supplemental?.amount),
+    high:
+      positive(fuyao?.high)
+      || positive(supplemental?.high),
+    low:
+      positive(fuyao?.low)
+      || positive(supplemental?.low),
+    open:
+      positive(fuyao?.open)
+      || positive(supplemental?.open),
+    prevClose:
+      positive(fuyao?.prevClose)
+      || positive(supplemental?.prevClose)
+      || price,
     tradeDate: sourceTradeDate,
     priceStatus: 'PREVIOUS_CLOSE',
     priceLabel: (
@@ -201,6 +232,7 @@ export function mergeQuoteSources(
     (fuyaoList || []).map((quote) => [String(quote.code), quote]),
   );
   const today = beijingDayKey(now);
+  const tradingDay = isTradingDayAt(now);
   return (codes || []).map((rawCode) => {
     const code = String(rawCode);
     const fuyao = fuyaoByCode.get(code);
@@ -210,12 +242,18 @@ export function mergeQuoteSources(
     const eastmoneyValid = positive(eastmoney?.price) != null;
     const tencentValid = positive(tencent?.price) != null;
     const eastmoneyCurrent = (
+      tradingDay
+      &&
       String(eastmoney?.tradeDate || '').slice(0, 10) === today
     );
     const fuyaoCurrent = (
+      tradingDay
+      &&
       String(fuyao?.tradeDate || '').slice(0, 10) === today
     );
     const tencentCurrent = (
+      tradingDay
+      &&
       String(tencent?.tradeDate || '').slice(0, 10) === today
     );
     if (fuyaoValid && fuyaoCurrent) {
@@ -397,11 +435,24 @@ export async function fetchQuotes(codes, dependencies = {}) {
   const eastmoneyByCode = new Map(
     eastmoneyList.map((quote) => [String(quote.code), quote]),
   );
-  const missing = normalizedCodes.filter(
-    (code) =>
-      positive(fuyaoByCode.get(code)?.price) == null
-      && positive(eastmoneyByCode.get(code)?.price) == null,
-  );
+  const tradingDay = isTradingDayAt(now);
+  const today = beijingDayKey(now);
+  const missing = normalizedCodes.filter((code) => {
+    const fuyao = fuyaoByCode.get(code);
+    const eastmoney = eastmoneyByCode.get(code);
+    const missingPrice = (
+      positive(fuyao?.price) == null
+      && positive(eastmoney?.price) == null
+    );
+    const stampedOnClosedDay = (
+      !tradingDay
+      && (
+        String(fuyao?.tradeDate || '').slice(0, 10) === today
+        || String(eastmoney?.tradeDate || '').slice(0, 10) === today
+      )
+    );
+    return missingPrice || stampedOnClosedDay;
+  });
   let tencentList = [];
   if (missing.length) {
     try {

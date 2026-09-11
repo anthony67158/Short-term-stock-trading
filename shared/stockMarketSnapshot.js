@@ -40,13 +40,22 @@ export function buildStockMarketSnapshot({
   )
     ? rounded((latestClose - baseClose) / baseClose * 100)
     : null
+  const fundAsOfDate = fund?.asOfDate || fund?.historicalAsOfDate || null
+  const quoteDate = day(quote?.tradeDate)
+  const latestCandleDate = day(latestCandle?.date)
+  const fundDate = day(fundAsOfDate)
+  const commonCompletedDate = (
+    quote?.isLivePrice !== true
+    && latestCandleDate
+    && latestCandleDate === fundDate
+  ) ? latestCandleDate : null
   const asOfDate = (
-    quote?.tradeDate
-    || fund?.asOfDate
-    || latestCandle?.date
+    commonCompletedDate
+    || quoteDate
+    || fundDate
+    || latestCandleDate
     || null
   )
-  const fundAsOfDate = fund?.asOfDate || fund?.historicalAsOfDate || null
   const fundAligned = (
     day(fundAsOfDate)
     && day(fundAsOfDate) === day(asOfDate)

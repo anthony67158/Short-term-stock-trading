@@ -128,6 +128,38 @@ test('资金日期落后时不把历史值伪装成当前快照', () => {
   assert.equal(result.recent5.retailNetYi, null)
 })
 
+test('休市报价日期异常领先时按K线与资金共同收盘日展示', () => {
+  const result = buildStockMarketSnapshot({
+    quote: {
+      tradeDate: '2026-09-12',
+      isLivePrice: false,
+      priceStatus: 'LATEST',
+    },
+    candles: [
+      ...candles,
+      { date: '2026-09-11', close: 67, turnover: 1.19 },
+    ],
+    fund: {
+      asOfDate: '2026-09-11',
+      mainNetYi: 1.8,
+      retailNetYi: -1.51,
+      main5dYi: -17.78,
+      retail5dYi: 12.87,
+      historyDayCount: 5,
+      historyComplete: true,
+      inflowDays: 2,
+      retailInflowDays: 3,
+    },
+  })
+
+  assert.equal(result.asOfDate, '2026-09-11')
+  assert.equal(result.latest.turnover, 1.19)
+  assert.equal(result.latest.mainNetYi, 1.8)
+  assert.equal(result.latest.retailNetYi, -1.51)
+  assert.equal(result.recent5.mainNetYi, -17.78)
+  assert.equal(result.recent5.retailNetYi, 12.87)
+})
+
 test('资金历史不足时使用同日报价的五日聚合值', () => {
   const result = buildStockMarketSnapshot({
     quote: {

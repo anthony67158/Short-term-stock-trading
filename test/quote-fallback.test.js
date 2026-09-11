@@ -175,6 +175,53 @@ test('休市时保留最近收盘日的活跃度与资金快照', async () => {
   assert.equal(list[0].retail5dInflow, -416_996_256)
 })
 
+test('休市扶摇快照误标当天时用腾讯校正收盘日并补齐活跃度', async () => {
+  const weekend = Date.parse('2026-09-12T00:35:00+08:00')
+  const requested = []
+  const list = await fetchQuotes(['002475'], {
+    now: weekend,
+    fetchFuyao: async () => [{
+      code: '002475',
+      source: '同花顺扶摇',
+      price: 55.39,
+      pct: 1.73,
+      amount: 4_768_100_000,
+      high: 55.92,
+      low: 53.35,
+      open: 53.84,
+      prevClose: 54.45,
+      tradeDate: '2026-09-12',
+    }],
+    fetchEastmoney: async () => [],
+    fetchTencent: async (codes) => {
+      requested.push(...codes)
+      return [{
+        code: '002475',
+        source: '腾讯财经',
+        price: 55.39,
+        pct: 1.73,
+        turnover: 1.19,
+        volRatio: 1,
+        amount: 4_768_100_000,
+        high: 55.92,
+        low: 53.35,
+        open: 53.84,
+        prevClose: 54.45,
+        tradeDate: '2026-09-11',
+      }]
+    },
+  })
+
+  assert.deepEqual(requested, ['002475'])
+  assert.equal(list[0].price, 55.39)
+  assert.equal(list[0].tradeDate, '2026-09-11')
+  assert.equal(list[0].turnover, 1.19)
+  assert.equal(list[0].volRatio, 1)
+  assert.equal(list[0].priceStatus, 'PREVIOUS_CLOSE')
+  assert.equal(list[0].priceLabel, '最近收盘')
+  assert.equal(list[0].isLivePrice, false)
+})
+
 test('东财报价映射保留五日主力与小单累计且缺失值不伪装成零', () => {
   const quote = mapEastmoneyQuote({
     f12: '300390',
