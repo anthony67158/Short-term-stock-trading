@@ -259,7 +259,7 @@ book.advice['002594'].advice = {
     generatedAt: now,
     summary: '当前没有费后价值为正的可执行路径。',
     counterCase: '若回踩后资金重新转强，原判断可能过于保守。',
-    invalidation: '价格或账户事实变化后重新运行V3。',
+    invalidation: '价格或账户事实变化后重新运行决策模型。',
     evidenceGap: '缺少真实盘中逐笔成交。',
   },
   priceContract: {

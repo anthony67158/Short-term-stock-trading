@@ -4,7 +4,7 @@ import fs from 'node:fs/promises'
 const base = process.env.UI_TEST_ORIGIN || 'http://127.0.0.1:5174'
 assert.equal(new URL(base).hostname, '127.0.0.1')
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE || 'playwright')
-const output = 'harness-artifacts/v3-workbench'
+const output = 'harness-artifacts/decision-workbench'
 await fs.mkdir(output, { recursive: true })
 const browser = await chromium.launch({ channel: 'chrome', headless: true })
 const results = []
@@ -19,21 +19,41 @@ try {
     await page.clock.install({ time: new Date('2026-09-10T02:10:00Z') })
     await page.goto(`${base}/test/ui/v3-workbench-preview.html?tab=positions`, { waitUntil: 'domcontentloaded' })
     await page.locator('.nav-tabs:visible').getByRole('button', { name: /持仓/ }).click()
-    await page.locator('.plan-cand.v3-card').first().waitFor()
+    await page.locator('.plan-cand.decision-card').first().waitFor()
+    const completedBatch = page.locator('.decision-batch-progress.done')
+    await completedBatch.waitFor()
+    await page.clock.fastForward(8050)
+    await completedBatch.waitFor({ state: 'detached' })
     const holding = (code) => page.locator(`.hold-item[data-code="${code}"]`)
     const candidate = (code) => page.locator(`.plan-cand[data-code="${code}"]`)
     const pendingExitText = await holding('000001').innerText()
     assert.match(pendingExitText, /等待退出前复核/)
     assert.doesNotMatch(pendingExitText, /清仓 10 手/)
     assert.match(pendingExitText, /约60秒/)
-    assert.match(await holding('600036').innerText(), /继续持有 5 手/)
-    assert.match(await holding('300750').innerText(), /V3模型调用失败/)
-    assert.match(await candidate('002594').innerText(), /等待回踩 84元/)
-    assert.match(await candidate('688981').innerText(), /买入 1 手/)
+    assert.match(await holding('600036').innerText(), /加仓 1 手/)
+    assert.equal(
+      await holding('600036').getByRole('button', {
+        name: '记录加仓',
+        exact: true,
+      }).count(),
+      1,
+    )
+    assert.match(
+      await holding('300750').innerText(),
+      /本轮未获得有效决策模型结果/,
+    )
+    assert.match(
+      await candidate('002594').innerText(),
+      /等待回踩 84元[\s\S]*回踩观察[\s\S]*84元[\s\S]*止损[\s\S]*目标/,
+    )
+    assert.match(
+      await candidate('688981').innerText(),
+      /买入 1 手[\s\S]*买入参考[\s\S]*120元[\s\S]*止损[\s\S]*目标/,
+    )
     assert.match(await candidate('600519').innerText(), /仅收藏，尚未跟踪/)
     assert.match(
       await candidate('600522').innerText(),
-      /尚无本轮V3决策/,
+      /尚无本轮系统决策/,
     )
     if (width === 1440) {
       const exitHolding = holding('000001')
@@ -72,16 +92,29 @@ try {
     const geometry = await page.evaluate(() => ({
       width: innerWidth,
       scrollWidth: document.documentElement.scrollWidth,
-      cards: [...document.querySelectorAll('.v3-card')].map((element) => {
+      accountControls: [
+        document.querySelector('.auto-ref-btn'),
+        document.querySelector('.batch-entry'),
+      ].map((element) => {
+        const box = element?.getBoundingClientRect()
+        return box ? {
+          text: element.textContent.trim(),
+          top: box.top,
+          bottom: box.bottom,
+          width: box.width,
+          height: box.height,
+        } : null
+      }),
+      cards: [...document.querySelectorAll('.decision-card')].map((element) => {
         const card = element.getBoundingClientRect()
-        const summary = element.querySelector('.v3-decision-summary').getBoundingClientRect()
+        const summary = element.querySelector('.decision-summary').getBoundingClientRect()
         const slot = element.querySelector('.card-decision-slot').getBoundingClientRect()
         const meta = element.querySelector('.card-decision-meta')?.getBoundingClientRect()
         const monitoring = element.querySelector('.monitoring-rules')
           ?.getBoundingClientRect()
         const decisionContentBottom = Math.max(
           ...[...element.querySelectorAll(
-            '.v3-decision-summary > *',
+            '.decision-summary > *',
           )].map((node) => node.getBoundingClientRect().bottom),
           summary.top,
         )
@@ -128,6 +161,21 @@ try {
       }),
     }))
     assert.equal(geometry.scrollWidth, width)
+    assert.ok(geometry.accountControls.every(Boolean))
+    assert.match(geometry.accountControls[1].text, /批量更新决策 · 6只/)
+    assert.ok(
+      Math.abs(
+        geometry.accountControls[0].height
+        - geometry.accountControls[1].height,
+      ) <= 1,
+      JSON.stringify(geometry.accountControls),
+    )
+    assert.ok(
+      geometry.accountControls.every((control) =>
+        control.width > 0 && control.height >= 40
+      ),
+      JSON.stringify(geometry.accountControls),
+    )
     for (const card of geometry.cards) {
       assert.ok(card.scrollWidth <= card.width + 1, JSON.stringify(card))
       assert.ok(card.scrollHeight <= card.height + 1, JSON.stringify(card))
@@ -184,7 +232,7 @@ try {
     await holding('600036').locator('.stock-name-link').first().click()
     await page.locator('.detail-panel').waitFor()
     assert.equal(await page.getByRole('button', { name: '深度生成', exact: true }).count(), 0)
-    assert.equal(await page.locator('.footbar-quick').innerText(), '更新 V3 决策')
+    assert.equal(await page.locator('.footbar-quick').innerText(), '更新决策')
     await page.getByRole('button', { name: '关闭个股详情', exact: true }).click()
     if ([320, 1440].includes(width)) {
       if (width === 1440) {
@@ -222,11 +270,15 @@ try {
       'desktop-row-equal-height',
       'six-states',
       'single-primary-action',
+      'holding-add-action',
       'no-deep-generation',
       'enrollment-cancel',
       'record-buy',
       't1',
       'detail-return',
+      'batch-decision-control',
+      'batch-completion-auto-hide',
+      'decision-price-strip',
       'no-overflow',
     ],
   }))

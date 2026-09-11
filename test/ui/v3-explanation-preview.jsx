@@ -11,9 +11,9 @@ const decisionId = 'decision-explanation-preview'
 const advice = {
   action: '持有',
   actionPlan: '继续持有1手，价格或账户事实变化后重新评估。',
-  quantNote: 'V3成交概率68.0%，成交后盈利概率59.0%。',
+  quantNote: '模型成交概率68.0%，成交后盈利概率59.0%。',
   fundNote: '主力与小单资金方向存在分歧。',
-  invalidation: '价格或账户事实变化后重新运行V3。',
+  invalidation: '价格或账户事实变化后重新运行决策模型。',
   decisionSource: {
     engine: 'MULTI_TASK',
     state: 'READY',
@@ -46,7 +46,7 @@ const advice = {
     generatedAt: now,
     summary: '当前持有路径的费后价值仍为正。',
     counterCase: '资金继续转弱时，持有优势可能消失。',
-    invalidation: '跌破既定风险边界后重新运行V3。',
+    invalidation: '跌破既定风险边界后重新运行决策模型。',
     evidenceGap: '缺少真实逐笔成交。',
   },
 }

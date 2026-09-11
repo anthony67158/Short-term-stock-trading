@@ -165,7 +165,7 @@ test('持仓页复用现有任务链批量更新系统决策', () => {
   assert.match(planTab, /runManualAdviceRefresh\('both', quote \|\| \{\}\)/)
   assert.match(planTab, /批量更新决策 · \$\{count\}只/)
   assert.match(planTab, /<DecisionBatchProgress quote=\{quote\} \/>/)
-  assert.match(planTab, /aria-label="V3批量更新进度"/)
+  assert.match(planTab, /aria-label="批量决策更新进度"/)
   assert.match(planTab, />\s*纳入作战\s*</)
   assert.match(planTab, /<AdviceGenerationStatus code=\{p\.code\}/)
 })

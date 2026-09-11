@@ -105,7 +105,7 @@ for (const [code, name, price, action, lots, state] of values) {
               generatedAt: now,
               summary: '当前持有路径的费后价值高于立即减仓。',
               counterCase: '资金转弱时持有优势可能消失。',
-              invalidation: '价格或账户事实变化后重新运行系统决策。',
+              invalidation: '价格或账户事实变化后重新运行决策模型。',
               evidenceGap: '缺少真实盘中逐笔成交。',
             },
           }

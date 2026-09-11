@@ -7,7 +7,7 @@ const { chromium } = await import(
 const base = process.env.UI_TEST_ORIGIN || 'http://127.0.0.1:5174'
 assert.equal(new URL(base).hostname, '127.0.0.1')
 const preview = `${base}/test/ui/v3-explanation-preview.html`
-const output = 'harness-artifacts/v3-explanation-ui'
+const output = 'harness-artifacts/decision-explanation-ui'
 await fs.mkdir(output, { recursive: true })
 const browser = await chromium.launch({
   channel: 'chrome',
@@ -33,14 +33,14 @@ try {
       name: '决策依据',
       exact: true,
     }).click()
-    const explanation = page.locator('.v3-ai-explanation')
+    const explanation = page.locator('.decision-ai-explanation')
     await explanation.waitFor()
     assert.match(
       await explanation.innerText(),
       /为什么.*最强反方.*何时失效.*证据缺口/s,
     )
     const geometry = await page.evaluate(() => {
-      const summary = document.querySelector('.v3-decision-summary')
+      const summary = document.querySelector('.decision-summary')
       const bounds = summary.getBoundingClientRect()
       return {
         width: innerWidth,
