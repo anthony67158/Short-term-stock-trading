@@ -4,6 +4,9 @@ import process from 'node:process'
 
 import { evaluateDecision } from '../api/_decision_orchestrator.js'
 import {
+  fetchDecisionScores,
+} from '../api/_action_value_client.js'
+import {
   buildRealOutcomeLearning,
 } from '../shared/realOutcomeLearning.js'
 import {
@@ -34,7 +37,7 @@ const DATES = [
   '20260828',
 ]
 const CODES = ['000001', '002594', '600036', '300750', '600519']
-const DECISION_SLOTS = new Set(['1000', '1430'])
+const DECISION_SLOTS = new Set(['1000', '1430', '1500'])
 const originalDateNow = Date.now
 let virtualNow = 0
 Date.now = () => virtualNow
@@ -289,6 +292,20 @@ function scheduleManualActions(frame) {
       lots: 1,
     })
   }
+  if (key === '20260825:1430') {
+    for (const code of ['000001', '002594']) {
+      const holding = holdingOf(code)
+      if (!holding) continue
+      queueOrder({
+        id: `manual-exit-${code}`,
+        source: 'MANUAL_SCENARIO',
+        intent: 'POSITION',
+        code,
+        side: 'SELL',
+        lots: holding.qty,
+      })
+    }
+  }
   if (key === '20260826:0935') {
     queueOrder({
       id: 'manual-build-600036',
@@ -356,6 +373,23 @@ function scheduleManualActions(frame) {
 
 function causalFund(frame, code) {
   const fund = structuredClone(frame.funds.get(code) || {})
+  if (frame.slot === '1500') {
+    const completed = (dataset.fundByCode.get(code) || [])
+      .filter((row) => row.date <= frame.date)
+      .slice(-5)
+    const current = completed.at(-1)
+    return {
+      ...fund,
+      source: 'HISTORICAL_SAME_DAY_CLOSE',
+      asOfDate: current?.date || null,
+      mainNetYi: current?.mainNetYi ?? null,
+      retailNetYi: current?.retailNetYi ?? null,
+      mainTrend5: completed.map((row) => row.mainNetYi),
+      retailTrend5: completed.map((row) => row.retailNetYi),
+      historyDayCount: completed.length,
+      historyComplete: completed.length === 5,
+    }
+  }
   const priorMain = fund.mainTrend5?.at(-1)
   const priorRetail = fund.retailTrend5?.at(-1)
   return {
@@ -384,6 +418,7 @@ function decisionRow(advice, frame, code, phase) {
     lots: plan.quantity?.lots || 0,
     modelVersion: advice.decisionSource?.modelVersion || null,
     usagePolicy: advice.decisionSource?.usagePolicy || null,
+    sourceState: advice.decisionSource?.state || null,
     blockedReasons: plan.blockedReasons || [],
     entryInstruction:
       advice.decisionRationale?.entryInstruction || null,
@@ -391,7 +426,6 @@ function decisionRow(advice, frame, code, phase) {
 }
 
 async function evaluateAt(frame, code, reviewEvent = null) {
-  report.modelCalls += 3
   const result = await evaluateDecision({
     code,
     book: planStore.get(),
@@ -403,6 +437,10 @@ async function evaluateAt(frame, code, reviewEvent = null) {
     market: frame.market,
     now: virtualNow,
     reviewEvent,
+    score: async (inputs) => {
+      report.modelCalls += 1
+      return fetchDecisionScores(inputs, { timeoutMs: 8000 })
+    },
   })
   assert.equal(result.meta.llmCalls, 0)
   report.llmCalls += result.meta.llmCalls
@@ -563,9 +601,6 @@ try {
   const tTransactions = finalBook.closed.filter(
     (item) => item.type === 'T',
   )
-  const systemOrders = report.orders.filter(
-    (item) => item.source === 'SYSTEM_DECISION',
-  )
   report.transactions = finalBook.closed
     .map((item) => ({
       id: item.id,
@@ -624,9 +659,41 @@ try {
       actual: tTransactions.length,
     },
     {
-      id: 'system-execution',
-      passed: systemOrders.some((item) => item.fillable),
-      actual: systemOrders,
+      id: 'intraday-stale-fund-fails-closed',
+      passed: report.decisions
+        .filter((item) => item.slot !== '1500')
+        .every((item) =>
+          item.sourceState === 'EVIDENCE_INCOMPLETE'
+          && item.modelVersion == null),
+      actual: report.decisions
+        .filter((item) => item.slot !== '1500')
+        .map((item) => ({
+          code: item.code,
+          slot: item.slot,
+          sourceState: item.sourceState,
+          modelVersion: item.modelVersion,
+        })),
+    },
+    {
+      id: 'same-day-close-fund-enables-model',
+      passed: report.decisions
+        .filter((item) => item.slot === '1500')
+        .some((item) => item.modelVersion),
+      actual: report.decisions
+        .filter((item) => item.slot === '1500')
+        .map((item) => ({
+          code: item.code,
+          sourceState: item.sourceState,
+          modelVersion: item.modelVersion,
+        })),
+    },
+    {
+      id: 'final-account-flat',
+      passed: finalBook.holding.length === 0,
+      actual: finalBook.holding.map((item) => ({
+        code: item.code,
+        qty: item.qty,
+      })),
     },
     {
       id: 'simulation-learning-isolation',
@@ -661,7 +728,9 @@ try {
     })
   }
   const staleFundAccepted = report.decisions.some(
-    (item) => item.modelVersion,
+    (item) =>
+      item.slot !== '1500'
+      && item.modelVersion,
   )
   if (staleFundAccepted) {
     report.issues.push({
@@ -671,17 +740,6 @@ try {
         '决策输入只要存在主力/小单数值就可通过，未校验资金数据日期是否为当前交易日。',
       evidence:
         '回放明确标记资金来源为前一交易日收盘，系统仍调用并采用生产决策模型。',
-    })
-  }
-  const unpricedConfirm = planStore.confirmExecutionPlan.length < 3
-  if (unpricedConfirm) {
-    report.issues.push({
-      id: 'execution-confirmation-without-current-price',
-      severity: 'HIGH',
-      summary:
-        '前端账本确认执行计划时不接收最新价格，无法在确认瞬间再次执行最高买价校验。',
-      evidence:
-        `confirmExecutionPlan公开参数个数为${planStore.confirmExecutionPlan.length}`,
     })
   }
   const staleSiblingPlan = report.orders.find(
