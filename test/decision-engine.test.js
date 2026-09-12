@@ -138,6 +138,70 @@ test('持仓仲裁读取任务头价值并输出完整动作向量', () => {
   )
 })
 
+test('V2持仓优化忽略旧镜像值并输出精确减仓手数', () => {
+  const held = {
+    ...payload,
+    holdQty: 4,
+    sellableTodayQty: 4,
+    holdingStopPrice: 45,
+    todayQuote: { price: 50, live: true },
+    account: {
+      stockWeight: 15,
+      maxStockWeight: 30,
+    },
+  }
+  const scoredPlan = {
+    ...plan,
+    entryPlan: { price: 50 },
+    exitPlan: {
+      hardStopPrice: 45,
+      takeProfitPrice: 60,
+    },
+    opportunityScore: {
+      ...plan.opportunityScore,
+      expectedNetR: 0.4,
+      netRLowerBound: -1.2,
+      taskValues: {
+        schemaVersion: 'decision-task-values.v1',
+        entry: { expectedNetR: 0.32, pFill: 0.8 },
+        portfolio: {
+          holdR: 0.4,
+          addExecutionAdjustedR: 0.32,
+          reduceRelativeToHoldR: 99,
+          exitRelativeToHoldR: 198,
+        },
+        risk: { q10R: -1.2, cvarR: -1.5 },
+        execution: { pFill: 0.8 },
+      },
+    },
+  }
+
+  const result = buildDecisionAction({
+    payload: held,
+    plans: [scoredPlan],
+  })
+
+  assert.equal(result.action, '减仓')
+  assert.equal(result.opQty, '减仓3手')
+  assert.equal(result.planQty, 3)
+  assert.equal(
+    result.actionValues.positionOptimization.schemaVersion,
+    'position-optimization.v2',
+  )
+  assert.equal(
+    result.actionValues.positionOptimization.selectedSellLots,
+    3,
+  )
+  assert.notEqual(
+    result.actionValues.actions.find(
+      (value) => value.action === 'EXIT',
+    ).actionUtilityR,
+    2 * result.actionValues.actions.find(
+      (value) => value.action === 'REDUCE',
+    ).actionUtilityR,
+  )
+})
+
 test('部分可卖仓位不能被仲裁成全部退出', () => {
   const result = buildDecisionAction({
     payload: {

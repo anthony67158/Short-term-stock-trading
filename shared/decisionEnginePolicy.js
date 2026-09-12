@@ -121,6 +121,21 @@ export function buildDecisionAction({
   const stop = finite(payload.holdingStopPrice)
   const sellable = state.eligibility.sellableLots
   const hardStop = state.eligibility.hardStop
+  const optimizedSellLots = Math.max(
+    0,
+    Math.trunc(
+      Number(decision.vector?.positionOptimization
+        ?.selectedSellLots) || 0,
+    ),
+  )
+  const actionLots = selling
+    ? Math.min(
+        sellable,
+        optimizedSellLots > 0
+          ? optimizedSellLots
+          : sellable,
+      )
+    : 0
   const instruction = hardStop
     ? sellable > 0
       ? `已触及账本止损${priceText(stop)}元，人工卖出可卖${sellable}手并记录成交`
@@ -133,8 +148,8 @@ export function buildDecisionAction({
         ? `加仓观察条件已确认，参考${priceText(selected.entryPlan.price)}元，手数由账户风控核定`
         : selling
           ? reviewedExit
-            ? `退出前复核后持仓价值仍不为正，${actionLabel}${sellable}手`
-            : `持仓价值不为正，先观察约60秒并重新评估；复核仍不为正再${actionLabel}${sellable}手`
+            ? `退出前复核后持仓价值仍不为正，${actionLabel}${actionLots}手`
+            : `持仓价值不为正，先观察约60秒并重新评估；复核仍不为正再${actionLabel}${actionLots}手`
           : decision.action === 'HOLD_LOCKED'
             ? '模型提示退出，但今日仓位受T+1锁定，下一可卖时段优先处理'
             : holdingAddPlan
@@ -154,9 +169,9 @@ export function buildDecisionAction({
     actionPlan: instruction,
     nextAction: instruction,
     opQty: selling
-      ? `${actionLabel}${sellable}手`
+      ? `${actionLabel}${actionLots}手`
       : decision.action === 'ADD' ? '加仓0手' : '不加仓、不减仓',
-    planQty: 0,
+    planQty: selling ? actionLots : 0,
     buyPrice: decision.action === 'BUY'
       ? selected?.entryPlan?.price ?? null
       : null,

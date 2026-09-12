@@ -104,6 +104,7 @@ export function buildActionValueVector({
   values = [],
   encoderVersion = 'legacy-feature-adapter.v1',
   routerVersion = 'deterministic-action-router.v1',
+  positionOptimization = null,
 } = {}) {
   if (
     state?.eligibility?.schemaVersion
@@ -130,6 +131,11 @@ export function buildActionValueVector({
     encoderVersion: text(encoderVersion, 120),
     routerVersion: text(routerVersion, 120),
     actions,
+    positionOptimization:
+      positionOptimization?.schemaVersion
+        === 'position-optimization.v2'
+        ? positionOptimization
+        : null,
     evidenceCoverage: {
       complete: state.evidence?.complete === true,
       missingCount: state.evidence?.missing?.length || 0,

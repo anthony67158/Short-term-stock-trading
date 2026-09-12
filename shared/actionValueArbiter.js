@@ -5,6 +5,9 @@ import {
 import {
   isExecutableOpportunityScore,
 } from './opportunityScoreContract.js'
+import {
+  optimizePositionActions,
+} from './positionActionOptimizer.js'
 import { isTriggeredReviewEvent } from './triggeredReviewDecision.js'
 
 export const ACTION_VALUE_ARBITER_VERSION =
@@ -94,6 +97,58 @@ function actionValue(plan, action, eligibility) {
   })
 }
 
+function optimizedPositionValue(
+  plan,
+  candidate,
+  eligibility,
+) {
+  const value = actionValueFromOpportunityScore({
+    action: candidate.action,
+    route: plan.route,
+    score: plan.opportunityScore,
+    eligibility,
+    metrics: {
+      expectedNetR: candidate.remainingExpectedR,
+      q10R: -candidate.remainingTailPenaltyR,
+      cvarR: plan.opportunityScore.expectedShortfall10,
+      pFill: 1,
+      executionCostR: candidate.sellCostR,
+      uncertaintyPenaltyR:
+        candidate.remainingTailPenaltyR
+        + candidate.switchPenaltyR,
+    },
+  })
+  return {
+    ...value,
+    positionCandidate: candidate,
+  }
+}
+
+function positionOptimizationFor(plan, state) {
+  if (!plan) return null
+  const score = plan.opportunityScore
+  return optimizePositionActions({
+    expectedHoldR: metric(
+      score,
+      ['portfolio', 'holdR'],
+      Number(score.expectedNetR),
+    ),
+    lowerBoundR: metric(
+      score,
+      ['risk', 'q10R'],
+      Number(score.netRLowerBound),
+    ),
+    price: state.quote.price,
+    hardStopPrice:
+      state.position.hardStopPrice
+      ?? plan.exitPlan?.hardStopPrice,
+    totalLots: state.eligibility.totalLots,
+    sellableLots: state.eligibility.sellableLots,
+    stockWeightPct: state.position.stockWeightPct,
+    maxStockWeightPct: state.account.maxStockWeightPct,
+  })
+}
+
 function bestCandidate(candidates) {
   const objective = (candidate) => {
     if (['BUY', 'ADD'].includes(candidate.action) && candidate.plan.targetPosition) {
@@ -139,13 +194,33 @@ export function arbitrateActionValues({
     )
   const immediate = scored.find((plan) => plan.route === 'IMMEDIATE')
     || null
+  const positionOptimization = state.eligibility.held
+    ? positionOptimizationFor(immediate, state)
+    : null
+  const optimizedPositionCandidates = (
+    positionOptimization?.state === 'READY'
+  ) ? ['HOLD', 'REDUCE', 'EXIT']
+      .map((action) => positionOptimization.actions[action])
+      .filter(Boolean)
+      .map((candidate) => ({
+        action: candidate.action,
+        plan: immediate,
+        value: optimizedPositionValue(
+          immediate,
+          candidate,
+          state.eligibility,
+        ),
+      }))
+    : null
   const candidates = state.eligibility.held
     ? [
-        ...(immediate ? ['HOLD', 'REDUCE', 'EXIT'].map((action) => ({
-          action,
-          plan: immediate,
-          value: actionValue(immediate, action, state.eligibility),
-        })) : []),
+        ...(optimizedPositionCandidates || (
+          immediate ? ['HOLD', 'REDUCE', 'EXIT'].map((action) => ({
+            action,
+            plan: immediate,
+            value: actionValue(immediate, action, state.eligibility),
+          })) : []
+        )),
         ...scored.map((plan) => ({
           action: 'ADD',
           plan,
@@ -163,6 +238,7 @@ export function arbitrateActionValues({
     values: candidates.map((candidate) => candidate.value),
     encoderVersion: engine.stateEncoder || 'feature-adapter.v1',
     routerVersion: engine.router || 'deterministic-action-router.v1',
+    positionOptimization,
   })
   if (state.eligibility.hardStop) {
     return {
@@ -218,7 +294,11 @@ export function arbitrateActionValues({
     )),
   )
   const currentAction = current?.action || 'HOLD'
-  const currentPositive = actionUtility(immediate, 'HOLD') > 0
+  const currentPositive = (
+    positionOptimization?.state === 'READY'
+      ? positionOptimization.actions.HOLD.actionUtilityR
+      : actionUtility(immediate, 'HOLD')
+  ) > 0
   if (
     addReview(state.review)
     && state.quote.live === true
