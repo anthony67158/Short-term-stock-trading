@@ -87,15 +87,12 @@ python3 upload_decision_model.py \
 
 每日原始市场数据不依赖 Tushare。GitHub Actions 使用仓库 Secret
 `QUANT_KEY` 调用杭州量化 FC 的 `POST /archive-market-day`，由 FC 使用
-TickFlow（可选）、东方财富和腾讯采集行情，完整性通过后写入 OSS。
-TickFlow 只提供日线和分钟 OHLCV，东方财富继续提供主力/小单资金流，腾讯
-作为分钟线逐股回退。`TICKFLOW_ARCHIVE_MODE` 支持 `off`、`shadow` 和
-`primary`，默认 `off`；影子模式只记录覆盖率，不改变训练数据。切换主源前
-必须使用重新生成且未暴露的 `TICKFLOW_API_KEY` 完成连续交易日验收。
-`daily-retrain.yml` 不读取 `TUSHARE_TOKEN`；Tushare 只保留为人工历史回填
-工具。夜间定时任务必须获得最新完整交易日分片，并读回校验 OSS 日线、资金
-流、1,000 股分钟池及至少 85% 覆盖率；端点失败、分片缺失或覆盖不足会直接
-阻断决策模型训练。
+东方财富全市场/历史 5 分钟接口并以腾讯 5 分钟接口兜底，完整性通过后写入
+OSS。`daily-retrain.yml` 不读取 `TUSHARE_TOKEN`；Tushare 只保留为人工历史
+回填工具。夜间定时任务必须获得最新完整交易日分片，并读回校验 OSS 日线、
+资金流、1,000 股分钟池及至少 85% 覆盖率；端点失败、分片缺失或覆盖不足
+会直接阻断决策模型训练。盘中手动任务收到 `market_open_skipped` 时可使用已
+校验的最近完整分片，不会把未收盘数据写入 OSS。
 
 实时价格与日线优先读取同花顺扶摇，环境变量为 `FUYAO_API_KEY`；东方财富
 继续补充换手、行业与资金字段，腾讯作为公开行情兜底。扶摇成交额不会被误作
