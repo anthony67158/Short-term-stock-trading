@@ -103,41 +103,6 @@ const REVIEW_STATUS_ICON = Object.freeze({
   stopped: 'close',
 })
 
-const CARD_DETAIL_CONTROL_SELECTOR = [
-  'a[href]',
-  'button',
-  'input',
-  'select',
-  'textarea',
-  'label',
-  'summary',
-  '[contenteditable="true"]',
-  '[role="button"]',
-  '[role="link"]',
-  '[role="checkbox"]',
-  '[role="switch"]',
-  '.buy-inline-wrap',
-  '.cost-edit-form',
-  '.plan-edit',
-  '.pc-alert-box',
-  '.pc-actions',
-  '.pi-actions',
-].join(',')
-
-function openDetailFromCardEvent(event, code, name) {
-  if (event.defaultPrevented) return
-  const control = event.target?.closest?.(CARD_DETAIL_CONTROL_SELECTOR)
-  if (control && control !== event.currentTarget) return
-  openStockDetail(code, name)
-}
-
-function openDetailFromCardKey(event, code, name) {
-  if (event.target !== event.currentTarget) return
-  if (event.key !== 'Enter' && event.key !== ' ') return
-  event.preventDefault()
-  openStockDetail(code, name)
-}
-
 function CandidateReviewStatus({
   code,
   alerts,
@@ -291,6 +256,7 @@ const POSITION_ACTION_STATE = Object.freeze({
   READY: { label: '现在执行', tone: 'buy', icon: 'target' },
   RISK_BLOCKED: { label: '风险受限', tone: 'danger', icon: 'shield' },
   CONFIRMING: { label: '正在复核', tone: 'warning', icon: 'clock' },
+  MARKET_CLOSED: { label: '下个交易时段', tone: 'waiting', icon: 'clock' },
   WAITING: { label: '系统盯盘', tone: 'waiting', icon: 'radar' },
 })
 
@@ -309,6 +275,9 @@ function PositionActionStrip({ state }) {
   const hardActions = immediate.filter((item) =>
     ['CONFLICT', 'RISK_EXIT', 'READY_EXIT'].includes(item.state)
   )
+  const deferred = actions.filter((item) =>
+    item.state === 'MARKET_CLOSED'
+  )
   const visible = hardActions.length
     ? [
         ...hardActions,
@@ -324,6 +293,8 @@ function PositionActionStrip({ state }) {
       ? '云端动作暂未更新，卡片继续显示最近有效计划'
       : immediate.length
         ? `${immediate.length} 项需要处理`
+        : deferred.length
+          ? `${deferred.length} 项下个交易时段处理`
         : '现在不用操作'
   return (
     <section
@@ -1380,13 +1351,7 @@ function PlanList({ book, quote, stockTags }) {
     return (
       <div className={'trade-card plan-cand stock-detail-card-hitarea decision-card' + (cardAdvice ? ' has-advice' : ' no-advice') + (p.star ? ' starred' : '')}
         key={p.code}
-        data-code={p.code}
-        role="button"
-        tabIndex={0}
-        aria-haspopup="dialog"
-        aria-label={`查看${cardName}详情与K线`}
-        onClick={(event) => openDetailFromCardEvent(event, p.code, cardName)}
-        onKeyDown={(event) => openDetailFromCardKey(event, p.code, cardName)}>
+        data-code={p.code}>
         {/* 顶行：左=股名/代码/标签，右=现价；量化分跟随建议生成信息显示。 */}
         <div className="pc-top">
           <div className="pc-name">
@@ -2032,7 +1997,7 @@ function HoldOverview({ book, quote }) {
         {pf.available != null && <span className="ho-sub muted">可用 {fmtMoney(pf.available).replace('+', '')}</span>}
       </div>
       <div className={'ho-cell ho-alert' + (urgent.length ? ' on' : '')}>
-        <span className="ho-k">需处理</span>
+        <span className="ho-k">当前触发</span>
         {urgent.length
           ? <span className="ho-v alert-num" title={urgent.map((h) => h.name).join('、')}>{urgent.length} 只</span>
           : <span className="ho-v muted">无</span>}
@@ -3128,15 +3093,6 @@ function HoldingItem({ h, quote: q }) {
       )}
       <div className={'trade-card hold-item stock-detail-card-hitarea decision-card' + (holdAdvice ? ' has-advice' : ' no-advice')} {...swipe.bind}
         data-code={h.code}
-        role="button"
-        tabIndex={0}
-        aria-haspopup="dialog"
-        aria-label={`查看${h.name}详情与K线`}
-        onClick={(event) => {
-          if (swipe.swiping || Math.abs(swipe.dx) > 4) return
-          openDetailFromCardEvent(event, h.code, h.name)
-        }}
-        onKeyDown={(event) => openDetailFromCardKey(event, h.code, h.name)}
         style={swipe.dx ? { transform: `translateX(${swipe.dx}px)`, transition: swipe.swiping ? 'none' : 'transform .2s ease' } : undefined}>
       {/* 身份行聚合股票身份、现价和盈亏；仓位与成本留在稳定指标带。 */}
       <div className="hold-head">

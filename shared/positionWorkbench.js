@@ -13,6 +13,9 @@ import {
   rankWatchlistCandidates,
   watchlistActionValue,
 } from './watchlistRanking.js'
+import {
+  formatAccountRiskBlocker,
+} from './accountRiskPresentation.js'
 
 export const POSITION_WORKBENCH_VERSION = 'position-workbench.v1'
 
@@ -38,6 +41,7 @@ function commandPriority(command) {
     READY: 2,
     RISK_BLOCKED: 3,
     CONFIRMING: 3,
+    MARKET_CLOSED: 3,
     WAITING: 4,
     HOLDING: 5,
     EMPTY: 6,
@@ -84,6 +88,7 @@ export function buildTodayCommandList({
     watchlist,
     scopes: ['watch'],
   }).watchCodes)
+  const tradingOpen = isContinuousTrading(now)
   const all = [...holding, ...watchlist]
   const seen = new Set()
   for (const item of all) {
@@ -167,7 +172,7 @@ export function buildTodayCommandList({
       && stop > 0
       && currentPrice > 0
       && currentPrice <= stop
-      && isContinuousTrading(now)
+      && tradingOpen
       && quote.isLivePrice !== false
     const sellable = stopReached
       ? t1StatusOf(
@@ -177,6 +182,19 @@ export function buildTodayCommandList({
           now,
         ).sellableToday
       : null
+    const reviewPending = (
+      view?.exitReviewRequired === true
+      || ['confirming', 'reviewing'].includes(alertPhase)
+    )
+    const decisionActionable = (
+      view?.actionable === true
+      && ['buy', 'add', 'reduce', 'sell'].includes(kind)
+    )
+    const marketDeferred = !tradingOpen && (
+      reviewPending
+      || executionReady
+      || decisionActionable
+    )
     const commandState = stopReached
       ? 'RISK_EXIT'
       : planConflict
@@ -186,7 +204,9 @@ export function buildTodayCommandList({
           : ['USER_CONFIRMED', 'PARTIALLY_RECORDED']
               .includes(executionPlan?.status)
             ? 'RECORD'
-            : executionReady && isContinuousTrading(now)
+            : marketDeferred
+              ? 'MARKET_CLOSED'
+            : executionReady && tradingOpen
               ? exitSide ? 'READY_EXIT' : 'READY'
               : view?.exitReviewRequired === true
                 ? 'CONFIRMING'
@@ -215,6 +235,10 @@ export function buildTodayCommandList({
           : '触及止损，今日仓位锁定'
         : planConflict
           ? '计划冲突，暂停操作'
+          : marketDeferred
+            ? exitSide
+              ? '下个交易时段复核'
+              : '下个交易时段再判断'
           : executionPlan?.actionLabel || actionLabel,
       alertPhase,
       distancePct: distancePct != null
@@ -230,6 +254,8 @@ export function buildTodayCommandList({
         ? `现价${currentPrice}元已到止损${stop}元；今日可卖${sellable || 0}手，不加仓摊平`
         : planConflict
           ? '执行队列与最新决策方向相反，请先核对已有计划'
+          : marketDeferred
+            ? '当前休市；下个交易时段收到有效报价后再观察和确认，休市期间不执行'
           : executionPlan?.trigger || (view ? `${view.headline}；${view.reason}` : '请更新系统决策'),
       stopPrice: executionPlan?.stopPrice
         ?? advice?.decisionPlan?.prices?.stop
@@ -266,11 +292,7 @@ export function buildTodayCommandList({
         command.quantity = ''
         command.keyPrice = null
         command.instruction = [
-          ...riskBlockers.map((blocker) => `${blocker.message}${
-            blocker.value != null && blocker.limit > 0
-              ? `（当前${blocker.value}，上限${blocker.limit}）`
-              : ''
-          }`),
+          ...riskBlockers.map(formatAccountRiskBlocker),
           currentRisk && !currentRisk.complete
             ? '账户或报价未完整'
             : '',

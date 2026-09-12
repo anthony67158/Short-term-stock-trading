@@ -240,7 +240,7 @@ test('异常数值统一降级，交易复盘不会渲染 NaN', () => {
 })
 
 test('操作建议生成时间使用固定月日时分格式且拒绝非法时间', () => {
-  const at = new Date(2026, 7, 13, 9, 5).getTime()
+  const at = Date.parse('2026-08-13T01:05:00.000Z')
   assert.equal(formatAdviceTime(at), '08-13 09:05')
   assert.equal(formatAdviceTime(null), '')
   assert.equal(formatAdviceTime('bad'), '')

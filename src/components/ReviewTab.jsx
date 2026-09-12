@@ -153,19 +153,21 @@ function DecisionClosure({ book, simulation }) {
             <div className="rv-attr-s">{stats.actionableRecommendations} 条可执行 · {stats.pending} 条待执行</div>
           </div>
           <div className="rv-attr-cell">
-            <div className="rv-attr-k">建议后执行</div>
+            <div className="rv-attr-k">可执行后成交</div>
             <div className="rv-attr-v">{stats.executedRecommendations}</div>
-            <div className="rv-attr-s">同股同方向、24 小时内</div>
+            <div className="rv-attr-s">仅统计同股同方向的可执行决策</div>
           </div>
           <div className="rv-attr-cell">
             <div className="rv-attr-k">{terms.executionLabel}</div>
             <div className="rv-attr-v">{stats.executions}</div>
-            <div className="rv-attr-s">{stats.linkedExecutions} 笔关联到建议</div>
+            <div className="rv-attr-s">
+              其中 {stats.linkedExecutions} 笔可追溯到任一历史决策
+            </div>
           </div>
           <div className="rv-attr-cell">
             <div className="rv-attr-k">采纳率</div>
             <div className="rv-attr-v">{stats.adoptionRate == null ? '--' : stats.adoptionRate + '%'}</div>
-            <div className="rv-attr-s">已执行建议 / 全部建议</div>
+            <div className="rv-attr-s">可执行决策实际执行 / 可执行决策</div>
           </div>
         </div>
       )}

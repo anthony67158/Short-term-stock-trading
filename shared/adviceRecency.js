@@ -1,3 +1,5 @@
+import { beijingDate } from './tradingCalendar.js'
+
 function pad(value) {
   return String(value).padStart(2, '0')
 }
@@ -14,8 +16,8 @@ function timeOf(date) {
 
 export function adviceRecency(timestamp, now = Date.now()) {
   if (timestamp == null || timestamp === '') return null
-  const generatedAt = new Date(timestamp)
-  const current = new Date(now)
+  const generatedAt = beijingDate(timestamp)
+  const current = beijingDate(now)
   if (
     !Number.isFinite(generatedAt.getTime())
     || !Number.isFinite(current.getTime())

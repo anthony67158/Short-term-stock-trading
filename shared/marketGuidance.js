@@ -18,6 +18,33 @@ function targetPosition(regime = {}) {
     : '按军师风险预算'
 }
 
+export function effectiveSentimentScore({
+  score,
+  breadth = {},
+  breakRate,
+} = {}) {
+  let result = finite(score)
+  if (result == null) return null
+  const up = finite(breadth.up)
+  const down = finite(breadth.down)
+  const limitDown = finite(breadth.limitDown)
+  const ratio = down > 0
+    ? (up || 0) / down
+    : null
+  if (ratio != null && ratio <= 0.2) {
+    result = Math.min(result, 30)
+  } else if (ratio != null && ratio <= 0.35) {
+    result = Math.min(result, 38)
+  }
+  if (limitDown != null && limitDown >= 20) {
+    result = Math.min(result, 35)
+  }
+  if (finite(breakRate) >= 35) {
+    result = Math.min(result, 39)
+  }
+  return Math.round(Math.max(0, Math.min(100, result)))
+}
+
 export function buildMarketBoardGuidance({
   regime = {},
   indices = [],

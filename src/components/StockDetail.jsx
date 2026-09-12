@@ -1181,6 +1181,9 @@ export default function StockDetail({ stock, onClose }) {
                   const resonance = meta.resonance
                   const marketEnv = meta.marketEnv
                   const generationMetrics = quantState.generationMetrics
+                  const exitDecisionActive = ['REDUCE', 'EXIT'].includes(
+                    adv?.decisionPlan?.action,
+                  ) || adv?.decisionSource?.exitReviewRequired === true
                   const cachedStr = quantState.cachedAt ? new Date(quantState.cachedAt).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : null
                   return (
                     <>
@@ -1246,13 +1249,17 @@ export default function StockDetail({ stock, onClose }) {
                         <div className="fc-fold-wrap">
                           <button className="fc-fold" onClick={() => setShowForecast((v) => !v)}>
                             <span className="fc-fold-summary">
-                              {primaryFc && (
+                              {exitDecisionActive ? (
+                                <span className="fc-dir-inline muted">
+                                  辅助走势数据 · 不改变上方退出复核
+                                </span>
+                              ) : primaryFc && (
                                 <span className={'fc-dir-inline production ' + (primaryFc.direction === '看涨' ? 'red' : primaryFc.direction === '看跌' ? 'green' : 'muted')}>
                                   {primaryWindow.shortLabel}{primaryFc.direction}·概率{primaryFc.upProb}%·{fmtRaw(primaryFc.targetLow)}~{fmtRaw(primaryFc.targetHigh)}
                                 </span>
                               )}
-                              {fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{fc.days || 5}日{fc.direction}·概率{fc.upProb}%</span>}
-                              {q.score != null && <span className={'quant-chip sm ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score}·{q.bias}</span>}
+                              {!exitDecisionActive && fc && <span className={'fc-dir-inline ' + (fc.direction === '看涨' ? 'red' : fc.direction === '看跌' ? 'green' : 'muted')}>量化{fc.days || 5}日{fc.direction}·概率{fc.upProb}%</span>}
+                              {!exitDecisionActive && q.score != null && <span className={'quant-chip sm ' + (q.score >= 62 ? 'red' : q.score <= 38 ? 'green' : 'gold')}>量化 {q.score}·{q.bias}</span>}
                             </span>
                             <Icon name={showForecast ? 'chevronDown' : 'chevronRight'} size={13} />
                           </button>

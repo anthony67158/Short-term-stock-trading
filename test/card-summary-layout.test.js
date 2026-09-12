@@ -24,7 +24,8 @@ const fixedCards = precision.slice(precision.indexOf(fixedCardMarker))
 
 test('持仓与自选卡直接展示核心摘要并保留详情入口', () => {
   assert.equal((planTab.match(/<DecisionSummary/g) || []).length, 3)
-  assert.match(planTab, /openDetailFromCardEvent/)
+  assert.match(planTab, /<StockName[\s\S]{0,100}code={p\.code}/)
+  assert.match(planTab, /<StockName[\s\S]{0,100}code={h\.code}/)
   assert.match(planTab, /decisionPresentation/)
   assert.doesNotMatch(planTab, /CardAdviceDisclosure|embeddedFull/)
   assert.doesNotMatch(planTab, /useLayoutEffect/)
@@ -86,28 +87,22 @@ test('卡片主结论使用统一的重要程度与交易语义色', () => {
   )
 })
 
-test('持仓与自选支持整卡进入详情且保留卡内独立操作', () => {
-  assert.match(
+test('持仓与自选通过股票名称进入详情且外层卡片不伪装按钮', () => {
+  assert.doesNotMatch(planTab, /openDetailFromCardEvent/)
+  assert.doesNotMatch(planTab, /CARD_DETAIL_CONTROL_SELECTOR/)
+  assert.doesNotMatch(
     planTab,
-    /const CARD_DETAIL_CONTROL_SELECTOR = \[[\s\S]*?'button'[\s\S]*?'input'[\s\S]*?'\.pc-actions'[\s\S]*?'\.pi-actions'/s,
+    /trade-card plan-cand stock-detail-card-hitarea[\s\S]{0,300}role="button"/s,
   )
-  assert.match(
+  assert.doesNotMatch(
     planTab,
-    /function openDetailFromCardEvent\(event, code, name\)\s*{[\s\S]*?control !== event\.currentTarget[\s\S]*?openStockDetail\(code, name\)/s,
-  )
-  assert.match(
-    planTab,
-    /trade-card plan-cand stock-detail-card-hitarea[\s\S]*?role="button"[\s\S]*?onClick=\{\(event\) => openDetailFromCardEvent/s,
-  )
-  assert.match(
-    planTab,
-    /trade-card hold-item stock-detail-card-hitarea[\s\S]*?role="button"[\s\S]*?onClick={\(event\) => {[\s\S]*?openDetailFromCardEvent\(event, h\.code, h\.name\)/s,
+    /trade-card hold-item stock-detail-card-hitarea[\s\S]{0,300}role="button"/s,
   )
   assert.match(planTab, /<StockName[\s\S]{0,100}code={p\.code}/)
   assert.match(planTab, /<StockName[\s\S]{0,100}code={h\.code}/)
   assert.match(
     precision,
-    /\.stock-detail-card-hitarea\s*{[^}]*cursor:\s*pointer[^}]*}[\s\S]*?\.stock-detail-card-hitarea:focus-visible\s*{[^}]*outline:\s*2px solid var\(--color-focus\)/s,
+    /\.stock-detail-card-hitarea\s*{[^}]*cursor:\s*default[^}]*}/s,
   )
 })
 

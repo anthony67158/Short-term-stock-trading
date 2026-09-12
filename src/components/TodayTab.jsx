@@ -98,6 +98,11 @@ const COMMAND_STATE = {
     tone: 'warning',
     icon: 'clock',
   },
+  MARKET_CLOSED: {
+    label: '下个交易时段',
+    tone: 'waiting',
+    icon: 'clock',
+  },
   WAITING: {
     label: '等待条件',
     tone: 'waiting',
@@ -178,6 +183,7 @@ function CombatCommandCenter({
     [
       'RISK_BLOCKED',
       'CONFIRMING',
+      'MARKET_CLOSED',
       'WAITING',
     ].includes(item.state)
   ).slice(0, 6)

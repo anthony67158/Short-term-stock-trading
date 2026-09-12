@@ -92,6 +92,49 @@ test('当前指令优先展示退出复核但不提前暴露可执行手数', ()
   assert.equal(commands[1].riskAmount, 180)
 })
 
+test('休市时退出复核明确延期到下个交易时段', () => {
+  const closedNow = Date.parse('2026-09-12T02:00:00.000Z')
+  const commands = buildTodayCommandList({
+    book: {
+      holding: [{
+        code: '600001',
+        name: '休市持仓',
+        qty: 3,
+        buyPrice: 10,
+        buyAt: closedNow - 86400000,
+      }],
+      plan: [],
+      alerts: [],
+      executionPlans: [],
+    },
+    quoteMap: {
+      '600001': {
+        price: 9.9,
+        isLivePrice: false,
+      },
+    },
+    adviceFor: () => entry({
+      mode: 'hold_advice',
+      action: '减仓',
+      actionPlan: '退出前复核',
+      decisionPlan: {
+        schemaVersion: 'decision-plan.v2',
+        action: 'REDUCE',
+        actionability: 'READY',
+        quantity: { lots: 2 },
+        prices: { reference: 10, stop: 9.8 },
+        validUntil: new Date(closedNow + 86400000).toISOString(),
+      },
+    }),
+    now: closedNow,
+  })
+
+  assert.equal(commands[0].state, 'MARKET_CLOSED')
+  assert.equal(commands[0].actionLabel, '下个交易时段复核')
+  assert.match(commands[0].instruction, /当前休市/)
+  assert.doesNotMatch(commands[0].instruction, /正在复核/)
+})
+
 test('执行计划与最新建议方向冲突时只输出冲突状态', () => {
   const commands = buildTodayCommandList({
     book: {

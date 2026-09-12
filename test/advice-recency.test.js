@@ -3,30 +3,30 @@ import assert from 'node:assert/strict'
 
 import { adviceRecency } from '../shared/adviceRecency.js'
 
-const now = new Date(2026, 7, 16, 15, 0).getTime()
+const now = Date.parse('2026-08-16T07:00:00.000Z')
 
 test('最近一小时的建议用相对时间突出新鲜度', () => {
   assert.deepEqual(
-    adviceRecency(new Date(2026, 7, 16, 14, 58).getTime(), now),
+    adviceRecency(Date.parse('2026-08-16T06:58:00.000Z'), now),
     { label: '刚刚', tone: 'fresh' },
   )
   assert.deepEqual(
-    adviceRecency(new Date(2026, 7, 16, 14, 35).getTime(), now),
+    adviceRecency(Date.parse('2026-08-16T06:35:00.000Z'), now),
     { label: '25分钟前', tone: 'fresh' },
   )
 })
 
 test('当天、昨天和更早的建议给出清晰时间层级', () => {
   assert.deepEqual(
-    adviceRecency(new Date(2026, 7, 16, 9, 0).getTime(), now),
+    adviceRecency(Date.parse('2026-08-16T01:00:00.000Z'), now),
     { label: '今天 09:00', tone: 'today' },
   )
   assert.deepEqual(
-    adviceRecency(new Date(2026, 7, 15, 14, 30).getTime(), now),
+    adviceRecency(Date.parse('2026-08-15T06:30:00.000Z'), now),
     { label: '昨天 14:30', tone: 'older' },
   )
   assert.deepEqual(
-    adviceRecency(new Date(2026, 7, 12, 10, 0).getTime(), now),
+    adviceRecency(Date.parse('2026-08-12T02:00:00.000Z'), now),
     { label: '08-12 10:00', tone: 'older' },
   )
 })

@@ -41,3 +41,21 @@ test('交易复盘按模拟账户切换语义且负期望不再称为可赚', ()
     /当前账本中的真实费后卖出结果/,
   )
 })
+
+test('散户主路径隐藏工程入口且股票卡不再嵌套按钮角色', () => {
+  const auth = source('../src/components/AuthGate.jsx')
+  const plan = source('../src/components/PlanTab.jsx')
+  const review = source('../src/components/ReviewTab.jsx')
+  assert.match(auth, /高级设置/)
+  assert.match(auth, /advancedOpen/)
+  assert.doesNotMatch(
+    plan,
+    /className=\{'trade-card hold-item[\s\S]{0,400}role="button"/,
+  )
+  assert.doesNotMatch(
+    plan,
+    /className=\{'trade-card plan-cand[\s\S]{0,400}role="button"/,
+  )
+  assert.match(review, />可执行后成交</)
+  assert.match(review, /可执行决策实际执行/)
+})

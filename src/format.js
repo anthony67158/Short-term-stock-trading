@@ -1,3 +1,5 @@
+import { beijingDate } from '../shared/tradingCalendar.js'
+
 // 格式化工具
 export function finiteNum(v, fallback = 0) {
   const n = Number(v);
@@ -50,8 +52,9 @@ export function timeStr(ts) {
 
 export function formatAdviceTime(ts) {
   if (ts == null || ts === '') return '';
-  const d = new Date(ts);
-  if (!Number.isFinite(d.getTime())) return '';
+  const raw = new Date(ts);
+  if (!Number.isFinite(raw.getTime())) return '';
+  const d = beijingDate(raw);
   const pad = (value) => String(value).padStart(2, '0');
   return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }

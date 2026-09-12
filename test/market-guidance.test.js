@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   buildMarketBoardGuidance,
   buildSentimentGuidance,
+  effectiveSentimentScore,
 } from '../shared/marketGuidance.js'
 
 test('指数偏弱但上涨家数占优时解释为结构性赚钱行情', () => {
@@ -105,4 +106,28 @@ test('情绪数据缺失时不编造赚钱效应结论', () => {
   assert.equal(guidance.tone, 'muted')
   assert.match(guidance.conclusion, /数据不足/)
   assert.match(guidance.action, /等待涨跌停与炸板数据恢复/)
+})
+
+test('极弱涨跌广度会压低孤立的中性情绪分', () => {
+  const score = effectiveSentimentScore({
+    score: 53,
+    breadth: {
+      up: 657,
+      down: 4922,
+      limitDown: 21,
+    },
+    breakRate: 31,
+  })
+
+  assert.ok(score < 40)
+  assert.equal(
+    buildSentimentGuidance({
+      score,
+      ztCount: 40,
+      zbCount: 18,
+      breakRate: 31,
+      b: { limitDown: 21 },
+    }).tone,
+    'risk',
+  )
 })

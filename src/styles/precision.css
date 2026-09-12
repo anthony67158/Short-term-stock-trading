@@ -16162,12 +16162,7 @@ button:is(
 }
 
 .stock-detail-card-hitarea {
-  cursor: pointer;
-}
-
-.stock-detail-card-hitarea:focus-visible {
-  outline: 2px solid var(--color-focus);
-  outline-offset: 2px;
+  cursor: default;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -17239,10 +17234,6 @@ html[data-theme="light"] .plan-cand.starred {
     );
     box-shadow: var(--shadow-trade-card-hover);
   }
-}
-
-.stock-detail-card-hitarea:active {
-  box-shadow: var(--shadow-trade-card-pressed);
 }
 
 .plan-cand.starred,

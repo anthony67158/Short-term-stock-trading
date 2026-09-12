@@ -1,4 +1,7 @@
 import { buildAccountRiskContext } from '../../shared/accountRiskBudget.js'
+import {
+  formatAccountRiskBlocker,
+} from '../../shared/accountRiskPresentation.js'
 import Icon from './Icon'
 
 function money(value) {
@@ -18,7 +21,7 @@ export default function AccountRiskStrip({ book, quotes, risk: suppliedRisk }) {
       </div>
       {risk.breaker.blockers.length > 0 ? (
         <p role="status">{risk.breaker.blockers.map((item) =>
-          `${item.message}${item.value != null && item.limit > 0 ? `（当前${item.value}，上限${item.limit}）` : ''}`
+          formatAccountRiskBlocker(item)
         ).join('；')}</p>
       ) : !risk.complete ? <p role="status">账户或持仓报价尚未完整，暂不提供新增仓位预算。</p> : null}
     </section>

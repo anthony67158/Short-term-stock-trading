@@ -104,6 +104,7 @@ export function AccountMenu() {
   const theme = useTheme()
   const searchConfig = useAiSearchConfig()
   const [open, setOpen] = useState(false)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
   const [deactivateOpen, setDeactivateOpen] = useState(false)
   const [deactivateBusy, setDeactivateBusy] = useState(false)
   const [deactivateError, setDeactivateError] = useState('')
@@ -135,12 +136,18 @@ export function AccountMenu() {
 
   return (
     <div className="acct-wrap">
-      <button type="button" className="acct-btn" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((o) => !o)} title="账号">
+      <button type="button" className="acct-btn" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((value) => {
+        if (value) setAdvancedOpen(false)
+        return !value
+      })} title="账号">
         <Icon name="user" size={13} /><span>{user}</span><Icon name="chevronDown" size={12} />
       </button>
       {open && (
         <>
-          <button type="button" className="acct-mask" aria-label="关闭账号菜单" onClick={() => setOpen(false)} />
+          <button type="button" className="acct-mask" aria-label="关闭账号菜单" onClick={() => {
+            setOpen(false)
+            setAdvancedOpen(false)
+          }} />
           <div className="acct-menu" role="menu">
             <div className="acct-menu-label" title={syncError || ''}>当前账号 · {syncLabel}</div>
             {(
@@ -170,9 +177,6 @@ export function AccountMenu() {
                   : '立即重试云端同步'}
               </button>
             )}
-            <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false) }}>
-              <Icon name="brain" size={13} />模型配置
-            </button>
             <button
               type="button"
               role="menuitemcheckbox"
@@ -190,13 +194,34 @@ export function AccountMenu() {
               <span className="acct-search-state">{searchConfig.enabled ? '开' : '关'}</span>
               <span className="acct-search-track"><span /></span>
             </button>
-            <button type="button" role="menuitem" className="acct-item" onClick={() => { aiSearchConfigStore.open(); setOpen(false) }}>
-              <Icon name="edit" size={13} />
-              {searchConfig.hasKey ? '更换豆包 API Key' : '配置豆包 API Key'}
+            <button
+              type="button"
+              role="menuitem"
+              className="acct-item"
+              aria-expanded={advancedOpen}
+              onClick={() => setAdvancedOpen((value) => !value)}
+            >
+              <Icon name="settings" size={13} />
+              高级设置
+              <Icon
+                name={advancedOpen ? 'chevronDown' : 'chevronRight'}
+                size={12}
+              />
             </button>
-            <button type="button" role="menuitem" className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false) }}>
-              <Icon name="gauge" size={13} />模型训练发布
-            </button>
+            {advancedOpen && (
+              <div className="acct-advanced" role="group" aria-label="高级设置">
+                <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open(); setOpen(false); setAdvancedOpen(false) }}>
+                  <Icon name="brain" size={13} />模型配置
+                </button>
+                <button type="button" role="menuitem" className="acct-item" onClick={() => { aiSearchConfigStore.open(); setOpen(false); setAdvancedOpen(false) }}>
+                  <Icon name="edit" size={13} />
+                  {searchConfig.hasKey ? '更换豆包 API Key' : '配置豆包 API Key'}
+                </button>
+                <button type="button" role="menuitem" className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false); setAdvancedOpen(false) }}>
+                  <Icon name="gauge" size={13} />模型训练发布
+                </button>
+              </div>
+            )}
             <button type="button" role="menuitem" className="acct-item" onClick={() => themeStore.toggle()}>
               <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={13} />
               {theme === 'dark' ? '切到浅色模式' : '切到深色模式'}

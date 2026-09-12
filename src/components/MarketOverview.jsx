@@ -6,6 +6,7 @@ import { deriveMarketRegime } from '../../shared/marketRegime.js'
 import {
   buildMarketBoardGuidance,
   buildSentimentGuidance,
+  effectiveSentimentScore,
 } from '../../shared/marketGuidance.js'
 
 function finite(value) {
@@ -273,6 +274,11 @@ function SentimentGauge({
       if (breadth.limitDown > 10) score -= 10
       score = Math.max(0, Math.min(100, score))
     }
+    score = effectiveSentimentScore({
+      score,
+      breadth,
+      breakRate,
+    })
     const level = score >= 70
       ? { text: '情绪火热', className: 'red' }
       : score >= 55
