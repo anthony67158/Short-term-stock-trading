@@ -91,6 +91,52 @@ test('一手持仓只比较持有和退出，不生成非法部分减仓', () =>
   )
 })
 
+test('非持有动作改善不足0.05R时保持持有避免频繁换手', () => {
+  const result = optimizePositionActions(input({
+    expectedHoldR: 0.3,
+    lowerBoundR: -0.8,
+    totalLots: 2,
+    sellableLots: 2,
+    stockWeightPct: 2,
+  }))
+
+  assert.equal(result.selectedAction, 'HOLD')
+  assert.equal(result.selectedSellLots, 0)
+  assert.ok(
+    Math.max(...result.candidates.map(
+      (candidate) => candidate.actionUtilityR,
+    )) > result.holdUtilityR,
+  )
+})
+
+test('所有整手与T+1组合都不产生负手数或超卖', () => {
+  for (let totalLots = 1; totalLots <= 20; totalLots += 1) {
+    for (
+      let sellableLots = 0;
+      sellableLots <= totalLots;
+      sellableLots += 1
+    ) {
+      const result = optimizePositionActions(input({
+        totalLots,
+        sellableLots,
+      }))
+      assert.equal(result.state, 'READY')
+      assert.ok(result.selectedSellLots >= 0)
+      assert.ok(result.selectedSellLots <= sellableLots)
+      assert.equal(
+        result.selectedSellLots + result.selectedRetainedLots,
+        totalLots,
+      )
+      assert.ok(result.candidates.every((candidate) => (
+        Number.isInteger(candidate.sellLots)
+        && candidate.sellLots >= 0
+        && candidate.sellLots <= sellableLots
+        && candidate.sellLots + candidate.retainedLots === totalLots
+      )))
+    }
+  }
+})
+
 test('缺少止损或账户集中度时失败关闭而不是回退拍脑袋参数', () => {
   const missingStop = optimizePositionActions(input({
     hardStopPrice: null,
