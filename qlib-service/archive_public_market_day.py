@@ -111,6 +111,54 @@ def _trade_date(timestamp):
     ).strftime("%Y%m%d")
 
 
+def _same_price(left, right):
+    left_value = _number(left)
+    right_value = _number(right)
+    if left_value is None or right_value is None:
+        return False
+    return abs(left_value - right_value) <= max(
+        0.01,
+        abs(right_value) * 0.0005,
+    )
+
+
+def _daily_agreement(primary, reference):
+    reference_by_code = {row["code"]: row for row in reference}
+    compared = 0
+    matched = 0
+    for code, bars in primary.items():
+        source = bars[-1] if isinstance(bars, list) and bars else None
+        target = reference_by_code.get(code)
+        if not source or not target:
+            continue
+        compared += 1
+        matched += int(_same_price(source.get("close"), target.get("close")))
+    return {
+        "compared": compared,
+        "closeMatchRate": round(matched / compared, 6) if compared else None,
+    }
+
+
+def _minute_agreement(primary, reference):
+    compared = 0
+    matched = 0
+    for code, primary_bars in primary.items():
+        reference_bars = {
+            row["date"]: row
+            for row in reference.get(code, [])
+        }
+        for row in primary_bars:
+            target = reference_bars.get(row["date"])
+            if not target:
+                continue
+            compared += 1
+            matched += int(_same_price(row.get("close"), target.get("close")))
+    return {
+        "comparedBars": compared,
+        "closeMatchRate": round(matched / compared, 6) if compared else None,
+    }
+
+
 def market_page_path(page):
     return (
         f"/api/qt/clist/get?pn={int(page)}&pz={PAGE_SIZE}"
@@ -256,6 +304,7 @@ def fetch_market_snapshot(
     tickflow_complete = (
         tickflow_coverage >= 0.85
     )
+    tickflow_daily_agreement = _daily_agreement(tickflow_rows, daily)
     if selected_tickflow_mode != "off":
         print(json.dumps({
             "stage": "TICKFLOW_DAILY_SOURCE",
@@ -281,6 +330,7 @@ def fetch_market_snapshot(
             "tickflowDiagnostics": {
                 "mode": selected_tickflow_mode,
                 "dailyCoverage": round(tickflow_coverage, 6),
+                "dailyAgreement": tickflow_daily_agreement,
             },
         }
     fuyao_loader = fetch_fuyao or (
@@ -325,6 +375,7 @@ def fetch_market_snapshot(
         "tickflowDiagnostics": {
             "mode": selected_tickflow_mode,
             "dailyCoverage": round(tickflow_coverage, 6),
+            "dailyAgreement": tickflow_daily_agreement,
         },
     }
 
@@ -545,6 +596,11 @@ def archive_latest_public(
             "minuteCoverage": round(
                 tickflow_minute_codes / len(universe),
                 6,
+            ),
+            "minuteAgreement": (
+                _minute_agreement(tickflow_minutes, minutes)
+                if selected_tickflow_mode == "shadow"
+                else None
             ),
         },
     }
