@@ -237,7 +237,6 @@ export async function evaluateDecision({
       && isContinuousTrading(now),
   }
   if (!(Number(quote?.price) > 0)) throw new Error('行情不可用，未发布新决策')
-  const validatedFund = currentFundEvidence(fund, quote.tradeDate)
   const name = quote.name || code
   const trendRows = Array.isArray(trends)
     ? trends
@@ -247,6 +246,13 @@ export async function evaluateDecision({
   const accountRisk = buildAccountRiskContext(book, quoteMap, now)
   const candles = (detail?.candles || []).filter((bar) =>
     [bar.close, bar.high, bar.low].every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
+  const evidenceTradeDate = quote.live
+    ? quote.tradeDate
+    : candles.at(-1)?.date || quote.tradeDate
+  const validatedFund = currentFundEvidence(
+    fund,
+    evidenceTradeDate,
+  )
   const context = buildMarketOpportunityContext({ market: market || {} })
   const strategyPatternCapabilities =
     resolveStrategyPatternCapabilities(process.env)

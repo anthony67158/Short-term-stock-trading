@@ -631,6 +631,44 @@ test('资金日期早于当前报价交易日时按缺失证据失败关闭', as
   assert.equal(result.result.decisionEvidence.funds.retailNetYi, null)
 })
 
+test('休市报价日期领先时按最后有效日线校验收盘资金', async () => {
+  let scoreCalls = 0
+  const result = await evaluateDecision(scenario({
+    now: Date.parse('2026-09-12T02:10:00Z'),
+    quotes: [{
+      code: '600001',
+      price: 10,
+      isLivePrice: true,
+      tradeDate: '2026-09-12',
+    }],
+    detail: {
+      candles: Array.from({ length: 30 }, (_, index) => ({
+        date: index === 29 ? '2026-09-11' : `2026-08-${String(index + 1).padStart(2, '0')}`,
+        close: 10,
+        high: 10.2,
+        low: 9.8,
+        amount: 100000000,
+      })),
+    },
+    fund: {
+      asOfDate: '2026-09-11',
+      mainNetYi: 1,
+      retailNetYi: -1,
+    },
+    score: async ([input]) => {
+      scoreCalls += 1
+      return new Map([[input.code, plan.opportunityScore]])
+    },
+  }))
+
+  assert.equal(scoreCalls, 3)
+  assert.notEqual(
+    result.result.decisionSource.state,
+    'EVIDENCE_INCOMPLETE',
+  )
+  assert.equal(result.result.decisionEvidence.funds.mainNetYi, 1)
+})
+
 test('模型缺失及资金故障不能阻断持仓硬止损', async () => {
   const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [],
