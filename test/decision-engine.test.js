@@ -229,7 +229,7 @@ test('完整决策评估在模型未就绪时独立返回明确状态与零LLM�
     code: '600001',
     book: { account: { totalAssets: 100000, cash: 100000 }, holding: [], closed: [] },
     quotes: [{ code: '600001', price: 10, isLivePrice: false }],
-    detail: { candles: Array.from({ length: 30 }, () => ({ close: 10, high: 10.2, low: 9.8 })) },
+    detail: { candles: Array.from({ length: 30 }, () => ({ close: 10, high: 10.2, low: 9.8, amount: 100000000 })) },
     trends: [],
     fund: { mainNetYi: 0.1, retailNetYi: -0.1 },
     market: { breadth: { up: 3000, down: 1000, flat: 100 } },
@@ -249,7 +249,7 @@ function scenario(overrides = {}) {
     code: '600001', now,
     book: { account: { cash: 100000 }, holding: [], closed: [], executionPlans: [] },
     quotes: [{ code: '600001', price: 10, isLivePrice: true, tradeDate: '2026-09-10' }],
-    detail: { candles: Array.from({ length: 30 }, () => ({ close: 10, high: 10.2, low: 9.8 })) },
+    detail: { candles: Array.from({ length: 30 }, () => ({ close: 10, high: 10.2, low: 9.8, amount: 100000000 })) },
     trends: [], fund: { mainNetYi: 1, retailNetYi: -1 },
     market: { breadth: { up: 3000, down: 1000, flat: 100 } },
     score: async ([input]) => new Map([[input.code, {
@@ -778,6 +778,8 @@ test('可执行提醒无需LLM二次裁决且过期或换版即失效', async ()
   assert.equal(alert.decisionEngine, 'MULTI_TASK')
   assert.equal(alert.phase, null)
   assert.ok(decisionActionAlertMessage(alert, { price: 10 }))
+  assert.equal(alert.maxBuyPrice, 10)
+  assert.equal(decisionActionAlertMessage(alert, { price: 10.01 }), null)
   assert.equal(decisionActionAlertMessage(alert, { price: 8 }), null)
   assert.equal(isCurrentDecisionAlert(alert, result.result, now), true)
   assert.equal(isCurrentDecisionAlert(alert, result.result, now + 86400000), false)
@@ -802,4 +804,32 @@ test('模型未就绪时不把缺失的模型价位回写并清空账本止损',
   saveAdvice('600001', { mode: result.mode, advice: result.result })
   assert.equal(advicePlan('600001'), null)
   assert.equal(planStore.get().holding[0].sl, 9)
+})
+
+test('目标仓位缺少流动性证据时不退回容量上限', async () => {
+  const result = await evaluateDecision(scenario({
+    detail: { candles: Array.from({ length: 30 }, () => ({ close: 10, high: 10.2, low: 9.8 })) },
+  }))
+  assert.equal(result.result.decisionPlan.quantity.lots, 0)
+  assert.equal(result.result.decisionPlan.targetPosition.state, 'UNAVAILABLE')
+  assert.match(result.result.decisionPlan.blockedReasons.join(''), /成交额/)
+})
+
+test('约束优化与实际买价上限进入执行合同且不阻止真实成交记录', async () => {
+  const { transitionExecutionPlan, recordExecutionFill } = await import('../shared/executionPlan.js')
+  const result = await evaluateDecision(scenario())
+  const plan = result.result.executionPlan
+  assert.equal(plan.maxBuyPrice, 10)
+  assert.throws(() => transitionExecutionPlan(plan, 'USER_CONFIRM', { price: 10.01, now }), /超过买入上限/)
+  const confirmed = transitionExecutionPlan(
+    transitionExecutionPlan(
+      transitionExecutionPlan(plan, 'ARM', { now }),
+      'PRICE_TRIGGERED', { now, price: 10 },
+    ),
+    'USER_CONFIRM', { price: 10, now },
+  )
+  const filled = recordExecutionFill(confirmed, {
+    fillId: 'real-over-limit', lots: 1, price: 10.01, at: now, manuallyRecorded: true,
+  })
+  assert.equal(filled.filledLots, 1)
 })

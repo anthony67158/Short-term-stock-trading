@@ -95,10 +95,16 @@ function actionValue(plan, action, eligibility) {
 }
 
 function bestCandidate(candidates) {
+  const objective = (candidate) => {
+    if (['BUY', 'ADD'].includes(candidate.action) && candidate.plan.targetPosition) {
+      return candidate.plan.targetPosition.state === 'READY'
+        ? candidate.plan.targetPosition.selected.opportunityNetAmount
+        : Number.NEGATIVE_INFINITY
+    }
+    return Number(candidate.value.actionUtilityR)
+  }
   return [...candidates].sort(
-    (left, right) =>
-      Number(right.value.actionUtilityR)
-      - Number(left.value.actionUtilityR),
+    (left, right) => objective(right) - objective(left),
   )[0] || null
 }
 
@@ -180,6 +186,7 @@ export function arbitrateActionValues({
       && selectedPlan.route === 'IMMEDIATE'
       && state.quote.live === true
       && state.eligibility.actions.includes('BUY')
+      && (!selectedPlan.targetPosition || selectedPlan.targetPosition.state === 'READY')
     )
     return {
       action: executable ? 'BUY' : 'WAIT',
@@ -218,6 +225,7 @@ export function arbitrateActionValues({
     && state.eligibility.actions.includes('ADD')
     && currentPositive
     && actionUtility(immediate, 'ADD') > 0
+    && (!immediate.targetPosition || immediate.targetPosition.state === 'READY')
   ) {
     return {
       action: 'ADD',
@@ -233,6 +241,7 @@ export function arbitrateActionValues({
       && candidate.plan.route !== 'IMMEDIATE'
       && candidate.value.feasible
       && Number(candidate.value.actionUtilityR) > 0
+      && (!candidate.plan.targetPosition || candidate.plan.targetPosition.state === 'READY')
     )),
   )
   const conditionalAddPlan = currentAction === 'HOLD'

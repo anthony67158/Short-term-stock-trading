@@ -278,6 +278,8 @@ export function compileExecutionPlan({
     remainingLots: targetLots,
     referencePrice,
     triggerPrice: referencePrice,
+    maxBuyPrice: side === 'BUY' && decisionPlan.targetPosition?.state === 'READY'
+      ? positive(decisionPlan.targetPosition.maxBuyPrice) : null,
     triggerDirection,
     priceContract,
     stopPrice: positive(decisionPlan.prices?.stop),
@@ -292,13 +294,15 @@ export function compileExecutionPlan({
     riskAmount: Math.max(
       0,
       finite(
-        decisionPlan.risk?.tradeExpectancy?.plan?.lossAmount,
+        decisionPlan.targetPosition?.selected?.stopLossAmount
+        ?? decisionPlan.risk?.tradeExpectancy?.plan?.lossAmount,
       ) || 0,
     ),
     stressRiskAmount: Math.max(
       0,
       finite(
-        decisionPlan.risk?.tradeExpectancy?.stress?.lossAmount,
+        decisionPlan.targetPosition?.selected?.stressLossAmount
+        ?? decisionPlan.risk?.tradeExpectancy?.stress?.lossAmount,
       ) || 0,
     ),
     tradeExpectancy:
@@ -372,6 +376,8 @@ function priceReached(plan, price) {
   const current = positive(price)
   const trigger = positive(plan.triggerPrice)
   if (current == null || trigger == null) return false
+  if (plan.side === 'BUY' && positive(plan.maxBuyPrice) != null
+    && current > plan.maxBuyPrice) return false
   const direction = executionTriggerDirection(plan)
   if (direction === 'IMMEDIATE') return true
   if (direction === 'LTE') return current <= trigger
@@ -402,6 +408,10 @@ export function transitionExecutionPlan(
     return withTransition(plan, 'ALERTED', event, now, reason)
   }
   if (event === 'USER_CONFIRM') {
+    if (plan.side === 'BUY' && positive(plan.maxBuyPrice) != null
+      && positive(price) != null && Number(price) > plan.maxBuyPrice) {
+      throw new Error('最新价格超过买入上限，需重新评估，不能追价执行')
+    }
     return withTransition(plan, 'USER_CONFIRMED', event, now, reason)
   }
   if (event === 'CANCEL') {

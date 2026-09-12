@@ -19,6 +19,7 @@ import {
 } from './opportunityLifecycle.js'
 import { positionExitEffect } from './positionExit.js'
 import { buildTradeExpectancy } from './tradeExpectancy.js'
+import { optimizeTargetPosition } from './targetPositionModel.js'
 import {
   beijingDayKey,
   beijingMinutes,
@@ -542,6 +543,7 @@ export function compileDecisionPlan({
       ?? positive(priceContract.levels.find((item) =>
         ['entry', 'add'].includes(item.key) && item.strict === true,
       )?.price)
+      ?? (deterministicPolicy ? positive(payload.decisionPricePlan?.entryPlan?.price) : null)
     requestedReferencePrice = referencePrice
   }
   const blockedReasons = []
@@ -828,9 +830,12 @@ export function compileDecisionPlan({
     quant: deterministicPolicy ? null : payload.quant,
     researchPrior: deterministicPolicy ? null : adaptiveResearchPrior(actionPolicy, tactical),
   })
-  const modelTailLoss = deterministicPolicy && tradeExpectancy.plan?.lossAmount > 0
+  const modelPriceRiskPerShare = positive(
+    payload.opportunityScore?.priceContract?.modelPriceRiskPerShare,
+  ) || Math.max(0, referencePrice - stopPrice)
+  const modelTailLoss = deterministicPolicy && capacity.lots > 0
     ? Math.max(0, -(finite(payload.opportunityScore?.expectedShortfall10) || 0))
-      * tradeExpectancy.plan.lossAmount
+      * modelPriceRiskPerShare * 100 * capacity.lots
     : 0
   const stressLoss = Math.max(modelTailLoss, tradeExpectancy.stress?.lossAmount || 0)
   if (
@@ -873,6 +878,37 @@ export function compileDecisionPlan({
         )
       }
     }
+  }
+  let targetPosition = null
+  if (riskIncreasing && deterministicPolicy?.quantityModelRequired === true) {
+    targetPosition = optimizeTargetPosition({
+      entryPrice: referencePrice,
+      stopPrice,
+      targetPrice,
+      modelPriceRiskPerShare,
+      score: payload.opportunityScore,
+      maxLots: blockedReasons.length ? 0 : capacity.lots,
+      existingLots: payload.holdQty,
+      reservedBuyLots: payload.reservedBuyLots,
+      market: payload.allocationMarket,
+      slippageBps,
+      maxStopLossAmount: capacity.maxLossAmount ?? 0,
+      maxCashAmount: costEstimate('BUY', referencePrice, capacity.lots, slippageBps).estimatedNetAmount,
+      maxStressLossAmount: (positive(account.totalAssets) || 0) * 0.02,
+      stressLossPerLot: Math.max(
+        modelPriceRiskPerShare * 100 * Math.max(0, -(finite(payload.opportunityScore?.expectedShortfall10) || 0)),
+        (tradeExpectancy.stress?.lossAmount || 0) / Math.max(1, capacity.lots),
+      ),
+    })
+    capacity = { ...capacity, lots: targetPosition.recommendedLots }
+    if (targetPosition.state !== 'READY') blockedReasons.push(targetPosition.reason)
+    tradeExpectancy = buildTradeExpectancy({
+      action: budgetAction,
+      referencePrice, stopPrice, targetPrice,
+      quantityLots: Math.max(1, capacity.lots), slippageBps,
+      stressExitPrice: payload.todayQuote?.limitDownPrice,
+      opportunityScore: payload.opportunityScore,
+    })
   }
   if (
     riskIncreasing
@@ -921,6 +957,10 @@ export function compileDecisionPlan({
     ? 'EXIT'
     : governedAction
   const costs = costEstimate(action, referencePrice, lots, slippageBps)
+  if (lots > 0 && targetPosition?.state === 'READY') {
+    costs.estimatedNetAmount = targetPosition.selected.requiredCash
+    costs.additionalImpactAmount = targetPosition.selected.additionalImpactAmount / 2
+  }
   const currentWeightPct = Math.max(0, finite(account.stockWeight) || 0)
   const totalAssets = positive(account.totalAssets)
   const deltaWeightPct = totalAssets == null
@@ -1108,6 +1148,7 @@ export function compileDecisionPlan({
       affordableLots: capacity.affordableLots,
       sellableLots: capacity.sellableLots ?? null,
     },
+    targetPosition,
     entryBudget: conditionalEntry ? {
       state: uniqueBlockers.length ? 'BLOCKED' : 'ESTIMATED',
       executionAllowed: false,
@@ -1115,8 +1156,14 @@ export function compileDecisionPlan({
       referencePrice: round(referencePrice, 3),
       stopPrice: round(stopPrice, 3),
       targetPrice: round(targetPrice, 3),
-      costs: costEstimate(budgetAction, referencePrice,
-        uniqueBlockers.length ? 0 : capacity.lots, slippageBps),
+      costs: {
+        ...costEstimate(budgetAction, referencePrice,
+          uniqueBlockers.length ? 0 : capacity.lots, slippageBps),
+        ...(!uniqueBlockers.length && targetPosition?.state === 'READY' ? {
+          estimatedNetAmount: targetPosition.selected.requiredCash,
+          additionalImpactAmount: targetPosition.selected.additionalImpactAmount / 2,
+        } : {}),
+      },
       stopLossAmount: uniqueBlockers.length
         ? null : tradeExpectancy.plan?.lossAmount ?? null,
       reasons: uniqueBlockers,

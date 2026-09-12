@@ -65,6 +65,8 @@ export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()
   })
   const reservedExposures = pendingBuys(data).map((plan) => ({
     code: plan.code,
+    lots: Math.max(0, finite(plan.remainingLots)
+      ?? ((finite(plan.targetLots) || 0) - (finite(plan.filledLots) || 0))),
     sectorCode: quotes[plan.code]?.industry || '',
     positionPct: portfolio.totalAssets > 0
       ? Number(plan.reservedCash) / portfolio.totalAssets * 100 : 0,

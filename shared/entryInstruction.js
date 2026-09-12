@@ -31,7 +31,7 @@ function routeLabel(value) {
     || '候选路径'
 }
 
-function candidatePlan(advice = {}, holding = false) {
+function candidatePlan(advice = {}, holding = false, decisionPlan = {}) {
   const selected = advice.selectedDecisionPlan || null
   if (!holding) return selected
   const addPlan = advice.holdingAddPlan
@@ -43,7 +43,7 @@ function candidatePlan(advice = {}, holding = false) {
       ? advice.decisionPaths
       : []).find((plan) => plan?.route === addPlan.route) || null
   }
-  if (String(advice.decisionPlan?.action || '').toUpperCase() === 'ADD') {
+  if (String(decisionPlan.action || '').toUpperCase() === 'ADD') {
     return selected
   }
   return null
@@ -69,17 +69,15 @@ function instructionState({
   plannedLots,
   blockers,
 }) {
+  if (!candidate || !(positive(candidate.entryPlan?.price))
+    || !(finite(candidate.opportunityScore?.expectedNetR) > 0)
+    || blockers.length || plannedLots <= 0) return 'NO_TRADE'
   const requiredAction = intent === 'ADD_POSITION' ? 'ADD' : 'BUY'
   if (
     action === requiredAction
     && ['READY', 'MANUAL_PROBE'].includes(actionability)
     && plannedLots > 0
   ) return 'READY'
-  if (!candidate) return 'NO_TRADE'
-  if (!(finite(candidate.opportunityScore?.expectedNetR) > 0)) {
-    return 'NO_TRADE'
-  }
-  if (blockers.length || plannedLots <= 0) return 'NO_TRADE'
   return 'WAIT_TRIGGER'
 }
 
@@ -102,12 +100,15 @@ function timingOf({
     }
   }
   if (state === 'WAIT_TRIGGER') {
+    if (candidate?.route === 'IMMEDIATE') return {
+      headline: '下一交易时段重新评估',
+      explanation: '当前为非执行时段；开盘后按新报价、账户和资金重新评估，不能直接按旧收盘价下单。',
+    }
     return {
       headline: `到${observationPrice.toFixed(2)}元后复核`,
       explanation: [
         trigger,
-        `价格首次到达${observationPrice.toFixed(2)}元后观察约60秒`,
-        '重新采集价格、量能和资金后只复核一次',
+        '首次到价后观察约60秒，再复核一次',
         confirmation,
       ].filter(Boolean).join('；') + '。',
     }
@@ -129,18 +130,19 @@ function priceOf({
   const executablePrice = state === 'READY'
     ? observationPrice || positive(decisionPlan.prices?.reference)
     : null
-  const stopPrice = positive(candidate?.exitPlan?.hardStopPrice)
-    || positive(decisionPlan.prices?.stop)
-  const targetPrice = positive(candidate?.exitPlan?.takeProfitPrice)
-    || positive(decisionPlan.prices?.target)
+  const stopPrice = candidate ? positive(candidate.exitPlan?.hardStopPrice) : null
+  const targetPrice = candidate ? positive(candidate.exitPlan?.takeProfitPrice) : null
   const explanation = state === 'READY'
-    ? `执行参考${executablePrice?.toFixed(2) || '--'}元；最终以人工记录的真实成交价为准。`
+    ? `执行参考${executablePrice?.toFixed(2) || '--'}元，限价不高于该价格；超过后不追价，需重新评估。`
+    : state === 'NO_TRADE' && observationPrice
+      ? `候选参考${observationPrice.toFixed(2)}元尚未通过，不是买点；不据此创建买入预警。`
     : observationPrice
       ? `观察价${observationPrice.toFixed(2)}元，不是直接买入价；复核通过后按最新有效报价核定。`
       : '当前没有合法观察价，不创建买入预警。'
   return {
     observationPrice: rounded(observationPrice),
     executablePrice: rounded(executablePrice),
+    maxBuyPrice: rounded(executablePrice),
     stopPrice: rounded(stopPrice),
     targetPrice: rounded(targetPrice),
     explanation,
@@ -165,6 +167,8 @@ function quantityOf({
     ? Math.max(0, Math.trunc(finite(budget.lots) || 0))
     : 0
   const plannedLots = executableLots || estimatedLots
+  const allocation = decisionPlan.targetPosition
+  const reservedBuyLots = Math.max(0, finite(allocation?.reservedBuyLots) || 0)
   const riskLimitedLots = finite(quantity.riskLimitedLots)
   const affordableLots = finite(quantity.affordableLots)
   const limitParts = [
@@ -191,11 +195,19 @@ function quantityOf({
     }${plannedLots}手`
       + `${limitParts.length ? `；${limitParts.join('，')}，取较小值` : ''}。`
   }
+  if (allocation?.state === 'READY' && state !== 'NO_TRADE') {
+    explanation = `现有${existingLots}手${reservedBuyLots ? `，待买${reservedBuyLots}手` : ''}；`
+      + `目标共${allocation.targetLots}手，本次${intent === 'ADD_POSITION' ? '加仓' : '建仓'}${plannedLots}手。`
+      + `账户允许最多新增${allocation.capacityLots}手。`
+      + (state === 'WAIT_TRIGGER' ? '这是预案，触价复核后重新核定。' : '')
+  }
   return {
     plannedLots,
     executableLots,
     estimatedLots,
     existingLots,
+    reservedBuyLots,
+    targetLots: existingLots + reservedBuyLots + plannedLots,
     afterLots: existingLots + plannedLots,
     riskLimitedLots: rounded(riskLimitedLots, 0),
     affordableLots: rounded(affordableLots, 0),
@@ -209,7 +221,7 @@ function expectedReturnOf({
   decisionPlan,
   price,
 }) {
-  const expectedNetR = rounded(
+  const expectedNetR = finite(
     candidate?.opportunityScore?.expectedNetR,
   )
   const entryPrice = positive(candidate?.entryPlan?.price)
@@ -221,13 +233,18 @@ function expectedReturnOf({
   const stopRiskPct = entryPrice && stopPrice
     ? rounded((entryPrice - stopPrice) / entryPrice * 100)
     : null
-  const lossPerLot = positive(decisionPlan.risk?.estimatedLossPerLot)
-  const riskAmount = lossPerLot && quantity.plannedLots > 0
-    ? lossPerLot * quantity.plannedLots
+  const priceRiskPerShare = positive(
+    candidate?.opportunityScore?.priceContract?.modelPriceRiskPerShare,
+  ) || (entryPrice && stopPrice ? Math.max(0, entryPrice - stopPrice) : null)
+  const riskAmount = priceRiskPerShare && quantity.plannedLots > 0
+    ? priceRiskPerShare * 100 * quantity.plannedLots
     : null
-  const expectedNetAmount = (
+  const allocation = decisionPlan.targetPosition?.state === 'READY'
+    && quantity.plannedLots === decisionPlan.targetPosition.recommendedLots
+    ? decisionPlan.targetPosition.selected : null
+  const expectedNetAmount = finite(allocation?.expectedNetAmount) ?? ((
     riskAmount != null && expectedNetR != null
-  ) ? rounded(riskAmount * expectedNetR, 0) : null
+  ) ? rounded(riskAmount * expectedNetR, 2) : null)
   const parts = []
   if (targetPrice && targetUpsidePct != null) {
     parts.push(
@@ -249,16 +266,33 @@ function expectedReturnOf({
       }${Math.abs(expectedNetAmount).toFixed(0)}元`,
     )
   }
+  if (allocation) {
+    parts.push(`本次新增资金约${allocation.requiredCash.toFixed(0)}元`)
+    parts.push(`若到目标价，扣费与估计冲击后约${allocation.targetNetProfit >= 0 ? '赚' : '亏'}${Math.abs(allocation.targetNetProfit).toFixed(0)}元；这不是平均预期`)
+    parts.push(`按计划止损约亏${allocation.stopLossAmount.toFixed(0)}元；跳空、跌停和T+1可能扩大实际损失`)
+  }
   if (!parts.length) {
     parts.push('当前模型结果不完整，不能估算预期收益')
   }
+  const explanation = allocation
+    ? `新增投入约${allocation.requiredCash.toFixed(0)}元；若成交，模型平均估计${expectedNetAmount >= 0 ? '赚' : '亏'}${Math.abs(expectedNetAmount).toFixed(0)}元。`
+      + `到目标${targetPrice.toFixed(2)}元约${allocation.targetNetProfit >= 0 ? '赚' : '亏'}${Math.abs(allocation.targetNetProfit).toFixed(0)}元，计划止损约亏${allocation.stopLossAmount.toFixed(0)}元。`
+      + '目标收益不等于平均收益；T+1、跳空和跌停可能扩大损失。'
+    : `${parts.join('；')}。`
   return {
     expectedNetR,
     expectedNetAmount,
     targetUpsidePct,
     stopRiskPct,
     riskAmount: rounded(riskAmount, 0),
-    explanation: `${parts.join('；')}。`,
+    requiredCash: allocation?.requiredCash ?? null,
+    targetNetProfit: allocation?.targetNetProfit ?? null,
+    stopLossAmount: allocation?.stopLossAmount ?? null,
+    expectedNetPct: allocation?.requiredCash > 0
+      ? rounded(expectedNetAmount / allocation.requiredCash * 100) : null,
+    estimateBasis: 'MODEL_PRICE_RISK',
+    horizonLabel: '沿用所选路径的模型结算窗口，并非承诺持有天数或固定退出日',
+    explanation,
   }
 }
 
@@ -269,7 +303,7 @@ export function buildEntryInstruction({
   const holding = ['hold_advice', 'review'].includes(decisionPlan.mode)
   const intent = holding ? 'ADD_POSITION' : 'BUILD_POSITION'
   const intentLabel = holding ? '加仓' : '建仓'
-  const candidate = candidatePlan(advice, holding)
+  const candidate = candidatePlan(advice, holding, decisionPlan)
   const action = text(decisionPlan.action, 24).toUpperCase()
   const actionability = text(
     decisionPlan.actionability,
@@ -317,15 +351,19 @@ export function buildEntryInstruction({
     intent,
     intentLabel,
     state,
+    validUntil: typeof decisionPlan.validUntil === 'string'
+      ? Date.parse(decisionPlan.validUntil) || null
+      : finite(decisionPlan.validUntil),
     route: text(candidate?.route, 24).toUpperCase() || null,
     routeLabel: candidate ? routeLabel(candidate.route) : null,
     timing,
     price,
     quantity,
     expectedReturn,
+    targetPosition: decisionPlan.targetPosition || null,
     blockers,
     modelBoundary:
-      '观察价由行情结构生成；触价后重新运行生产模型，只有费后平均结果仍为正才核定执行价和手数。',
+      '观察价不是下单价。目标仓位按现役路径预测与流动性假设优化；平均收益为估计，不保证实现。触价复核后重新核定价格与手数。',
     summary: [
       timing.headline,
       timing.explanation,

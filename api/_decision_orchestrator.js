@@ -28,6 +28,7 @@ import { buildStockFundNote } from '../shared/retailFundFlow.js'
 import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
 import { attachMonitoringPlan } from '../shared/monitoringPlan.js'
 import { isTriggeredReviewEvent } from '../shared/triggeredReviewDecision.js'
+import { allocationMarketFrom } from '../shared/targetPositionModel.js'
 
 async function bounded(promise, fallback, milliseconds = 7000) {
   let timer
@@ -295,6 +296,10 @@ export async function evaluateDecision({
     holdingStopPrice: Math.max(0, ...holding.map((item) => Number(item.sl) || 0)) || null,
     stockFund: fund,
     reviewEvent,
+    allocationMarket: allocationMarketFrom(candles, quote),
+    reservedBuyLots: accountRisk.reservedExposures
+      .filter((item) => item.code === code)
+      .reduce((sum, item) => sum + (Number(item.lots) || 0), 0),
     missingEvidence,
     evidenceIncomplete: missingEvidence.length > 0,
   }
@@ -366,10 +371,41 @@ export async function evaluateDecision({
           entryPrice: plan.entryPlan.price,
           stopPrice: plan.exitPlan.hardStopPrice,
           targetPrice: plan.exitPlan.takeProfitPrice,
+          modelPriceRiskPerShare:
+            plan.entryPlan.price * input.factors.stopDistancePct / 100,
         },
       },
     }
   }))
+  // Budget every path on the same account snapshot before comparing them.
+  // These hypothetical compilations are never published as executable plans.
+  for (const plan of evaluated) {
+    const adding = holding.length > 0
+    const full = !adding || Number(plan.opportunityScore?.meanConfidenceLowerBound) > 0
+    const hypothetical = compileDecisionPlan({
+      mode: adding ? 'hold_advice' : 'buy_advice',
+      advice: {
+        action: adding ? '加仓' : '立即买入',
+        buyPrice: plan.entryPlan.price,
+        addPrice: plan.entryPlan.price,
+        stopPrice: plan.exitPlan.hardStopPrice,
+        targetPrice: plan.exitPlan.takeProfitPrice,
+      },
+      payload: { ...payload, opportunityScore: plan.opportunityScore, decisionPricePlan: plan },
+      now,
+      accountCircuitBreaker: accountRisk.breaker,
+      deterministicPolicy: {
+        quantityModelRequired: true,
+        effectiveAction: adding ? 'ADD' : 'BUY',
+        riskTier: full ? 'FULL' : 'PROBE',
+        executionOpen: false,
+        riskMultiplier: context.baseRiskPct / 0.6,
+        maxStockWeightPct: full ? 20 : 5,
+        maxPortfolioPositionPct: 85,
+      },
+    })
+    plan.targetPosition = hypothetical.targetPosition
+  }
   let advice = {
     ...buildDecisionAction({ payload, plans: evaluated, now }),
     fundNote: '',
@@ -447,8 +483,10 @@ export async function evaluateDecision({
   const decisionPlan = compileDecisionPlan({
     mode, advice, payload, now, accountCircuitBreaker: accountRisk.breaker,
     deterministicPolicy: {
+      quantityModelRequired: true,
       effectiveAction: action,
-      riskTier: action === 'BUY' ? 'FULL' : addRiskTier || 'NONE',
+      riskTier: !holding.length && advice.selectedDecisionPlan
+        ? 'FULL' : addRiskTier || 'NONE',
       executionOpen: payload.todayQuote.live,
       hardProtection: advice.decisionSource.hardProtection,
       exitConfirmed: (

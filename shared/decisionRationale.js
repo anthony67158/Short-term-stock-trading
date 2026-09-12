@@ -74,6 +74,11 @@ function pricePath(plan = {}, selectedRoute = '') {
       + `${Math.abs(expectedNetR).toFixed(2)}份`,
     )
   }
+  const allocation = plan.targetPosition
+  if (allocation?.state === 'READY') {
+    parts.push(`建议${allocation.recommendedLots}手；若成交，新增部分平均约${allocation.selected.expectedNetAmount.toFixed(0)}元`)
+    parts.push(`计入未成交可能后的机会价值约${allocation.selected.opportunityNetAmount.toFixed(0)}元`)
+  } else if (allocation) parts.push(allocation.reason)
   return {
     route,
     label: routeLabel(route),
@@ -84,6 +89,7 @@ function pricePath(plan = {}, selectedRoute = '') {
     trigger: text(plan.entryPlan?.trigger),
     riskReward: rounded(plan.riskReward),
     expectedNetR,
+    targetPosition: allocation || null,
     explanation: parts.join('；'),
   }
 }

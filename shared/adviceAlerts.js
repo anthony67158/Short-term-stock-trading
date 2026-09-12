@@ -42,6 +42,8 @@ export function decisionActionAlertMessage(alert, quote) {
   const price = Number(quote?.price)
   const reference = Number(alert.value)
   if (!(price > 0 && reference > 0)) return null
+  if (alert.actionSide === 'BUY' && Number(alert.maxBuyPrice) > 0
+    && price > Number(alert.maxBuyPrice)) return null
   if (alert.actionSide === 'BUY'
     && Math.abs(price / reference - 1) > 0.015) return null
   return alert.timing || alert.judgeContext?.actionPlan || null
@@ -54,6 +56,9 @@ function decisionAlert(alert, advice) {
     decisionId: advice.decisionPlan.decisionId,
     validUntil: advice.decisionPlan.validUntil,
     actionSide: ['BUY', 'ADD'].includes(advice.decisionPlan.action) ? 'BUY' : 'SELL',
+    maxBuyPrice: ['BUY', 'ADD'].includes(advice.decisionPlan.action)
+      && advice.decisionPlan.targetPosition?.state === 'READY'
+      ? advice.decisionPlan.targetPosition.maxBuyPrice : null,
     timing: advice.actionPlan,
     // An approved decision action is a notification, not a second LLM decision.
     phase: alert.reviewOnly ? alert.phase : null,

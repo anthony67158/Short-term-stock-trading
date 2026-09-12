@@ -88,7 +88,7 @@ test('买入依据明确价格来源、路径比较和手数上限', () => {
   assert.equal(result.entryInstruction.quantity.plannedLots, 2)
   assert.equal(result.entryInstruction.expectedReturn.targetUpsidePct, 8.92)
   assert.equal(result.entryInstruction.expectedReturn.expectedNetR, 0.18)
-  assert.equal(result.entryInstruction.expectedReturn.expectedNetAmount, 137)
+  assert.equal(result.entryInstruction.expectedReturn.expectedNetAmount, 93.6)
   assert.equal(result.price.selectedRoute, 'PULLBACK')
   assert.equal(result.price.routeLabel, '回踩确认')
   assert.equal(result.price.referencePrice, 53.8)
@@ -219,7 +219,7 @@ test('未持仓观望仍展示候选价格路径而不是持仓动作', () => {
   )
   assert.equal(result.pathComparison.length, 1)
   assert.equal(result.actionComparison.length, 0)
-  assert.match(result.summary, /观察价56\.10元/)
+  assert.match(result.summary, /候选参考56\.10元/)
   assert.match(result.quantity.explanation, /当前为0手/)
   assert.match(
     result.quantity.explanation,
@@ -298,7 +298,7 @@ test('持仓加仓输出观察时机、价格、预案手数和预期收益', ()
     /当前持有2手，触发后预案加仓1手/,
   )
   assert.equal(result.entryInstruction.expectedReturn.expectedNetR, 0.18)
-  assert.equal(result.entryInstruction.expectedReturn.expectedNetAmount, 58)
+  assert.equal(result.entryInstruction.expectedReturn.expectedNetAmount, 46.8)
   assert.match(
     result.entryInstruction.expectedReturn.explanation,
     /达到目标价58\.60元对应8\.92%价格空间/,
