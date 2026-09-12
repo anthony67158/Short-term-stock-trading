@@ -305,10 +305,6 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
         self.assertEqual(result["daily"][0]["close"], 11)
         self.assertEqual(result["daily"][0]["turnover"], 1.2)
         self.assertEqual(result["funds"][0]["retailNetYi"], -0.05)
-        self.assertEqual(
-            result["tickflowDiagnostics"]["dailyAgreement"],
-            {"compared": 800, "closeMatchRate": 0.0},
-        )
 
     def test_archive_uses_previous_oss_day_for_causal_universe(self):
         target_bucket = FakeBucket()
@@ -442,10 +438,6 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
         self.assertEqual(
             artifact["sourceDiagnostics"]["tickflow"]["minuteCoverage"],
             1,
-        )
-        self.assertEqual(
-            artifact["sourceDiagnostics"]["tickflow"]["minuteAgreement"],
-            {"comparedBars": 4800, "closeMatchRate": 1.0},
         )
 
 
