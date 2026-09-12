@@ -459,7 +459,7 @@ export default function PlanTab({ interval }) {
       <ExecutionQueue
         plans={book.executionPlans || []}
         attributions={book.executionAttributions || []}
-        quoteMap={quote}
+        quoteMap={executionQuote}
         onOpen={openStockDetail}
       />
       <HoldingList
