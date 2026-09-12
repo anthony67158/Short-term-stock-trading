@@ -320,10 +320,12 @@ def publish_strategy_pattern_snapshot(bucket, market_manifest):
     ):
         raise ValueError("市场数据manifest版本无效")
     entries = list(market_manifest.get("dates") or [])[-MAX_HISTORY_DAYS:]
-    artifacts = [
-        _load_market_day_entry(bucket, entry)
-        for entry in entries
-    ]
+    artifacts = []
+    for entry in entries:
+        # Verify each full shard, but retain only daily bars for pattern scores.
+        artifact = _load_market_day_entry(bucket, entry)
+        artifacts.append({"date": artifact["date"], "daily": artifact["daily"]})
+        del artifact
     snapshot = build_strategy_pattern_snapshot(artifacts)
     encoded = gzip.compress(
         json.dumps(
