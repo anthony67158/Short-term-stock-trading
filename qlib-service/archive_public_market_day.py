@@ -40,7 +40,7 @@ EASTMONEY_HISTORY_HOSTS = (
     "https://33.push2his.eastmoney.com",
     "https://48.push2his.eastmoney.com",
 )
-TENCENT_HISTORY_HOST = "https://web.ifzq.gtimg.cn"
+TENCENT_HISTORY_HOST = "https://ifzq.gtimg.cn"
 MARKET_FILTER = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048"
 MARKET_FIELDS = (
     "f2,f3,f5,f6,f8,f10,f12,f14,f15,f16,f17,f18,"

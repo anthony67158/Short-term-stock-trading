@@ -80,6 +80,7 @@ jobs:
             tests/test_opportunity_history.py \
             tests/test_opportunity_market_archive.py \
             tests/test_archive_public_market_day.py \
+            tests/test_archive_minute_fallback.py \
             tests/test_validate_market_archive_report.py \
             tests/test_opportunity_sector_archive.py \
             tests/test_archive_tushare_market_day.py \
