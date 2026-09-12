@@ -24,6 +24,7 @@
     "harness:online": "node harness/run.mjs --suite endpoint --online --no-baseline",
     "harness:shadow": "node harness/run.mjs --suite shadow --online --no-baseline",
     "harness:advice": "node scripts/advice-reliability-harness.mjs",
+    "harness:continuous": "node --max-old-space-size=4096 scripts/verify-continuous-market.mjs",
     "opportunity:export": "node scripts/export-opportunity-outcomes.mjs",
     "opportunity:backfill-stockdb": "node --max-old-space-size=6144 scripts/backfill-opportunity-stockdb.mjs",
     "opportunity:backfill-tushare": "node --max-old-space-size=6144 scripts/backfill-opportunity-stockdb.mjs --provider tushare",
