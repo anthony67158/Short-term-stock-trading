@@ -399,6 +399,46 @@ test('持仓初评生成加仓观察价并保留账户核定预算', async () =>
   assert.equal(blocked.result.breakoutWatchPrice, null)
 })
 
+test('收盘后的持仓决策随结果保存次日交易预案合同', async () => {
+  const closeNow = Date.parse('2026-09-11T07:50:00Z')
+  const result = await evaluateDecision(scenario({
+    now: closeNow,
+    quotes: [{
+      code: '600001',
+      price: 10,
+      prevClose: 9.8,
+      isLivePrice: false,
+      priceStatus: 'CLOSE',
+      tradeDate: '2026-09-11',
+    }],
+    fund: {
+      asOfDate: '2026-09-11',
+      mainNetYi: 1,
+      retailNetYi: -1,
+    },
+    book: {
+      account: { totalAssets: 100000, cash: 60000 },
+      closed: [],
+      executionPlans: [],
+      holding: [{
+        code: '600001',
+        qty: 2,
+        buyPrice: 9.5,
+        sl: 9,
+        buyAt: closeNow - 86400000,
+      }],
+    },
+  }))
+
+  assert.equal(
+    result.result.closePositionPlan.schemaVersion,
+    'next-session-plan.v1',
+  )
+  assert.equal(result.result.closePositionPlan.state, 'READY')
+  assert.equal(result.result.closePositionPlan.closePrice, 10)
+  assert.equal(result.result.closePositionPlan.scenarios.length, 3)
+})
+
 test('持仓加仓到价后由决策模型和账户风控共同核定手数', async () => {
   const addEvent = {
     kind: 'price-review',

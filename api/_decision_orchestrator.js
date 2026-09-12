@@ -23,6 +23,7 @@ import { compileExecutionPlan } from '../shared/executionPlan.js'
 import {
   buildDecisionRationale,
 } from '../shared/decisionRationale.js'
+import { buildNextSessionPlan } from '../shared/nextSessionPlan.js'
 import { deriveMarketRegime } from '../shared/marketRegime.js'
 import { buildStockFundNote } from '../shared/retailFundFlow.js'
 import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
@@ -559,6 +560,15 @@ export async function evaluateDecision({
     ...advice,
     decisionRationale,
     quantNote: decisionRationale.summary || advice.quantNote,
+  }
+  if (mode === 'hold_advice' && payload.todayQuote.live !== true) {
+    advice.closePositionPlan = buildNextSessionPlan({
+      advice,
+      closePrice: payload.todayQuote.price,
+      holdingLots: payload.holdQty,
+      sellableLots: payload.holdQty,
+      now,
+    })
   }
   if (!['BUY', 'ADD'].includes(decisionPlan.action) && !decisionPlan.blockedReasons?.length) {
     advice.actionPlan = sourceInstruction
