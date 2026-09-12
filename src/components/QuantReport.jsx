@@ -326,7 +326,7 @@ export default function QuantReport() {
           )}
         </div>
 
-        <div className="qrp-foot">工作日 01:15（北京时间）自动训练 · 仅更优且通过整体风险验证的组成部分会发布</div>
+        <div className="qrp-foot">周一至周六 01:15（北京时间）自动训练，周六处理周五收盘数据 · 仅更优且通过整体风险验证的组成部分会发布</div>
       </div>
     </div>
   )
