@@ -1,4 +1,7 @@
-"""Validated TickFlow OHLCV adapter for immutable market archives."""
+"""Validated TickFlow OHLCV adapter for immutable market archives.
+
+API contract: https://docs.tickflow.org/zh-hans/api-reference/k线数据/批量查询-k线数据
+"""
 
 import concurrent.futures
 import datetime as dt

@@ -3,7 +3,7 @@ import unittest
 import urllib.parse
 from zoneinfo import ZoneInfo
 
-from tickflow_data import fetch_daily, fetch_minutes
+from tickflow_data import archive_mode, fetch_daily, fetch_minutes
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -47,6 +47,17 @@ def compact(date, *, period):
 
 
 class TickFlowDataTest(unittest.TestCase):
+    def test_archive_mode_defaults_closed_and_rejects_unknown_values(self):
+        self.assertEqual(archive_mode({}), "off")
+        self.assertEqual(
+            archive_mode({"TICKFLOW_ARCHIVE_MODE": "shadow"}),
+            "shadow",
+        )
+        self.assertEqual(
+            archive_mode({"TICKFLOW_ARCHIVE_MODE": "unexpected"}),
+            "off",
+        )
+
     def test_minutes_use_unadjusted_batched_historical_api(self):
         calls = []
 
