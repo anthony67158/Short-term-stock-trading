@@ -43,23 +43,20 @@ OSS Bucket 必须保持私有；归档不包含账号账本、用户昵称、Tok
 
 ## 每日增量
 
-`.github/workflows/daily-retrain.yml` 的 `market-data-archive` job 在周一
-至周六北京时间 01:15 运行：
+`.github/workflows/daily-retrain.yml` 的 `market-data-archive` job 在工作日
+北京时间 01:15 运行：
 
 1. 调用杭州量化 FC 的鉴权端点 `/archive-market-day`，避免 GitHub 海外出口
    直接访问国内行情源；
-2. 从东方财富完整分页读取 A 股收盘快照和资金流，并校验返回数量与去重
-   数量一致；
+2. 从东方财富完整分页读取 A 股收盘快照，并校验返回数量与去重数量一致；
 3. 使用 OSS 上一交易日分片构建 80% 高流动性 + 20% 稳定探索股票池；
-4. 可选从 TickFlow 批量读取目标日未复权日线和 5 分钟线；影子模式只记录
-   覆盖率，主源模式缺失的股票逐只回退东方财富和腾讯；
+4. 优先从东方财富历史接口获取目标日 5 分钟线，失败时回退腾讯 5 分钟线；
 5. 同时保存东方财富 `f62` 主力净额和 `f84` 小单净额；
 6. 完整分钟代码覆盖率低于 85% 时失败关闭；
 7. 将分片追加到 OSS；重复运行同一内容不会产生重复对象。
 
-TickFlow Key 只配置在杭州量化 FC，不进入 GitHub Actions。运行模式由
-`TICKFLOW_ARCHIVE_MODE=off|shadow|primary` 控制，默认 `off`。GitHub
-Actions 只使用长期维护的仓库 Secret `QUANT_KEY` 鉴权杭州量化 FC，不读取
+公开行情源本身不需要第三方数据 Token；GitHub Actions 只使用长期维护的
+仓库 Secret `QUANT_KEY` 鉴权杭州量化 FC。每日流水线不读取
 `TUSHARE_TOKEN`，也不把 Tushare 作为自动回退。已有行业成员档案继续从
 `opportunitymodel/sector-data/v1/` 读取。公开接口没有正式 SLA，因此实现
 必须坚持多镜像、超时和完整性校验。
@@ -80,9 +77,8 @@ Actions 只使用长期维护的仓库 Secret `QUANT_KEY` 鉴权杭州量化 FC�
 
 归档步骤的核心数据口径为：
 
-- 全市场收盘快照：TickFlow 可作价格主源，东方财富保留全市场元数据与
-  资金流；未启用或覆盖不足时回退同花顺扶摇/东方财富；
-- 个股 5 分钟线：TickFlow 可作批量主源，东方财富和腾讯作为逐股回退；
+- 全市场收盘快照：东方财富；
+- 个股 5 分钟线：东方财富历史镜像，腾讯作为逐股回退；
 - 历史行业成员：OSS 中已版本化的申万成员档案；
 - 标签：生产反事实账本成熟后生成，原始行情永不直接充当标签。
 

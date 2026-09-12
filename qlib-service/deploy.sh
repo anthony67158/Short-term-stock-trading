@@ -21,7 +21,6 @@ else
     "$HERE/opportunity_market_archive.py" \
     "$HERE/opportunity_pattern_snapshot.py" \
     "$HERE/archive_public_market_day.py" \
-    "$HERE/tickflow_data.py" \
     "$HERE/sector_contract.py" \
     "$HERE/sector_factors.py" \
     "$HERE/sector_model.py" \
