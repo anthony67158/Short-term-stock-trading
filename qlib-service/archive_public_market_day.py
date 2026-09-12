@@ -23,6 +23,10 @@ from model_lib import _oss_bucket
 from decision_engine.data.fuyao import (
     fetch_full_snapshot as fetch_fuyao_market_snapshot,
 )
+from tickflow_data import (
+    fetch_daily as fetch_tickflow_daily,
+    fetch_minutes as fetch_tickflow_minutes,
+)
 
 
 EASTMONEY_REALTIME_HOSTS = (
@@ -119,6 +123,7 @@ def fetch_market_snapshot(
     *,
     fetch_page=None,
     fetch_fuyao=None,
+    fetch_tickflow=None,
     workers=6,
 ):
     load_page = fetch_page or (
@@ -224,6 +229,39 @@ def fetch_market_snapshot(
             })
     if len(daily) < 800 or len(funds) < 500:
         raise ValueError("公开源日线或资金流覆盖不足")
+    tickflow_loader = fetch_tickflow or (
+        lambda codes, date: fetch_tickflow_daily(
+            codes,
+            date,
+            workers=workers,
+        )
+    )
+    try:
+        tickflow_rows = tickflow_loader(
+            [row["code"] for row in daily],
+            target,
+        )
+    except Exception:
+        tickflow_rows = {}
+    tickflow_complete = (
+        isinstance(tickflow_rows, dict)
+        and len(tickflow_rows) / len(daily) >= 0.85
+    )
+    if tickflow_complete:
+        for row in daily:
+            bars = tickflow_rows.get(row["code"])
+            source = bars[-1] if isinstance(bars, list) and bars else None
+            if not source:
+                continue
+            for key in ("open", "high", "low", "close", "volume", "amount"):
+                if source.get(key) is not None:
+                    row[key] = source[key]
+        return {
+            "date": target,
+            "daily": daily,
+            "funds": funds,
+            "priceSource": "TICKFLOW",
+        }
     fuyao_loader = fetch_fuyao or (
         lambda: fetch_fuyao_market_snapshot(workers=workers)
     )
@@ -338,6 +376,7 @@ def archive_latest_public(
     target_bucket=None,
     snapshot_loader=fetch_market_snapshot,
     minute_loader=fetch_public_minute_day,
+    batch_minute_loader=None,
     universe_size=1000,
     workers=12,
     now_ms=None,
@@ -384,13 +423,34 @@ def archive_latest_public(
     )
     if len(universe) < universe_size:
         raise ValueError(f"公开源因果股票池不足: {len(universe)}/{universe_size}")
-    minutes = {}
+    load_tickflow_minutes = batch_minute_loader or (
+        lambda codes, date: fetch_tickflow_minutes(
+            codes,
+            date,
+            workers=min(int(workers), 5),
+        )
+    )
+    try:
+        minutes = load_tickflow_minutes(universe, target)
+    except Exception:
+        minutes = {}
+    if not isinstance(minutes, dict):
+        minutes = {}
+    tickflow_minute_codes = len(minutes)
+    if tickflow_minute_codes:
+        print(json.dumps({
+            "stage": "TICKFLOW_MINUTE_BATCH",
+            "progress": len(universe),
+            "total": len(universe),
+            "complete": tickflow_minute_codes,
+        }), flush=True)
+    missing_codes = [code for code in universe if code not in minutes]
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, min(int(workers), 20)),
     ) as executor:
         futures = {
             executor.submit(minute_loader, code, target): code
-            for code in universe
+            for code in missing_codes
         }
         for completed, future in enumerate(
             concurrent.futures.as_completed(futures),
@@ -407,7 +467,7 @@ def archive_latest_public(
                 print(json.dumps({
                     "stage": "PUBLIC_MINUTE_CODE",
                     "progress": completed,
-                    "total": len(universe),
+                    "total": len(missing_codes),
                     "complete": len(minutes),
                 }), flush=True)
     preclose = {
@@ -417,15 +477,23 @@ def archive_latest_public(
     for code, bars in minutes.items():
         for bar in bars:
             bar["pre_close"] = preclose.get(code)
+    uses_tickflow = (
+        snapshot.get("priceSource") == "TICKFLOW"
+        or tickflow_minute_codes > 0
+    )
     artifact = build_market_day_artifact(
         date=target,
         daily=snapshot["daily"],
         funds=snapshot["funds"],
         minutes={"date": target, "codes": minutes},
         source=(
-            "THS_FUYAO_EASTMONEY_TENCENT_DAILY_INCREMENT"
-            if snapshot.get("priceSource") == "THS_FUYAO"
-            else "EASTMONEY_TENCENT_DAILY_INCREMENT"
+            "TICKFLOW_EM_TENCENT_DAILY_INCREMENT"
+            if uses_tickflow
+            else (
+                "THS_FUYAO_EM_TENCENT_DAILY_INCREMENT"
+                if snapshot.get("priceSource") == "THS_FUYAO"
+                else "EASTMONEY_TENCENT_DAILY_INCREMENT"
+            )
         ),
         universe_source_date=previous["date"],
         requested_codes=len(universe),

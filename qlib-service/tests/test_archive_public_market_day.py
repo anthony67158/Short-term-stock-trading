@@ -253,6 +253,57 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
         self.assertEqual(result["daily"][0]["turnover"], 1.2)
         self.assertEqual(result["funds"][0]["mainNetYi"], 0.1)
 
+    def test_market_snapshot_prefers_complete_tickflow_prices(self):
+        timestamp = 1_788_940_800
+
+        def page(number):
+            start = (number - 1) * 100
+            rows = [{
+                "f2": 10.2,
+                "f5": 100,
+                "f6": 1_000_000,
+                "f8": 1.2,
+                "f10": 1.1,
+                "f12": f"{index:06d}",
+                "f14": f"股票{index}",
+                "f15": 10.5,
+                "f16": 9.8,
+                "f17": 10,
+                "f18": 10,
+                "f21": 1_020_000_000,
+                "f62": 10_000_000,
+                "f84": -5_000_000,
+                "f184": 1.2,
+                "f124": timestamp,
+            } for index in range(start, start + 100)]
+            return {"data": {"total": 800, "diff": rows}}
+
+        def tickflow(codes, date):
+            self.assertEqual(date, "20260909")
+            return {
+                code: [{
+                    "open": 10.8,
+                    "high": 11.2,
+                    "low": 10.7,
+                    "close": 11,
+                    "volume": 20_000,
+                    "amount": 220_000,
+                }]
+                for code in codes
+            }
+
+        result = fetch_market_snapshot(
+            fetch_page=page,
+            fetch_tickflow=tickflow,
+            fetch_fuyao=lambda: self.fail("扶摇不应在TickFlow完整时调用"),
+            workers=2,
+        )
+
+        self.assertEqual(result["priceSource"], "TICKFLOW")
+        self.assertEqual(result["daily"][0]["close"], 11)
+        self.assertEqual(result["daily"][0]["turnover"], 1.2)
+        self.assertEqual(result["funds"][0]["retailNetYi"], -0.05)
+
     def test_archive_uses_previous_oss_day_for_causal_universe(self):
         target_bucket = FakeBucket()
         previous = build_market_day_artifact(
@@ -285,6 +336,54 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
         self.assertEqual(result["status"], "published")
         self.assertEqual(result["source"], "EASTMONEY_TENCENT_DAILY_INCREMENT")
         self.assertEqual(result["entry"]["universe"]["sourceDate"], "20260908")
+        self.assertEqual(result["entry"]["universe"]["coverage"], 1)
+
+    def test_archive_uses_tickflow_batch_then_falls_back_only_missing_codes(self):
+        target_bucket = FakeBucket()
+        previous = build_market_day_artifact(
+            date="20260908",
+            daily=daily_rows("20260908"),
+            funds=fund_rows("20260908"),
+            minutes={
+                "date": "20260908",
+                "codes": {
+                    "000001": minute_bars("000001", "20260908"),
+                },
+            },
+            universe_source_date="20260905",
+            requested_codes=1,
+        )
+        publish_market_days(target_bucket, [previous])
+        fallback_calls = []
+
+        def tickflow(codes, date):
+            self.assertEqual(date, "20260909")
+            return {
+                code: minute_bars(code, date)
+                for code in codes[:90]
+            }
+
+        def fallback(code, date):
+            fallback_calls.append(code)
+            return minute_bars(code, date)
+
+        result = archive_latest_public(
+            target_bucket=target_bucket,
+            snapshot_loader=lambda: {
+                "date": "20260909",
+                "daily": daily_rows("20260909"),
+                "funds": fund_rows("20260909"),
+                "priceSource": "EASTMONEY",
+            },
+            minute_loader=fallback,
+            batch_minute_loader=tickflow,
+            universe_size=100,
+            workers=2,
+        )
+
+        self.assertEqual(result["status"], "published")
+        self.assertEqual(result["source"], "TICKFLOW_EM_TENCENT_DAILY_INCREMENT")
+        self.assertEqual(len(fallback_calls), 10)
         self.assertEqual(result["entry"]["universe"]["coverage"], 1)
 
 
