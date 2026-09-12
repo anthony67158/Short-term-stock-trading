@@ -10,6 +10,7 @@ import {
   parseConceptCloseHistoryPayload,
   parseConceptTrendPayload,
   selectLongestConceptKlinePayload,
+  visibleConceptSectors,
 } from '../shared/conceptTrend.js'
 
 const payload = {
@@ -119,6 +120,20 @@ test('概念目录不截断完整数据且支持名称和代码搜索', () => {
   assert.equal(filterConceptSectors(sectors, '').length, 504)
   assert.deepEqual(filterConceptSectors(sectors, '创新'), [sectors[503]])
   assert.deepEqual(filterConceptSectors(sectors, 'BK0503'), [sectors[503]])
+})
+
+test('概念目录默认只挂载前20项且搜索和展开使用全量结果', () => {
+  const sectors = Array.from({ length: 30 }, (_, index) => ({
+    code: `BK${String(index + 1).padStart(4, '0')}`,
+    name: `概念${index + 1}`,
+  }))
+
+  assert.equal(visibleConceptSectors(sectors).length, 20)
+  assert.equal(visibleConceptSectors(sectors, { showAll: true }).length, 30)
+  assert.equal(
+    visibleConceptSectors(sectors.slice(29), { query: '概念30' })[0].code,
+    'BK0030',
+  )
 })
 
 test('概念历史K线按东方财富字段解析为OCLH和成交量数据', () => {

@@ -33,6 +33,15 @@ export function filterConceptSectors(sectors, query = '') {
   )
 }
 
+export function visibleConceptSectors(
+  sectors,
+  { query = '', showAll = false, limit = 20 } = {},
+) {
+  const list = Array.isArray(sectors) ? sectors : []
+  if (String(query || '').trim() || showAll) return list
+  return list.slice(0, Math.max(0, Math.trunc(Number(limit) || 0)))
+}
+
 export function parseConceptTrendRows(rows, preClose) {
   const base = finite(preClose)
   return (Array.isArray(rows) ? rows : []).flatMap((row) => {

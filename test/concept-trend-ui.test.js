@@ -22,12 +22,17 @@ test('盘面研究新增独立概念走势区并可联动现有成分股面板',
   assert.match(research, /tabIndex="-1"/)
 })
 
-test('概念走势展示完整可搜索目录而非只截取前10个', () => {
+test('概念走势默认聚焦前20项且搜索仍覆盖完整目录', () => {
   assert.match(concept, /\/api\/sectors\?type=concept&sort=/)
   assert.match(concept, /filterConceptSectors\(/)
-  assert.doesNotMatch(concept, /\.slice\(0,\s*10\)/)
+  assert.match(concept, /const DEFAULT_CONCEPT_COUNT = 20/)
+  assert.match(
+    concept,
+    /visibleConceptSectors\(ranked, \{[\s\S]*?query,[\s\S]*?showAll,[\s\S]*?limit: DEFAULT_CONCEPT_COUNT/,
+  )
   assert.match(concept, /placeholder="搜索全部概念"/)
   assert.match(concept, /共 \{allSectors\.length\} 个概念/)
+  assert.match(concept, /查看全部 \$\{ranked\.length\} 个概念/)
 })
 
 test('概念走势支持分时日K周K月K并明确真实数据日期', () => {

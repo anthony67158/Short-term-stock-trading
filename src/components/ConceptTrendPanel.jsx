@@ -8,9 +8,11 @@ import {
   formatConceptCloseHistoryTooltip,
   formatConceptKlineTooltip,
   formatConceptTrendTooltip,
+  visibleConceptSectors,
 } from '../../shared/conceptTrend.js'
 
 const KEY_TIMES = new Set(['09:30', '11:30', '13:00', '15:00'])
+const DEFAULT_CONCEPT_COUNT = 20
 
 function compactAmount(value) {
   const number = Number(value)
@@ -335,6 +337,7 @@ export default function ConceptTrendPanel({ interval, onInspect }) {
   const [rankMode, setRankMode] = useState('main')
   const [selectedCode, setSelectedCode] = useState('')
   const [query, setQuery] = useState('')
+  const [showAll, setShowAll] = useState(false)
   const [chartMode, setChartMode] = useState('intraday')
   const sectors = usePolling(
     `/api/sectors?type=concept&sort=${rankMode}`,
@@ -350,6 +353,11 @@ export default function ConceptTrendPanel({ interval, onInspect }) {
     () => filterConceptSectors(allSectors, query),
     [allSectors, query],
   )
+  const visibleRanked = visibleConceptSectors(ranked, {
+    query,
+    showAll,
+    limit: DEFAULT_CONCEPT_COUNT,
+  })
   const selected = allSectors.find((item) => item.code === selectedCode)
     || allSectors[0]
     || null
@@ -427,7 +435,7 @@ export default function ConceptTrendPanel({ interval, onInspect }) {
               <span>共 {allSectors.length} 个概念</span>
             </div>
             <div className="concept-rank" role="listbox" aria-label="概念板块排行">
-              {ranked.map((item) => (
+              {visibleRanked.map((item) => (
                 <button type="button" key={item.code}
                   className={'concept-rank-item' + (selected?.code === item.code ? ' active' : '')}
                   aria-selected={selected?.code === item.code}
@@ -442,6 +450,22 @@ export default function ConceptTrendPanel({ interval, onInspect }) {
                 <div className="empty small">没有匹配的概念</div>
               )}
             </div>
+            {!query.trim() && ranked.length > DEFAULT_CONCEPT_COUNT && (
+              <button
+                type="button"
+                className="concept-rank-toggle"
+                aria-expanded={showAll}
+                onClick={() => setShowAll((value) => !value)}
+              >
+                {showAll
+                  ? '收起到前 20 个'
+                  : `查看全部 ${ranked.length} 个概念`}
+                <Icon
+                  name={showAll ? 'chevronUp' : 'chevronDown'}
+                  size={12}
+                />
+              </button>
+            )}
           </div>
 
           <div className="concept-trend-main">

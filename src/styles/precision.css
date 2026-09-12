@@ -7167,6 +7167,25 @@ body:has(.modal-mask) .card-decision-slot .action-command-preview {
   padding: var(--space-2xs) 0;
 }
 
+.concept-rank-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2xs);
+  min-height: 36px;
+  border: 0;
+  border-top: 1px solid var(--color-rule-2);
+  background: var(--color-paper-2);
+  color: var(--color-accent);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.concept-rank-toggle:hover {
+  background: var(--color-paper-3);
+}
+
 .concept-rank-item {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 60px 78px;
