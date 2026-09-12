@@ -20060,6 +20060,40 @@ html[data-theme="light"] .nav {
   gap: var(--space-md);
 }
 
+.entry-instruction {
+  display: grid;
+  gap: var(--space-sm);
+  padding-block-end: var(--space-md);
+  border-block-end: 1px solid var(--color-rule-2);
+}
+
+.entry-instruction-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.entry-instruction-title span {
+  color: var(--color-muted);
+  font-weight: 650;
+}
+
+.entry-instruction[data-state='READY'] .entry-instruction-title span {
+  color: var(--color-up);
+}
+
+.entry-instruction[data-state='WAIT_TRIGGER'] .entry-instruction-title span {
+  color: var(--color-accent);
+}
+
+.entry-instruction-boundary {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
 .decision-rationale-facts {
   display: grid;
   gap: var(--space-sm);

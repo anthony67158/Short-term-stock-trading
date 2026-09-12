@@ -6,7 +6,7 @@ import {
 import { decisionScoreLanguage } from '../../shared/decisionScoreLanguage.js'
 import { fmtRaw } from '../format.js'
 import { loadDecisionExplanation } from '../decisionExplanation.js'
-import DecisionRationaleEvidence from './DecisionRationaleEvidence'
+import DecisionRationaleEvidence, { EntryInstruction } from './DecisionRationaleEvidence'
 import Icon from './Icon'
 import StrategyPatternEvidence from './StrategyPatternEvidence'
 
@@ -88,6 +88,10 @@ export default function DecisionSummary({
           <div><dt>风险边界</dt><dd>{view.protection}</dd></div>
         )}
       </dl>
+      {detailed && <EntryInstruction
+        instruction={decisionRationale?.entryInstruction}
+        executionOpen={view.executable}
+      />}
       {detailed && (
         <>
           <button type="button" className="decision-evidence-toggle" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>
@@ -106,6 +110,7 @@ export default function DecisionSummary({
               {decisionRationale ? (
                 <DecisionRationaleEvidence
                   rationale={decisionRationale}
+                  hideEntry
                 />
               ) : scoreLanguage.items.length > 0 ? (
                 <>
