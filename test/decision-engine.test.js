@@ -250,7 +250,11 @@ function scenario(overrides = {}) {
     book: { account: { cash: 100000 }, holding: [], closed: [], executionPlans: [] },
     quotes: [{ code: '600001', price: 10, isLivePrice: true, tradeDate: '2026-09-10' }],
     detail: { candles: Array.from({ length: 30 }, () => ({ close: 10, high: 10.2, low: 9.8, amount: 100000000 })) },
-    trends: [], fund: { mainNetYi: 1, retailNetYi: -1 },
+    trends: [], fund: {
+      asOfDate: '2026-09-10',
+      mainNetYi: 1,
+      retailNetYi: -1,
+    },
     market: { breadth: { up: 3000, down: 1000, flat: 100 } },
     score: async ([input]) => new Map([[input.code, {
       ...plan.opportunityScore,
@@ -597,7 +601,34 @@ test('过时报价和缺失资金不产生买入指令', async () => {
   const missing = await evaluateDecision(scenario({ fund: null }))
   assert.equal(missing.result.decisionSource.state, 'EVIDENCE_INCOMPLETE')
   assert.equal(missing.result.decisionPlan.quantity.lots, 0)
-  assert.ok(missing.result.decisionSource.missingEvidence.includes('主力与小单资金'))
+  assert.ok(
+    missing.result.decisionSource.missingEvidence
+      .includes('当日主力与小单资金'),
+  )
+})
+
+test('资金日期早于当前报价交易日时按缺失证据失败关闭', async () => {
+  let scoreCalls = 0
+  const result = await evaluateDecision(scenario({
+    fund: {
+      asOfDate: '2026-09-09',
+      mainNetYi: 8,
+      retailNetYi: -6,
+    },
+    score: async () => {
+      scoreCalls += 1
+      return new Map()
+    },
+  }))
+
+  assert.equal(scoreCalls, 0)
+  assert.equal(result.result.decisionSource.state, 'EVIDENCE_INCOMPLETE')
+  assert.ok(
+    result.result.decisionSource.missingEvidence
+      .includes('当日主力与小单资金'),
+  )
+  assert.equal(result.result.decisionEvidence.funds.mainNetYi, null)
+  assert.equal(result.result.decisionEvidence.funds.retailNetYi, null)
 })
 
 test('模型缺失及资金故障不能阻断持仓硬止损', async () => {
@@ -732,6 +763,11 @@ test('退出前复核用最新模型结果撤销反弹后的旧清仓或确认�
   assert.equal(confirmedExit.result.decisionPlan.action, 'EXIT')
   assert.equal(confirmedExit.result.decisionPlan.actionability, 'READY')
   assert.equal(confirmedExit.result.decisionPlan.prices.reference, 53.9)
+  assert.ok(confirmedExit.result.executionPlan.riskAmount > 0)
+  assert.equal(
+    confirmedExit.result.executionPlan.plannedExpectedNetR,
+    -0.2,
+  )
 })
 
 test('模型换版期间不得混用三条路径的模型概率', () => {

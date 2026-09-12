@@ -214,6 +214,11 @@ export function compileExecutionPlan({
   })
   const targetLots = integerLots(decisionPlan.quantity?.lots)
   const referencePrice = positive(decisionPlan.prices?.reference)
+  const modelRiskAmount = (
+    positive(decisionPlan.risk?.modelPriceRiskPerShare)
+    * targetLots
+    * 100
+  ) || 0
   const estimatedNetAmount = positive(
     decisionPlan.costs?.estimatedNetAmount,
   ) || (
@@ -296,7 +301,11 @@ export function compileExecutionPlan({
       finite(
         decisionPlan.targetPosition?.selected?.stopLossAmount
         ?? decisionPlan.risk?.tradeExpectancy?.plan?.lossAmount,
-      ) || 0,
+      ) || modelRiskAmount,
+    ),
+    plannedExpectedNetR: finite(
+      decisionPlan.risk?.modelExpectedNetR
+      ?? decisionPlan.risk?.expectedNetR,
     ),
     stressRiskAmount: Math.max(
       0,

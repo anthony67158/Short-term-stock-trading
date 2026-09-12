@@ -1198,6 +1198,12 @@ export function compileDecisionPlan({
         tradeExpectancy.plan?.breakEvenWinProbability ?? null,
       expectedNetR:
         tradeExpectancy.expectancy?.expectedNetRGivenFill ?? null,
+      modelPriceRiskPerShare:
+        round(modelPriceRiskPerShare, 4),
+      modelExpectedNetR:
+        round(payload.opportunityScore?.expectedNetR, 4),
+      modelExpectedShortfall10:
+        round(payload.opportunityScore?.expectedShortfall10, 4),
       maxLossAmount: capacity.maxLossAmount,
       estimatedLossPerLot: capacity.lossPerLot,
       manualProbeLimitPct: capacity.manualProbeLimitPct ?? null,

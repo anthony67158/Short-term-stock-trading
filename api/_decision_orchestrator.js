@@ -76,6 +76,31 @@ function finite(value) {
   return Number.isFinite(number) ? number : null
 }
 
+function normalizedTradeDate(value) {
+  const digits = String(value || '').replace(/\D/g, '')
+  return /^\d{8}$/.test(digits) ? digits : ''
+}
+
+function currentFundEvidence(fund, tradeDate) {
+  const expectedDate = normalizedTradeDate(tradeDate)
+  const actualDate = normalizedTradeDate(fund?.asOfDate)
+  const valuesPresent = (
+    fund?.mainNetYi != null
+    && fund?.retailNetYi != null
+  )
+  const current = (
+    valuesPresent
+    && (!expectedDate || actualDate === expectedDate)
+  )
+  return {
+    ...(fund || {}),
+    mainNetYi: current ? fund.mainNetYi : null,
+    retailNetYi: current ? fund.retailNetYi : null,
+    currentValuesValid: current,
+    expectedTradeDate: expectedDate || null,
+  }
+}
+
 function evidenceTrend(values) {
   return (Array.isArray(values) ? values : [])
     .slice(-5)
@@ -212,6 +237,7 @@ export async function evaluateDecision({
       && isContinuousTrading(now),
   }
   if (!(Number(quote?.price) > 0)) throw new Error('行情不可用，未发布新决策')
+  const validatedFund = currentFundEvidence(fund, quote.tradeDate)
   const name = quote.name || code
   const trendRows = Array.isArray(trends)
     ? trends
@@ -230,7 +256,7 @@ export async function evaluateDecision({
     quote,
     candles,
     trends: trendRows,
-    fund: fund || {},
+    fund: validatedFund,
     sectorOpportunity: sector || {},
     mode: quote.live === true ? 'intraday' : 'close',
   })
@@ -244,7 +270,7 @@ export async function evaluateDecision({
     code,
     name,
     quote,
-    fund,
+    fund: validatedFund,
     sectorOpportunity: sector,
     ...(strategyPatternToolsEnabled ? { shadowFeatures } : {}),
     strategyPatternCapabilities,
@@ -273,7 +299,7 @@ export async function evaluateDecision({
   const missingEvidence = [
     candles.length < 20 ? '至少20根有效日线' : '',
     !(market?.breadth?.up != null && market?.breadth?.down != null) ? '市场涨跌家数' : '',
-    !(fund?.mainNetYi != null && fund?.retailNetYi != null) ? '主力与小单资金' : '',
+    validatedFund.currentValuesValid !== true ? '当日主力与小单资金' : '',
     !holding.length && !accountRisk.complete ? '账户现金或持仓风险' : '',
   ].filter(Boolean)
   const payload = {
@@ -294,7 +320,7 @@ export async function evaluateDecision({
     sectorOpportunity: sector || {},
     accountCircuitBreaker: accountRisk.breaker,
     holdingStopPrice: Math.max(0, ...holding.map((item) => Number(item.sl) || 0)) || null,
-    stockFund: fund,
+    stockFund: validatedFund,
     reviewEvent,
     allocationMarket: allocationMarketFrom(candles, quote),
     reservedBuyLots: accountRisk.reservedExposures
@@ -324,7 +350,7 @@ export async function evaluateDecision({
     quote: payload.todayQuote,
     market,
     sector,
-    fund,
+    fund: validatedFund,
     shadowFeatures,
     missingEvidence,
     strategyPatternDisplayEnabled:
@@ -361,11 +387,18 @@ export async function evaluateDecision({
         sector: sector?.sector,
       },
     })
-    const scores = await score([input]).catch(() => new Map())
+    const scores = payload.evidenceIncomplete
+      ? new Map()
+      : await score([input]).catch(() => new Map())
     return {
       ...plan,
       opportunityScore: {
-        ...(scores.get(code) || unavailableOpportunityScore(input, 'MISSING_RESPONSE')),
+        ...(scores.get(code) || unavailableOpportunityScore(
+          input,
+          payload.evidenceIncomplete
+            ? 'EVIDENCE_INCOMPLETE'
+            : 'MISSING_RESPONSE',
+        )),
         serverVerified: true,
         priceContract: {
           entryPrice: plan.entryPlan.price,
@@ -452,7 +485,8 @@ export async function evaluateDecision({
     观望: 'WATCH',
   }[advice.action]
   const mode = holding.length ? 'hold_advice' : 'buy_advice'
-  advice.fundNote = buildStockFundNote(fund || {}) || '资金数据暂缺，未据此推断资金方向'
+  advice.fundNote = buildStockFundNote(validatedFund)
+    || '资金数据暂缺，未据此推断资金方向'
   const plannedReviewAction = String(
     reviewEvent?.plannedAction || '',
   ).toUpperCase()

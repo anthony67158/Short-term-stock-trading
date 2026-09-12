@@ -61,6 +61,10 @@ function draftSellPlan({
       quantity: { lots },
       prices: { reference: 10, stop: 9.5, target: 11 },
       costs: { estimatedNetAmount: 1990, estimatedFees: 10 },
+      risk: {
+        modelPriceRiskPerShare: 0.5,
+        modelExpectedNetR: -0.2,
+      },
       evidenceIds: ['ev_demo'],
       strategy: {
       },

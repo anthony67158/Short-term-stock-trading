@@ -172,7 +172,8 @@ export function attributeExecution(plan, {
     ?? plan.tradeExpectancy?.plan?.lossAmount,
   )
   const expectedNetR = finite(
-    plan.tradeExpectancy?.expectancy?.expectedNetRGivenFill,
+    plan.plannedExpectedNetR
+    ?? plan.tradeExpectancy?.expectancy?.expectedNetRGivenFill,
   )
   const realizedNetR = (
     validationComplete === true
@@ -235,6 +236,9 @@ export function attributeExecution(plan, {
       status === 'COMPLETED'
       && validationComplete === true
       && finite(netPnl) != null
+      && riskAmount > 0
+      && expectedNetR != null
+      && realizedNetR != null
     ),
   }
 }
