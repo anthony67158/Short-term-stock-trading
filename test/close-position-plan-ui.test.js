@@ -28,7 +28,7 @@ test('收盘卡片使用独立次日预案并撤下盘中加仓说明', () => {
   assert.match(closePlan, /次日交易预案/)
   assert.match(closePlan, /次日开盘三种路径/)
   assert.match(closePlan, /至止损额外风险/)
-  assert.match(closePlan, /模型动作价值/)
+  assert.match(closePlan, /plan\.risk\.actionValueLabel/)
   assert.match(closePlan, /失效条件/)
 })
 

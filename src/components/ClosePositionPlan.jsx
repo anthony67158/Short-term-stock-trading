@@ -62,7 +62,7 @@ export default function ClosePositionPlan({ plan }) {
               ? 'negative'
               : 'neutral'
         }>
-          <dt>模型动作价值</dt>
+          <dt>{plan.risk.actionValueLabel}</dt>
           <dd>{signedMoney(actionValue)}</dd>
         </div>
       </dl>

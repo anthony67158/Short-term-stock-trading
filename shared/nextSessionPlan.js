@@ -288,6 +288,9 @@ export function buildNextSessionPlan({
         Math.max(0, close - stop) * held * 100,
       ),
       planRiskAmount: money(planRiskAmount),
+      actionValueLabel: ['EXIT', 'REDUCE'].includes(action)
+        ? '相对继续持有'
+        : '模型动作价值',
       selectedActionValueR,
       actionValueAmount: selectedActionValueR == null
         ? null
