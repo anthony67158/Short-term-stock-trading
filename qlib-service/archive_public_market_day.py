@@ -24,7 +24,6 @@ from decision_engine.data.fuyao import (
     fetch_full_snapshot as fetch_fuyao_market_snapshot,
 )
 from tickflow_data import (
-    archive_mode as tickflow_archive_mode,
     fetch_daily as fetch_tickflow_daily,
     fetch_minutes as fetch_tickflow_minutes,
 )
@@ -125,7 +124,6 @@ def fetch_market_snapshot(
     fetch_page=None,
     fetch_fuyao=None,
     fetch_tickflow=None,
-    tickflow_mode=None,
     workers=6,
 ):
     load_page = fetch_page or (
@@ -231,40 +229,25 @@ def fetch_market_snapshot(
             })
     if len(daily) < 800 or len(funds) < 500:
         raise ValueError("公开源日线或资金流覆盖不足")
-    selected_tickflow_mode = tickflow_mode or tickflow_archive_mode()
-    tickflow_rows = {}
-    if selected_tickflow_mode != "off":
-        tickflow_loader = fetch_tickflow or (
-            lambda codes, date: fetch_tickflow_daily(
-                codes,
-                date,
-                workers=workers,
-            )
+    tickflow_loader = fetch_tickflow or (
+        lambda codes, date: fetch_tickflow_daily(
+            codes,
+            date,
+            workers=workers,
         )
-        try:
-            tickflow_rows = tickflow_loader(
-                [row["code"] for row in daily],
-                target,
-            )
-        except Exception:
-            tickflow_rows = {}
-    tickflow_coverage = (
-        len(tickflow_rows) / len(daily)
-        if isinstance(tickflow_rows, dict) and daily
-        else 0.0
     )
+    try:
+        tickflow_rows = tickflow_loader(
+            [row["code"] for row in daily],
+            target,
+        )
+    except Exception:
+        tickflow_rows = {}
     tickflow_complete = (
-        tickflow_coverage >= 0.85
+        isinstance(tickflow_rows, dict)
+        and len(tickflow_rows) / len(daily) >= 0.85
     )
-    if selected_tickflow_mode != "off":
-        print(json.dumps({
-            "stage": "TICKFLOW_DAILY_SOURCE",
-            "mode": selected_tickflow_mode,
-            "requested": len(daily),
-            "complete": len(tickflow_rows),
-            "coverage": round(tickflow_coverage, 6),
-        }), flush=True)
-    if selected_tickflow_mode == "primary" and tickflow_complete:
+    if tickflow_complete:
         for row in daily:
             bars = tickflow_rows.get(row["code"])
             source = bars[-1] if isinstance(bars, list) and bars else None
@@ -278,10 +261,6 @@ def fetch_market_snapshot(
             "daily": daily,
             "funds": funds,
             "priceSource": "TICKFLOW",
-            "tickflowDiagnostics": {
-                "mode": selected_tickflow_mode,
-                "dailyCoverage": round(tickflow_coverage, 6),
-            },
         }
     fuyao_loader = fetch_fuyao or (
         lambda: fetch_fuyao_market_snapshot(workers=workers)
@@ -322,10 +301,6 @@ def fetch_market_snapshot(
             if isinstance(fuyao_rows, dict)
             else "EASTMONEY"
         ),
-        "tickflowDiagnostics": {
-            "mode": selected_tickflow_mode,
-            "dailyCoverage": round(tickflow_coverage, 6),
-        },
     }
 
 
@@ -402,7 +377,6 @@ def archive_latest_public(
     snapshot_loader=fetch_market_snapshot,
     minute_loader=fetch_public_minute_day,
     batch_minute_loader=None,
-    tickflow_mode=None,
     universe_size=1000,
     workers=12,
     now_ms=None,
@@ -449,37 +423,27 @@ def archive_latest_public(
     )
     if len(universe) < universe_size:
         raise ValueError(f"公开源因果股票池不足: {len(universe)}/{universe_size}")
-    selected_tickflow_mode = tickflow_mode or tickflow_archive_mode()
-    tickflow_minutes = {}
-    if selected_tickflow_mode != "off":
-        load_tickflow_minutes = batch_minute_loader or (
-            lambda codes, date: fetch_tickflow_minutes(
-                codes,
-                date,
-                workers=min(int(workers), 5),
-            )
+    load_tickflow_minutes = batch_minute_loader or (
+        lambda codes, date: fetch_tickflow_minutes(
+            codes,
+            date,
+            workers=min(int(workers), 5),
         )
-        try:
-            tickflow_minutes = load_tickflow_minutes(universe, target)
-        except Exception:
-            tickflow_minutes = {}
-    if not isinstance(tickflow_minutes, dict):
-        tickflow_minutes = {}
-    tickflow_minute_codes = len(tickflow_minutes)
-    if selected_tickflow_mode != "off":
+    )
+    try:
+        minutes = load_tickflow_minutes(universe, target)
+    except Exception:
+        minutes = {}
+    if not isinstance(minutes, dict):
+        minutes = {}
+    tickflow_minute_codes = len(minutes)
+    if tickflow_minute_codes:
         print(json.dumps({
             "stage": "TICKFLOW_MINUTE_BATCH",
-            "mode": selected_tickflow_mode,
             "progress": len(universe),
             "total": len(universe),
             "complete": tickflow_minute_codes,
-            "coverage": round(tickflow_minute_codes / len(universe), 6),
         }), flush=True)
-    minutes = (
-        dict(tickflow_minutes)
-        if selected_tickflow_mode == "primary"
-        else {}
-    )
     missing_codes = [code for code in universe if code not in minutes]
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, min(int(workers), 20)),
@@ -514,11 +478,8 @@ def archive_latest_public(
         for bar in bars:
             bar["pre_close"] = preclose.get(code)
     uses_tickflow = (
-        selected_tickflow_mode == "primary"
-        and (
-            snapshot.get("priceSource") == "TICKFLOW"
-            or tickflow_minute_codes > 0
-        )
+        snapshot.get("priceSource") == "TICKFLOW"
+        or tickflow_minute_codes > 0
     )
     artifact = build_market_day_artifact(
         date=target,
@@ -538,16 +499,6 @@ def archive_latest_public(
         requested_codes=len(universe),
         generated_at=market_close_ms(target),
     )
-    artifact["sourceDiagnostics"] = {
-        "tickflow": {
-            **(snapshot.get("tickflowDiagnostics") or {}),
-            "mode": selected_tickflow_mode,
-            "minuteCoverage": round(
-                tickflow_minute_codes / len(universe),
-                6,
-            ),
-        },
-    }
     published = publish_market_days(target_bucket, [artifact])
     pattern_manifest = refresh_strategy_pattern_snapshot(
         target_bucket,

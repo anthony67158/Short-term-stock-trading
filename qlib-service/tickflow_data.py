@@ -18,18 +18,11 @@ BATCH_SIZE = 100
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 CODE_PATTERN = re.compile(r"^\d{6}$")
 REQUIRED_COLUMNS = ("timestamp", "open", "high", "low", "close", "volume")
-ARCHIVE_MODES = {"off", "shadow", "primary"}
 
 
 def configured(env=None):
     source = env if env is not None else os.environ
     return bool(str(source.get("TICKFLOW_API_KEY") or "").strip())
-
-
-def archive_mode(env=None):
-    source = env if env is not None else os.environ
-    value = str(source.get("TICKFLOW_ARCHIVE_MODE") or "off").strip().lower()
-    return value if value in ARCHIVE_MODES else "off"
 
 
 def _symbol(code):
