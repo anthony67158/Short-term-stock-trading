@@ -2736,7 +2736,8 @@ function HoldingItem({ h, quote: q }) {
   const decisionView = decisionPresentation({
     advice: holdAdvice, holdingLots: liveQty,
     stopPrice: effectivePlanStop,
-    currentPrice: validPx, sellableLots: currentT1.sellableToday,
+    currentPrice: validPx, closePrice: effPx,
+    sellableLots: currentT1.sellableToday,
     loading: generation?.active, executionPlans: book.executionPlans || [],
   })
 

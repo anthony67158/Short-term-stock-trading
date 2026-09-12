@@ -1137,6 +1137,7 @@ export default function StockDetail({ stock, onClose }) {
                     holdingLots={myHold?.qty || 0}
                     stopPrice={book.holding.find((item) => item.code === stock.code)?.sl}
                     currentPrice={quoteDisplayState(overview).livePrice}
+                    closePrice={quoteDisplayState(overview).price}
                     sellableLots={t1StatusOf(stock.code).sellableToday}
                   />
                 )}
@@ -1194,6 +1195,7 @@ export default function StockDetail({ stock, onClose }) {
                           holdingLots={myHold?.qty || 0}
                           stopPrice={book.holding.find((item) => item.code === stock.code)?.sl}
                           currentPrice={quoteDisplayState(overview).livePrice}
+                          closePrice={quoteDisplayState(overview).price}
                           sellableLots={t1StatusOf(stock.code).sellableToday}
                           detailed
                         />

@@ -40,7 +40,7 @@ const adviceBase = {
       stop: 48.85,
       target: 58.2,
     },
-    validUntil: new Date(now + 3600000).toISOString(),
+    validUntil: new Date(now + 3 * 86400000).toISOString(),
   },
   selectedDecisionPlan: {
     route: 'IMMEDIATE',

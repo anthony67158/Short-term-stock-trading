@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildNextSessionPlan,
+  isNextSessionPlanWindow,
 } from '../shared/nextSessionPlan.js'
 
 const now = Date.parse('2026-09-11T07:50:00Z')
@@ -126,4 +127,42 @@ test('关键结果不完整时收盘卡片判为无效且不展示半成品情�
   assert.equal(result.conclusion.headline, '本轮收盘决策无效')
   assert.deepEqual(result.scenarios, [])
   assert.match(result.summary, /目标价/)
+})
+
+test('有效期未覆盖下一交易日开盘时不得发布次日预案', () => {
+  const advice = holdingAdvice()
+  advice.decisionPlan = {
+    ...advice.decisionPlan,
+    validUntil: '2026-09-11T09:00:00.000Z',
+  }
+
+  const result = buildNextSessionPlan({
+    advice,
+    closePrice: 51.13,
+    holdingLots: 4,
+    sellableLots: 4,
+    now,
+  })
+
+  assert.equal(result.state, 'INVALID')
+  assert.match(result.summary, /下一交易日开盘/)
+})
+
+test('次日预案窗口覆盖收盘后盘前和非交易日但不覆盖午休', () => {
+  assert.equal(
+    isNextSessionPlanWindow(Date.parse('2026-09-11T07:50:00Z')),
+    true,
+  )
+  assert.equal(
+    isNextSessionPlanWindow(Date.parse('2026-09-11T01:10:00Z')),
+    true,
+  )
+  assert.equal(
+    isNextSessionPlanWindow(Date.parse('2026-09-12T02:00:00Z')),
+    true,
+  )
+  assert.equal(
+    isNextSessionPlanWindow(Date.parse('2026-09-11T04:00:00Z')),
+    false,
+  )
 })

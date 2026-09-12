@@ -1,6 +1,10 @@
 import {
   isDecisionEngineAdvice,
 } from './decisionEngineSource.js'
+import {
+  buildNextSessionPlan,
+  isNextSessionPlanWindow,
+} from './nextSessionPlan.js'
 import { isContinuousTrading } from './tradingCalendar.js'
 import { humanizeUserFacingText } from './userFacingLanguage.js'
 
@@ -72,7 +76,7 @@ export function decisionPrices(advice = {}) {
 
 export function decisionPresentation({
   advice, holdingLots = 0, stopPrice = null, managed = true,
-  loading = false, now = Date.now(), currentPrice,
+  loading = false, now = Date.now(), currentPrice, closePrice,
   sellableLots = null, executionPlans = [],
 } = {}) {
   const held = Number(holdingLots) > 0
@@ -215,10 +219,29 @@ export function decisionPresentation({
     reason = held ? '当前路径价值仍为正，本次不加仓、不减仓。'
       : '当前没有费后价值为正的买入路径。'
   }
+  const storedClosePlan = advice?.closePositionPlan
+  const closePositionPlan = (
+    held
+    && managed
+    && !loading
+    && isNextSessionPlanWindow(now)
+  ) ? (
+      storedClosePlan?.schemaVersion === 'next-session-plan.v1'
+      && storedClosePlan.decisionId === plan?.decisionId
+      && closePrice == null
+        ? storedClosePlan
+        : buildNextSessionPlan({
+            advice,
+            closePrice,
+            holdingLots,
+            sellableLots,
+            now,
+          })
+    ) : null
   return {
     headline, reason, timing, tone, icon, executable, action, qty,
     isDecisionEngine, ready, waiting, hardStop, exitReviewRequired,
-    addWaiting,
+    addWaiting, closePositionPlan,
     kind: { BUY: 'buy', ADD: 'add', EXIT: 'sell', REDUCE: 'reduce', HOLD: 'hold', WATCH: 'wait' }[action],
     actionable: executable,
     quantity: executable ? `${qty}手` : '',

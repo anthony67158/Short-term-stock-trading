@@ -1,9 +1,18 @@
 import {
   beijingDate,
+  beijingMinutes,
+  isTradingDayAt,
+  nextTradingDate,
   nextTradingDayLabel,
 } from './tradingCalendar.js'
 
 export const NEXT_SESSION_PLAN_VERSION = 'next-session-plan.v1'
+
+export function isNextSessionPlanWindow(now = Date.now()) {
+  if (!isTradingDayAt(now)) return true
+  const minutes = beijingMinutes(now)
+  return minutes < 570 || minutes > 900
+}
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -39,6 +48,18 @@ function validUntilLabel(value) {
   } ${String(date.getHours()).padStart(2, '0')}:${
     String(date.getMinutes()).padStart(2, '0')
   }`
+}
+
+function nextSessionOpenAt(now) {
+  const date = nextTradingDate(now)
+  if (!date) return null
+  return Date.UTC(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    1,
+    30,
+  )
 }
 
 function actionValue(advice = {}, action = '') {
@@ -134,6 +155,7 @@ export function buildNextSessionPlan({
     sellableLots ?? decisionPlan.quantity?.sellableLots,
   )
   const expiresAt = Date.parse(decisionPlan.validUntil)
+  const nextOpenAt = nextSessionOpenAt(now)
   const requestedLots = lots(
     decisionPlan.quantity?.requestedLots
     ?? decisionPlan.quantity?.lots,
@@ -161,6 +183,10 @@ export function buildNextSessionPlan({
     !Number.isFinite(expiresAt)
     || expiresAt <= now
   ) missing.push('有效期限')
+  else if (
+    nextOpenAt != null
+    && expiresAt < nextOpenAt
+  ) missing.push('覆盖下一交易日开盘的有效期限')
 
   const base = {
     schemaVersion: NEXT_SESSION_PLAN_VERSION,

@@ -237,3 +237,61 @@ test('休市退出复核在所有决策卡片统一延期到下个交易时段',
   assert.match(view.reason, /当前休市/)
   assert.doesNotMatch(view.reason, /约60秒/)
 })
+
+test('收盘持仓卡投影次日预案且盘中保持原决策结构', () => {
+  const closeAdvice = {
+    decisionSource: {
+      engine: 'MULTI_TASK',
+      state: 'READY',
+      hardProtection: false,
+    },
+    actionValues: {
+      actions: [{
+        action: 'HOLD',
+        feasible: true,
+        actionUtilityR: 0.18,
+      }],
+    },
+    stopPrice: 48.85,
+    targetPrice: 56.06,
+    decisionPlan: {
+      decisionId: 'close-card-1',
+      mode: 'hold_advice',
+      action: 'HOLD',
+      actionability: 'WATCH',
+      quantity: {
+        lots: 0,
+        holdingLots: 4,
+        sellableLots: 4,
+      },
+      prices: {
+        current: 51.13,
+        stop: 48.85,
+        target: 56.06,
+      },
+      risk: {
+        modelPriceRiskPerShare: 2.28,
+      },
+      validUntil: '2026-09-14T07:00:00.000Z',
+    },
+  }
+  const afterClose = decisionPresentation({
+    advice: closeAdvice,
+    holdingLots: 4,
+    sellableLots: 4,
+    closePrice: 51.13,
+    now: Date.parse('2026-09-11T07:50:00Z'),
+  })
+  const intraday = decisionPresentation({
+    advice: closeAdvice,
+    holdingLots: 4,
+    sellableLots: 4,
+    currentPrice: 51.13,
+    closePrice: 51.13,
+    now: Date.parse('2026-09-11T02:10:00Z'),
+  })
+
+  assert.equal(afterClose.closePositionPlan.state, 'READY')
+  assert.equal(afterClose.closePositionPlan.scenarios.length, 3)
+  assert.equal(intraday.closePositionPlan, null)
+})

@@ -6,6 +6,7 @@ import {
 import { decisionScoreLanguage } from '../../shared/decisionScoreLanguage.js'
 import { fmtRaw } from '../format.js'
 import { loadDecisionExplanation } from '../decisionExplanation.js'
+import ClosePositionPlan from './ClosePositionPlan'
 import DecisionRationaleEvidence, { EntryInstruction } from './DecisionRationaleEvidence'
 import Icon from './Icon'
 import StrategyPatternEvidence from './StrategyPatternEvidence'
@@ -13,7 +14,7 @@ import StrategyPatternEvidence from './StrategyPatternEvidence'
 export default function DecisionSummary({
   advice, holdingLots = 0, stopPrice = null, managed = true,
   loading = false, detailed = false, view: preparedView, currentPrice,
-  sellableLots = null, code = '',
+  closePrice, sellableLots = null, code = '',
 }) {
   const [expanded, setExpanded] = useState(false)
   const decisionId = advice?.decisionPlan?.decisionId || ''
@@ -34,8 +35,10 @@ export default function DecisionSummary({
     setExplanationLoading(false)
   }, [savedExplanationKey])
   const view = preparedView || decisionPresentation({
-    advice, holdingLots, stopPrice, managed, loading, currentPrice, sellableLots,
+    advice, holdingLots, stopPrice, managed, loading, currentPrice,
+    closePrice, sellableLots,
   })
+  const closePositionPlan = view.closePositionPlan
   const priceItems = decisionPrices(advice)
   const displayedPriceKeys = new Set(
     priceItems.map((item) => item.key),
@@ -60,35 +63,41 @@ export default function DecisionSummary({
   }
   return (
     <section className={`decision-summary ${view.tone}`} aria-label="操作决策">
-      <div className="decision-eyebrow">
-        <span>{view.hardStop ? '账本止损' : view.isDecisionEngine ? '系统决策' : managed ? '等待评估' : '普通收藏'}</span>
-        {loading && <Icon name="refresh" className="spin" size={14} />}
-      </div>
-      <div className="decision-headline">
-        <Icon name={view.icon} size={21} />
-        <strong>{view.headline}</strong>
-      </div>
-      <p className="decision-reason">{view.reason}</p>
-      {priceItems.length > 0 && (
-        <dl className="decision-price-strip" aria-label="复核与执行价位">
-          {priceItems.map((item) => (
-            <div key={item.key} data-tone={item.tone}>
-              <dt>{item.label}</dt>
-              <dd>{fmtRaw(item.value)}<small>元</small></dd>
-            </div>
-          ))}
-        </dl>
+      {closePositionPlan ? (
+        <ClosePositionPlan plan={closePositionPlan} />
+      ) : (
+        <>
+          <div className="decision-eyebrow">
+            <span>{view.hardStop ? '账本止损' : view.isDecisionEngine ? '系统决策' : managed ? '等待评估' : '普通收藏'}</span>
+            {loading && <Icon name="refresh" className="spin" size={14} />}
+          </div>
+          <div className="decision-headline">
+            <Icon name={view.icon} size={21} />
+            <strong>{view.headline}</strong>
+          </div>
+          <p className="decision-reason">{view.reason}</p>
+          {priceItems.length > 0 && (
+            <dl className="decision-price-strip" aria-label="复核与执行价位">
+              {priceItems.map((item) => (
+                <div key={item.key} data-tone={item.tone}>
+                  <dt>{item.label}</dt>
+                  <dd>{fmtRaw(item.value)}<small>元</small></dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          <dl className="decision-execution-facts">
+            <div><dt>何时操作</dt><dd>{view.timing}</dd></div>
+            {view.executable
+              && (detailed || !displayedPriceKeys.has('reference'))
+              && <div><dt>参考价格</dt><dd>{view.reference}</dd></div>}
+            {(detailed || !displayedPriceKeys.has('stop')) && (
+              <div><dt>风险边界</dt><dd>{view.protection}</dd></div>
+            )}
+          </dl>
+        </>
       )}
-      <dl className="decision-execution-facts">
-        <div><dt>何时操作</dt><dd>{view.timing}</dd></div>
-        {view.executable
-          && (detailed || !displayedPriceKeys.has('reference'))
-          && <div><dt>参考价格</dt><dd>{view.reference}</dd></div>}
-        {(detailed || !displayedPriceKeys.has('stop')) && (
-          <div><dt>风险边界</dt><dd>{view.protection}</dd></div>
-        )}
-      </dl>
-      {detailed && <EntryInstruction
+      {detailed && !closePositionPlan && <EntryInstruction
         instruction={decisionRationale?.entryInstruction}
         executionOpen={view.executable}
       />}
