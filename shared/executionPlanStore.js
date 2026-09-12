@@ -191,6 +191,9 @@ export function expireExecutionPlansForAccountChange(
   plans,
   {
     exceptPlanId = '',
+    changedCode = '',
+    changedSide = '',
+    accountTradeFingerprint = '',
     now = Date.now(),
   } = {},
 ) {
@@ -206,6 +209,17 @@ export function expireExecutionPlansForAccountChange(
       ]
         .includes(plan?.status)
     ) return plan
+    const sameStock = String(plan.code || '') === String(changedCode || '')
+    const riskIncreasingPlan = plan.side === 'BUY'
+    const accountAddedRisk = String(changedSide || '').toUpperCase() === 'BUY'
+    if (!sameStock && !(riskIncreasingPlan && accountAddedRisk)) {
+      return {
+        ...plan,
+        accountTradeFingerprint:
+          String(accountTradeFingerprint || plan.accountTradeFingerprint || ''),
+        updatedAt: Number(now) || Date.now(),
+      }
+    }
     return transitionExecutionPlan(plan, 'EXPIRE', {
       now,
       reason: '账户交易事实已变化，旧计划需重新编译',

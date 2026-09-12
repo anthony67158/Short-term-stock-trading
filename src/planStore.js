@@ -867,7 +867,11 @@ export const planStore = {
     emit()
     return true
   },
-  confirmExecutionPlan(planId, now = Date.now()) {
+  confirmExecutionPlan(
+    planId,
+    now = Date.now(),
+    currentPrice = null,
+  ) {
     const current = (state.executionPlans || []).find(
       (plan) => plan.planId === planId,
     )
@@ -878,7 +882,7 @@ export const planStore = {
       state.executionPlans,
       planId,
       'USER_CONFIRM',
-      { now },
+      { now, price: currentPrice },
     )
     emit()
     return state.executionPlans.find((plan) => plan.planId === planId)
@@ -953,11 +957,28 @@ export const planStore = {
       }, fillPrice, quantity, options)
     }
     if (plan.side === 'SELL') {
+      const holdings = state.holding.filter(
+        (item) => item.code === plan.code,
+      )
+      const heldLots = holdings.reduce(
+        (sum, item) => sum + Math.max(0, Number(item.qty) || 0),
+        0,
+      )
+      const sellableLots = Math.min(
+        heldLots,
+        Math.max(0, Number(t1StatusOf(plan.code)?.sellableToday) || 0),
+      )
+      if (quantity > sellableLots) {
+        return {
+          ok: false,
+          error:
+            `受持仓或T+1限制，当前最多可记录${sellableLots}手`,
+          maxRecordableLots: sellableLots,
+        }
+      }
       let remaining = quantity
       const transactions = []
-      for (const holding of state.holding.filter(
-        (item) => item.code === plan.code,
-      )) {
+      for (const holding of holdings) {
         if (remaining <= 0) break
         const sellable = t1StatusOf(plan.code).sellableToday
         const currentLots = Math.min(
@@ -3157,6 +3178,9 @@ export const planStore = {
       state.executionPlans,
       {
         exceptPlanId: executionPlan?.planId || '',
+        changedCode: entry.code,
+        changedSide: entry.side,
+        accountTradeFingerprint: accountTradeStateFingerprint(state),
         now: Number(
           transaction?.at
           || transaction?.sellAt

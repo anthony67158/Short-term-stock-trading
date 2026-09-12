@@ -72,7 +72,12 @@ function planStatusDetail(plan) {
   return `${methodLabel(plan)} · ${dateTime(plan.validUntil)}前有效`
 }
 
-function QueueRow({ plan, attribution, onOpen }) {
+function QueueRow({
+  plan,
+  attribution,
+  currentPrice,
+  onOpen,
+}) {
   const [price, setPrice] = useState(
     String(plan.referencePrice || ''),
   )
@@ -86,6 +91,18 @@ function QueueRow({ plan, attribution, onOpen }) {
   }
   const canRecord = ['USER_CONFIRMED', 'PARTIALLY_RECORDED']
     .includes(plan.status)
+  const confirm = () => {
+    try {
+      planStore.confirmExecutionPlan(
+        plan.planId,
+        Date.now(),
+        currentPrice,
+      )
+      setError('')
+    } catch (cause) {
+      setError(cause?.message || '确认失败，请刷新行情后重试')
+    }
+  }
 
   const record = () => {
     const result = planStore.recordExecutionPlanTrade(
@@ -142,7 +159,7 @@ function QueueRow({ plan, attribution, onOpen }) {
           <button
             type="button"
             className="btn tiny"
-            onClick={() => planStore.confirmExecutionPlan(plan.planId)}
+            onClick={confirm}
           >
             <Icon name="check" size={13} /> 确认准备
           </button>
@@ -184,6 +201,7 @@ function QueueRow({ plan, attribution, onOpen }) {
 export default function ExecutionQueue({
   plans = [],
   attributions = [],
+  quoteMap = {},
   onOpen,
 }) {
   const visible = useMemo(() => {
@@ -235,6 +253,7 @@ export default function ExecutionQueue({
             key={plan.planId}
             plan={plan}
             attribution={attributionByPlan.get(plan.planId)}
+            currentPrice={quoteMap?.[plan.code]?.price}
             onOpen={onOpen}
           />
         ))}

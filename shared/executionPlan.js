@@ -408,9 +408,14 @@ export function transitionExecutionPlan(
     return withTransition(plan, 'ALERTED', event, now, reason)
   }
   if (event === 'USER_CONFIRM') {
-    if (plan.side === 'BUY' && positive(plan.maxBuyPrice) != null
-      && positive(price) != null && Number(price) > plan.maxBuyPrice) {
-      throw new Error('最新价格超过买入上限，需重新评估，不能追价执行')
+    if (plan.side === 'BUY' && positive(plan.maxBuyPrice) != null) {
+      const currentPrice = positive(price)
+      if (currentPrice == null) {
+        throw new Error('缺少最新价格，需刷新行情后再确认买入')
+      }
+      if (currentPrice > plan.maxBuyPrice) {
+        throw new Error('最新价格超过买入上限，需重新评估，不能追价执行')
+      }
     }
     return withTransition(plan, 'USER_CONFIRMED', event, now, reason)
   }
