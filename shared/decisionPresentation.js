@@ -89,7 +89,9 @@ export function decisionPresentation({
     && !completed
   const ready = active && source.state === 'READY'
   const stop = held ? stopPrice ?? advice?.stopPrice : advice?.stopPrice
-  const live = isContinuousTrading(now) && (currentPrice === undefined || Number(currentPrice) > 0)
+  const tradingOpen = isContinuousTrading(now)
+  const live = tradingOpen
+    && (currentPrice === undefined || Number(currentPrice) > 0)
   const hardStop = held && live && Number(currentPrice) > 0
     && Number(stop) > 0 && Number(currentPrice) <= Number(stop)
   const sellable = sellableLots == null ? null
@@ -172,9 +174,15 @@ export function decisionPresentation({
   } else if (
     exitReviewRequired
   ) {
-    headline = '等待退出前复核'
-    reason = '这不是硬止损。系统先观察约60秒，再按最新价格、资金和决策模型结果决定是否卖出。'
-    timing = '下一笔有效报价开始观察'
+    headline = tradingOpen
+      ? '等待退出前复核'
+      : '下个交易时段复核'
+    reason = tradingOpen
+      ? '这不是硬止损。系统先观察约60秒，再按最新价格、资金和决策模型结果决定是否卖出。'
+      : '当前休市；下个交易时段收到有效报价后再开始观察和确认，休市期间不执行。'
+    timing = tradingOpen
+      ? '下一笔有效报价开始观察'
+      : '下个交易时段收到有效报价后'
     icon = 'clock'
   } else if (plan.blockedReasons?.length) {
     headline = held ? '本次不加仓' : '本次不买入'

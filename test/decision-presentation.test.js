@@ -206,3 +206,34 @@ test('旧版非止损清仓建议也先显示退出复核，复核终态后才�
   assert.equal(reviewed.executable, true)
   assert.equal(reviewed.headline, '清仓 1 手')
 })
+
+test('休市退出复核在所有决策卡片统一延期到下个交易时段', () => {
+  const closedNow = Date.parse('2026-09-12T02:00:00Z')
+  const view = decisionPresentation({
+    advice: {
+      decisionSource: {
+        engine: 'MULTI_TASK',
+        state: 'READY',
+        hardProtection: false,
+      },
+      stopPrice: 48.85,
+      decisionPlan: {
+        action: 'EXIT',
+        actionability: 'READY',
+        quantity: { lots: 1 },
+        prices: { reference: 51.13 },
+        validUntil: '2026-09-14T03:30:00Z',
+      },
+    },
+    holdingLots: 1,
+    sellableLots: 1,
+    currentPrice: 51.13,
+    now: closedNow,
+  })
+
+  assert.equal(view.executable, false)
+  assert.equal(view.headline, '下个交易时段复核')
+  assert.equal(view.timing, '下个交易时段收到有效报价后')
+  assert.match(view.reason, /当前休市/)
+  assert.doesNotMatch(view.reason, /约60秒/)
+})
