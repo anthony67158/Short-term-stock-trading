@@ -27,6 +27,10 @@ import {
   listTradePeriods,
   summarizeTradePeriod,
 } from '../../shared/tradePeriodPerformance.js'
+import {
+  expectationCaption,
+  reviewTerminology,
+} from '../../shared/reviewPresentation.js'
 
 // 汇总所有交易记录：已存 closed（BUY/SELL/CLOSE/T）+ 持仓中实时做T（未归档）
 function useRealizedRecords(book) {
@@ -101,6 +105,7 @@ function useRealizedRecords(book) {
 // ============ 复盘 Tab：兑现 + 迭代（情绪复盘已整合进 AI 助手）============
 export default function ReviewTab({ snapshot }) {
   const book = usePlanStore()
+  const simulation = book.account?.simulation === true
   const records = useRealizedRecords(book)
   const quoteMap = Object.fromEntries(
     (snapshot?.()?.quotes || []).map((quote) => [quote.code, quote]),
@@ -117,8 +122,11 @@ export default function ReviewTab({ snapshot }) {
 
   return (
     <div className="review">
-      <SelectionPerformance records={book.closed || []} />
-      <DecisionClosure book={book} />
+      <SelectionPerformance
+        records={book.closed || []}
+        simulation={simulation}
+      />
+      <DecisionClosure book={book} simulation={simulation} />
       <TradeStat records={records} analyticsRecords={analyticsRecords} />
       <ReviewCharts records={analyticsRecords} />
       <DailyLog records={records} totalAssets={totalAssets} />
@@ -126,20 +134,21 @@ export default function ReviewTab({ snapshot }) {
   )
 }
 
-function DecisionClosure({ book }) {
+function DecisionClosure({ book, simulation }) {
   const stats = useMemo(() => planStore.decisionStats(), [book.decisionLog])
+  const terms = reviewTerminology(simulation)
   return (
     <div className="panel">
       <div className="panel-head">
         <div role="heading" aria-level="2" className="panel-title"><Icon name="target" size={16} /> 决策闭环</div>
-        <span className="panel-sub">军师建议不等于真实操作，只统计实际落账</span>
+        <span className="panel-sub">{terms.executionDescription}</span>
       </div>
       {stats.recommendations === 0 && stats.executions === 0 ? (
-        <div className="empty">生成军师建议并记录真实买卖后，这里会显示建议采纳与执行关联。</div>
+        <div className="empty">{terms.emptyExecution}</div>
       ) : (
         <div className="rv-attr">
           <div className="rv-attr-cell">
-            <div className="rv-attr-k">军师建议</div>
+            <div className="rv-attr-k">系统决策</div>
             <div className="rv-attr-v">{stats.recommendations}</div>
             <div className="rv-attr-s">{stats.actionableRecommendations} 条可执行 · {stats.pending} 条待执行</div>
           </div>
@@ -149,7 +158,7 @@ function DecisionClosure({ book }) {
             <div className="rv-attr-s">同股同方向、24 小时内</div>
           </div>
           <div className="rv-attr-cell">
-            <div className="rv-attr-k">真实执行</div>
+            <div className="rv-attr-k">{terms.executionLabel}</div>
             <div className="rv-attr-v">{stats.executions}</div>
             <div className="rv-attr-s">{stats.linkedExecutions} 笔关联到建议</div>
           </div>
@@ -293,7 +302,7 @@ function PeriodPerformance({ records, totalAssets }) {
     ? '账户收益率按本周期已实现净收益除以当前总资产计算，暂不包含未实现浮盈变化'
     : '当前总资产暂缺，无法计算账户收益率'
   const tradeRateTitle = summary.realizedCount > summary.ratedCount
-    ? `收益率仅按 ${summary.ratedCount}/${summary.realizedCount} 笔有真实成本依据的已实现交易计算`
+    ? `收益率仅按 ${summary.ratedCount}/${summary.realizedCount} 笔有可核对成本依据的已实现交易计算`
     : '交易收益率按本周期已实现交易盈亏除以对应含费成本计算'
 
   return (
@@ -683,7 +692,7 @@ function DailyLog({ records, totalAssets }) {
               </div>
               <small>
                 {tradeIntent === 't' && editableTradeIntent(editTarget)
-                  ? '手动选择的另一腿优先固定配对；未指定时按同股、同交易日和时间顺序自动配对。未配对腿仍按真实买卖影响现金、持仓与T+1。'
+                  ? '手动选择的另一腿优先固定配对；未指定时按同股、同交易日和时间顺序自动配对。未配对腿仍按已记录买卖影响现金、持仓与T+1。'
                   : '保存后会重算成交额、手续费、现金、持仓与已实现盈亏。'}
                 {' '}修改会自动同步到阿里云 OSS。
               </small>
@@ -946,7 +955,9 @@ function TradeStat({ records, analyticsRecords }) {
             <div className="rv-attr-cell">
               <div className="rv-attr-k">每笔期望</div>
               <div className={'rv-attr-v ' + (all.expect >= 0 ? 'red' : 'green')}>{all.expect != null ? fmtMoney(all.expect) : '--'}</div>
-              <div className="rv-attr-s">每笔平均可赚</div>
+              <div className="rv-attr-s">
+                {expectationCaption(all.expect)}
+              </div>
             </div>
             <div className="rv-attr-cell rv-attr-hint">
               <div className="rv-attr-k">解读</div>

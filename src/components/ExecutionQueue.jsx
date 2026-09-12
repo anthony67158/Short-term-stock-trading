@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react'
 
 import { executionTriggerDirection } from '../../shared/executionTrigger'
 import { planStore } from '../planStore'
+import {
+  executionProgressLabel,
+} from '../../shared/reviewPresentation.js'
 import Icon from './Icon'
 
 const STATUS = {
@@ -129,9 +132,7 @@ function QueueRow({
       </button>
       <div className="execution-queue-action">
         <span>{plan.actionLabel || plan.action}</span>
-        <b>
-          {plan.remainingLots}/{plan.targetLots}手
-        </b>
+        <b>{executionProgressLabel(plan)}</b>
       </div>
       <div className="execution-queue-trigger">
         <span>{planCondition(plan)}</span>

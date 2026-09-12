@@ -1,16 +1,23 @@
 import { selectionSourcePerformance } from '../../shared/selectionOrigin.js'
 import Icon from './Icon'
+import {
+  reviewTerminology,
+} from '../../shared/reviewPresentation.js'
 
 function money(value) {
   return Number(value).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
 }
 
-export default function SelectionPerformance({ records = [] }) {
+export default function SelectionPerformance({
+  records = [],
+  simulation = false,
+}) {
   const groups = selectionSourcePerformance(records)
+  const terms = reviewTerminology(simulation)
   return (
     <section className="selection-performance" aria-label="选股来源复盘">
       <h2 className="panel-title"><Icon name="chart" size={16} /> 选股来源复盘</h2>
-      <p className="muted">当前账本中的真实费后卖出结果，按首次选股来源归类；部分卖出不作为独立回合。</p>
+      <p className="muted">{terms.selectionDescription}</p>
       {groups.length ? (
         <div className="selection-performance-list">
           {groups.map((group) => (
@@ -24,7 +31,7 @@ export default function SelectionPerformance({ records = [] }) {
             </div>
           ))}
         </div>
-      ) : <div className="empty">当前没有可核对的真实卖出记录</div>}
+      ) : <div className="empty">{terms.emptySelection}</div>}
       {!!groups.length && (
         <p className="muted">
           {groups.reduce((sum, group) => sum + group.positions, 0) < 20

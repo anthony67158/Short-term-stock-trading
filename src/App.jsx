@@ -340,7 +340,7 @@ export function MainApp() {
   const refreshTick = useRefreshTick()
   const remain = useCountdown(interval, (market.data && market.data.updatedAt) + refreshTick)
   const book = usePlanStore()
-  const planCount = book.plan.length + book.holding.length
+  const planCount = book.holding.length
   const currentSection = APP_SECTIONS.find((section) => section.key === tab)
     || APP_SECTIONS[0]
   const navigateBack = useCallback(() => {
