@@ -1,14 +1,15 @@
 # 每日量化增量训练（公开行情归档 + 成熟样本重训 + 三种子回测）
-# 触发：北京时间工作日 01:15（UTC 前一日 17:15）+ 手动。
+# 触发：北京时间周一至周六 01:15（UTC 前一日 17:15）+ 手动。
 # 机制：国内FC归档公开行情→成熟样本压实→决策模型重训→成员级冠军对照→整体门禁→选择性更新DIRECT版本。
 #       量化服务 model_lib 每 1h 从 OSS 热更新，故上传即上线，无需重部署 FC。
 name: daily-retrain
 
 on:
   schedule:
-    # UTC 周日至周四 17:15 = 北京时间周一至周五 01:15。
+    # UTC 周日至周五 17:15 = 北京时间周一至周六 01:15。
+    # 周六凌晨处理周五收盘数据；保留周一的既有补齐时段。
     # 避开整点和半点，降低 GitHub Actions 定时任务拥堵延迟。
-    - cron: "15 17 * * 0-4"
+    - cron: "15 17 * * 0-5"
   workflow_dispatch: {}       # 支持手动触发
 
 concurrency:
@@ -79,6 +80,10 @@ jobs:
             tests/test_opportunity_history.py \
             tests/test_opportunity_market_archive.py \
             tests/test_archive_public_market_day.py \
+            tests/test_archive_minute_fallback.py \
+            tests/test_tickflow_data.py \
+            tests/test_opportunity_pattern_snapshot.py \
+            tests/test_pattern_snapshot_memory.py \
             tests/test_validate_market_archive_report.py \
             tests/test_opportunity_sector_archive.py \
             tests/test_archive_tushare_market_day.py \
