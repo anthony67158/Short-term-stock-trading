@@ -60,7 +60,7 @@ test('核心入口保留明确业务语义', () => {
   assert.match(source['src/components/AlertPanel.jsx'], />自动预警</)
   assert.match(source['src/components/LLMConfig.jsx'], /模型角色与端点/)
   assert.match(source['src/components/SectorConceptExplanation.jsx'], /'解释'/)
-  assert.match(source['src/components/ReviewTab.jsx'], />军师建议</)
+  assert.match(source['src/components/ReviewTab.jsx'], />系统决策</)
   assert.match(
     source['src/components/HoldingPlanDialog.jsx'],
     /恢复自动跟随/,

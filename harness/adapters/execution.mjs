@@ -48,6 +48,12 @@ function decision(input = {}) {
       estimatedNetAmount: (input.lots || 2)
         * (input.referencePrice || 10) * 100,
     },
+    risk: {
+      modelPriceRiskPerShare:
+        input.modelPriceRiskPerShare || 0.5,
+      modelExpectedNetR:
+        input.modelExpectedNetR ?? 0.8,
+    },
     trigger: '到价后确认',
     invalidation: '结构失效',
     evidenceIds: ['ev_harness'],
