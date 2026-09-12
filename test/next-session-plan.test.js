@@ -105,6 +105,51 @@ test('收盘退出决策明确次日目标手数但不冒充收盘价委托', ()
   assert.doesNotMatch(result.scenarios[1].instruction, /按收盘价/)
 })
 
+test('V2减仓预案使用优化器改善值和精确卖出手数', () => {
+  const advice = holdingAdvice()
+  advice.decisionPlan = {
+    ...advice.decisionPlan,
+    action: 'REDUCE',
+    quantity: {
+      lots: 3,
+      requestedLots: 3,
+      holdingLots: 4,
+      sellableLots: 4,
+    },
+  }
+  advice.actionValues = {
+    positionOptimization: {
+      schemaVersion: 'position-optimization.v2',
+      state: 'READY',
+      selectedAction: 'REDUCE',
+      selectedSellLots: 3,
+      selectedRetainedLots: 1,
+      selectedUtilityR: -0.012,
+      holdUtilityR: -0.26,
+      improvementOverHoldR: 0.248,
+    },
+    actions: [{
+      action: 'REDUCE',
+      feasible: true,
+      actionUtilityR: -0.012,
+    }],
+  }
+
+  const result = buildNextSessionPlan({
+    advice,
+    closePrice: 51.13,
+    holdingLots: 4,
+    sellableLots: 4,
+    now,
+  })
+
+  assert.equal(result.conclusion.action, 'REDUCE')
+  assert.equal(result.conclusion.lots, 3)
+  assert.equal(result.risk.selectedActionValueR, 0.248)
+  assert.equal(result.risk.actionValueAmount, 226)
+  assert.equal(result.risk.actionValueLabel, '相对继续持有')
+})
+
 test('关键结果不完整时收盘卡片判为无效且不展示半成品情景', () => {
   const advice = holdingAdvice()
   advice.decisionPlan = {

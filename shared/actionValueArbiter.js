@@ -287,12 +287,17 @@ export function arbitrateActionValues({
       reason: 'MODEL_UNAVAILABLE',
     }
   }
-  const current = bestCandidate(
-    candidates.filter((candidate) => (
-      ['HOLD', 'REDUCE', 'EXIT'].includes(candidate.action)
-      && candidate.value.feasible
-    )),
-  )
+  const positionCandidates = candidates.filter((candidate) => (
+    ['HOLD', 'REDUCE', 'EXIT'].includes(candidate.action)
+    && candidate.value.feasible
+  ))
+  const current = positionOptimization?.state === 'READY'
+    ? positionCandidates.find(
+        (candidate) =>
+          candidate.action
+          === positionOptimization.selectedAction,
+      ) || null
+    : bestCandidate(positionCandidates)
   const currentAction = current?.action || 'HOLD'
   const currentPositive = (
     positionOptimization?.state === 'READY'

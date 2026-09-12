@@ -574,6 +574,23 @@ export async function evaluateDecision({
     advice.actionPlan = sourceInstruction
     advice.nextAction = sourceInstruction
   }
+  const reviewedEntry = (
+    reviewEvent?.reviewMode === 'ENTRY_CONFIRMATION'
+    || /BUY|ADD/.test(plannedReviewAction)
+  )
+  const reviewedExit = (
+    reviewEvent?.reviewMode === 'EXIT_CONFIRMATION'
+    || /REDUCE|EXIT/.test(plannedReviewAction)
+  )
+  const reviewedQuantity = reviewedEntry
+    ? ['BUY', 'ADD'].includes(decisionPlan.action)
+      ? decisionPlan.quantity.lots
+      : 0
+    : reviewedExit
+      ? ['REDUCE', 'EXIT'].includes(decisionPlan.action)
+        ? decisionPlan.quantity.lots
+        : 0
+      : decisionPlan.quantity.lots
   advice = {
     ...advice,
     ...(reviewEvent ? {
@@ -581,7 +598,7 @@ export async function evaluateDecision({
         ...advice.reviewDecision,
         outcome: advice.action,
         operation: advice.actionPlan,
-        quantity: decisionPlan.quantity.lots,
+        quantity: reviewedQuantity,
       },
     } : {}),
     priceContract: decisionPlan.priceContract,

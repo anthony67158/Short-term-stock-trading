@@ -94,11 +94,49 @@ function pricePath(plan = {}, selectedRoute = '') {
   }
 }
 
-function actionComparison(value = {}, selectedAction = '') {
+function actionComparison(
+  value = {},
+  selectedAction = '',
+  optimization = null,
+) {
   const action = text(value.action, 24).toUpperCase()
-  const actionUtilityR = rounded(value.actionUtilityR)
+  const rawActionUtilityR = finite(value.actionUtilityR)
+  const actionUtilityR = rounded(rawActionUtilityR)
+  const candidate = value.positionCandidate
+  const optimized = (
+    optimization?.schemaVersion === 'position-optimization.v2'
+    && optimization?.state === 'READY'
+    && candidate
+  )
   const relative = ['REDUCE', 'EXIT'].includes(action)
-  const explanation = actionUtilityR == null
+  const improvementOverHoldR = optimized
+    ? rounded(
+        rawActionUtilityR
+        - Number(optimization.holdUtilityR),
+        3,
+      )
+    : relative ? actionUtilityR : null
+  const explanation = optimized
+    ? [
+        candidate.sellLots > 0
+          ? `卖出${candidate.sellLots}手、保留${candidate.retainedLots}手`
+          : `保留${candidate.retainedLots}手`,
+        `剩余上涨价值${signed(candidate.remainingExpectedR)}R`,
+        `尾部风险扣减${Math.abs(
+          rounded(candidate.remainingTailPenaltyR) || 0,
+        ).toFixed(2)}R`,
+        `费用与换手扣减${Math.abs(rounded(
+          Number(candidate.sellCostR)
+          + Number(candidate.switchPenaltyR),
+        ) || 0).toFixed(2)}R`,
+        `净动作价值${signed(actionUtilityR)}R`,
+        action === 'HOLD'
+          ? ''
+          : `相对继续持有${improvementOverHoldR >= 0 ? '改善' : '变差'}${
+            Math.abs(improvementOverHoldR).toFixed(2)
+          }R`,
+      ].filter(Boolean).join('；')
+    : actionUtilityR == null
     ? '当前缺少可比较的动作价值'
     : relative
       ? `相对继续持有${actionUtilityR >= 0 ? '改善' : '变差'}`
@@ -110,6 +148,16 @@ function actionComparison(value = {}, selectedAction = '') {
     selected: action === selectedAction,
     feasible: value.feasible === true,
     actionUtilityR,
+    sellLots: optimized ? candidate.sellLots : null,
+    retainedLots: optimized ? candidate.retainedLots : null,
+    improvementOverHoldR,
+    components: optimized ? {
+      remainingExpectedR: rounded(candidate.remainingExpectedR),
+      remainingTailPenaltyR:
+        rounded(candidate.remainingTailPenaltyR),
+      sellCostR: rounded(candidate.sellCostR),
+      switchPenaltyR: rounded(candidate.switchPenaltyR),
+    } : null,
     explanation,
   }
 }
@@ -251,6 +299,8 @@ export function buildDecisionRationale({
   const actionValues = Array.isArray(advice.actionValues?.actions)
     ? advice.actionValues.actions
     : []
+  const positionOptimization =
+    advice.actionValues?.positionOptimization
   const actionComparisons = context === 'POSITION'
     ? actionValues
       .filter((value) => (
@@ -258,7 +308,11 @@ export function buildDecisionRationale({
           String(value?.action || '').toUpperCase(),
         )
       ))
-      .map((value) => actionComparison(value, action))
+      .map((value) => actionComparison(
+        value,
+        action,
+        positionOptimization,
+      ))
     : []
   const quantity = entryContext
     ? entryQuantity(decisionPlan, selected)
@@ -270,6 +324,9 @@ export function buildDecisionRationale({
   const selectedAction = actionComparisons.find((item) => item.selected)
   const modelBoundary = entryContext
     ? '候选价由行情结构和波动约束生成；模型只评估每条价格路径，不直接生成价格。'
+    : positionOptimization?.schemaVersion
+      === 'position-optimization.v2'
+      ? '持仓动作由离散仓位优化器比较剩余上涨、尾部风险、真实费用与换手成本；底层收益和风险仍来自现役机会模型，不是独立训练的卖出概率。'
     : '持仓动作值由现役机会模型结果换算，用于比较继续持有、减仓和退出；它不是独立训练的卖出概率。'
   const summary = context === 'ENTRY'
     ? entryInstruction.summary

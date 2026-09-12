@@ -274,7 +274,15 @@ export function buildNextSessionPlan({
     decisionPlan.risk?.modelPriceRiskPerShare,
   ) ?? Math.max(0, close - stop)
   const planRiskAmount = riskPerShare * held * 100
-  const selectedActionValueR = actionValue(advice, action)
+  const optimization =
+    advice.actionValues?.positionOptimization
+  const selectedActionValueR = (
+    optimization?.schemaVersion === 'position-optimization.v2'
+    && optimization?.state === 'READY'
+    && ['REDUCE', 'EXIT'].includes(action)
+  )
+    ? finite(optimization.improvementOverHoldR)
+    : actionValue(advice, action)
   return {
     ...base,
     state: 'READY',

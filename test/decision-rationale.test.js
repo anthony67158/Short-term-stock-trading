@@ -178,6 +178,87 @@ test('持仓依据使用持有减仓退出价值且不输出买入成交概率',
   assert.doesNotMatch(JSON.stringify(result), /成交概率|pFill/)
 })
 
+test('V2持仓解释展示精确减仓数量和净动作价值分解', () => {
+  const result = buildDecisionRationale({
+    advice: {
+      actionValues: {
+        positionOptimization: {
+          schemaVersion: 'position-optimization.v2',
+          state: 'READY',
+          holdUtilityR: -0.26,
+          improvementOverHoldR: 0.248,
+        },
+        actions: [
+          {
+            action: 'HOLD',
+            feasible: true,
+            actionUtilityR: -0.26,
+            positionCandidate: {
+              sellLots: 0,
+              retainedLots: 4,
+              remainingExpectedR: 0.4,
+              remainingTailPenaltyR: 0.66,
+              sellCostR: 0,
+              switchPenaltyR: 0,
+            },
+          },
+          {
+            action: 'REDUCE',
+            feasible: true,
+            actionUtilityR: -0.012,
+            positionCandidate: {
+              sellLots: 3,
+              retainedLots: 1,
+              remainingExpectedR: 0.1,
+              remainingTailPenaltyR: 0.041,
+              sellCostR: 0.01,
+              switchPenaltyR: 0.061,
+            },
+          },
+          {
+            action: 'EXIT',
+            feasible: true,
+            actionUtilityR: -0.093,
+            positionCandidate: {
+              sellLots: 4,
+              retainedLots: 0,
+              remainingExpectedR: 0,
+              remainingTailPenaltyR: 0,
+              sellCostR: 0.013,
+              switchPenaltyR: 0.08,
+            },
+          },
+        ],
+      },
+    },
+    decisionPlan: {
+      mode: 'hold_advice',
+      action: 'REDUCE',
+      quantity: {
+        lots: 3,
+        holdingLots: 4,
+        remainingLots: 1,
+        sellableLots: 4,
+      },
+      prices: { current: 50, reference: 50 },
+      risk: {},
+      costs: {},
+    },
+  })
+
+  const reduce = result.actionComparison.find(
+    (item) => item.action === 'REDUCE',
+  )
+  assert.equal(reduce.sellLots, 3)
+  assert.equal(reduce.retainedLots, 1)
+  assert.equal(reduce.improvementOverHoldR, 0.248)
+  assert.match(reduce.explanation, /卖出3手、保留1手/)
+  assert.match(reduce.explanation, /剩余上涨价值/)
+  assert.match(reduce.explanation, /尾部风险/)
+  assert.match(reduce.explanation, /费用与换手/)
+  assert.match(result.modelBoundary, /离散仓位优化器/)
+})
+
 test('未持仓观望仍展示候选价格路径而不是持仓动作', () => {
   const selected = scoredPlan('BREAKOUT', 56.1, -0.08)
   const result = buildDecisionRationale({

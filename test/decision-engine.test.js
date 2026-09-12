@@ -571,7 +571,8 @@ test('持仓加仓到价后由决策模型和账户风控共同核定手数', as
     },
   })
   assert.notEqual(blocked.result.decisionPlan.action, 'ADD')
-  assert.equal(blocked.result.decisionPlan.quantity.lots, 0)
+  assert.equal(blocked.result.decisionPlan.action, 'REDUCE')
+  assert.equal(blocked.result.decisionPlan.quantity.lots, 1)
   assert.equal(
     blocked.result.decisionRationale.entryInstruction.state,
     'NO_TRADE',
@@ -876,7 +877,7 @@ test('退出前复核用最新模型结果撤销反弹后的旧清仓或确认�
     },
     score: async ([input]) => new Map([[input.code, {
       ...plan.opportunityScore,
-      expectedNetR: 0.18,
+      expectedNetR: 0.4,
     }]]),
   }))
   assert.equal(rebound.result.decisionPlan.action, 'HOLD')
