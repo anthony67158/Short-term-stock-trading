@@ -1,3 +1,7 @@
+import {
+  buildEntryInstruction,
+} from './entryInstruction.js'
+
 export const DECISION_RATIONALE_VERSION = 'decision-rationale.v1'
 
 const ROUTE_LABELS = Object.freeze({
@@ -253,18 +257,25 @@ export function buildDecisionRationale({
   const quantity = entryContext
     ? entryQuantity(decisionPlan, selected)
     : positionQuantity(decisionPlan)
+  const entryInstruction = buildEntryInstruction({
+    advice,
+    decisionPlan,
+  })
   const selectedAction = actionComparisons.find((item) => item.selected)
   const modelBoundary = entryContext
     ? '候选价由行情结构和波动约束生成；模型只评估每条价格路径，不直接生成价格。'
     : '持仓动作值由现役机会模型结果换算，用于比较继续持有、减仓和退出；它不是独立训练的卖出概率。'
   const summary = context === 'ENTRY'
-    ? `${priceExplanation}${quantity.explanation}`
-    : `${selectedAction?.explanation || `${actionLabel(action)}等待重新评估`}；${quantity.explanation}`
+    ? entryInstruction.summary
+    : `${selectedAction?.explanation || `${actionLabel(action)}等待重新评估`}；${
+        entryInstruction.summary
+      }；${quantity.explanation}`
   return {
     schemaVersion: DECISION_RATIONALE_VERSION,
     context,
     action,
     actionLabel: actionLabel(action),
+    entryInstruction,
     price: {
       selectedRoute,
       routeLabel: routeLabel(selectedRoute),

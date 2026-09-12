@@ -77,6 +77,18 @@ test('买入依据明确价格来源、路径比较和手数上限', () => {
 
   assert.equal(result.schemaVersion, 'decision-rationale.v1')
   assert.equal(result.context, 'ENTRY')
+  assert.equal(
+    result.entryInstruction.schemaVersion,
+    'entry-instruction.v1',
+  )
+  assert.equal(result.entryInstruction.intent, 'BUILD_POSITION')
+  assert.equal(result.entryInstruction.state, 'READY')
+  assert.equal(result.entryInstruction.price.observationPrice, 53.8)
+  assert.equal(result.entryInstruction.price.executablePrice, 53.8)
+  assert.equal(result.entryInstruction.quantity.plannedLots, 2)
+  assert.equal(result.entryInstruction.expectedReturn.targetUpsidePct, 8.92)
+  assert.equal(result.entryInstruction.expectedReturn.expectedNetR, 0.18)
+  assert.equal(result.entryInstruction.expectedReturn.expectedNetAmount, 137)
   assert.equal(result.price.selectedRoute, 'PULLBACK')
   assert.equal(result.price.routeLabel, '回踩确认')
   assert.equal(result.price.referencePrice, 53.8)
@@ -146,6 +158,12 @@ test('持仓依据使用持有减仓退出价值且不输出买入成交概率',
   })
 
   assert.equal(result.context, 'POSITION')
+  assert.equal(result.entryInstruction.intent, 'ADD_POSITION')
+  assert.equal(result.entryInstruction.state, 'NO_TRADE')
+  assert.match(
+    result.entryInstruction.summary,
+    /当前没有形成合法的加仓路径/,
+  )
   assert.equal(result.pathComparison.length, 0)
   assert.deepEqual(
     result.actionComparison.map((item) => item.label),
@@ -193,12 +211,96 @@ test('未持仓观望仍展示候选价格路径而不是持仓动作', () => {
   })
 
   assert.equal(result.context, 'ENTRY')
+  assert.equal(result.entryInstruction.state, 'NO_TRADE')
+  assert.equal(result.entryInstruction.price.executablePrice, null)
+  assert.match(
+    result.entryInstruction.expectedReturn.explanation,
+    /费后平均结果为每承担1元止损风险预计亏0\.08元/,
+  )
   assert.equal(result.pathComparison.length, 1)
   assert.equal(result.actionComparison.length, 0)
-  assert.match(result.summary, /突破确认候选价56\.10元/)
+  assert.match(result.summary, /观察价56\.10元/)
   assert.match(result.quantity.explanation, /当前为0手/)
   assert.match(
     result.quantity.explanation,
     /该价格路径扣除费用后的平均结果不为正/,
+  )
+})
+
+test('持仓加仓输出观察时机、价格、预案手数和预期收益', () => {
+  const immediate = scoredPlan('IMMEDIATE', 55.39, 0.05)
+  const pullback = scoredPlan('PULLBACK', 53.8, 0.18)
+  const result = buildDecisionRationale({
+    advice: {
+      selectedDecisionPlan: immediate,
+      decisionPaths: [immediate, pullback],
+      holdingAddPlan: {
+        schemaVersion: 'holding-add-plan.v1',
+        route: 'PULLBACK',
+        price: 53.8,
+        direction: 'LTE',
+        plannedAction: 'ADD',
+        actionLabel: '条件加仓',
+      },
+      actionValues: {
+        actions: [{
+          action: 'HOLD',
+          route: 'IMMEDIATE',
+          feasible: true,
+          actionUtilityR: 0.05,
+        }],
+      },
+    },
+    decisionPlan: {
+      mode: 'hold_advice',
+      action: 'HOLD',
+      actionability: 'WATCH',
+      prices: {
+        current: 55.39,
+        reference: 53.8,
+        stop: 51.2,
+        target: 58.6,
+      },
+      quantity: {
+        lots: 0,
+        holdingLots: 2,
+        sellableLots: 2,
+        riskLimitedLots: 2,
+        affordableLots: 1,
+      },
+      entryBudget: {
+        state: 'ESTIMATED',
+        executionAllowed: false,
+        lots: 1,
+        referencePrice: 53.8,
+        stopPrice: 51.2,
+        targetPrice: 58.6,
+      },
+      risk: {
+        estimatedLossPerLot: 320,
+        maxLossAmount: 800,
+      },
+      costs: {},
+    },
+  })
+
+  assert.equal(result.context, 'POSITION')
+  assert.equal(result.entryInstruction.intent, 'ADD_POSITION')
+  assert.equal(result.entryInstruction.state, 'WAIT_TRIGGER')
+  assert.equal(result.entryInstruction.price.observationPrice, 53.8)
+  assert.equal(result.entryInstruction.price.executablePrice, null)
+  assert.match(result.entryInstruction.timing.explanation, /观察约60秒/)
+  assert.equal(result.entryInstruction.quantity.existingLots, 2)
+  assert.equal(result.entryInstruction.quantity.plannedLots, 1)
+  assert.equal(result.entryInstruction.quantity.afterLots, 3)
+  assert.match(
+    result.entryInstruction.quantity.explanation,
+    /当前持有2手，触发后预案加仓1手/,
+  )
+  assert.equal(result.entryInstruction.expectedReturn.expectedNetR, 0.18)
+  assert.equal(result.entryInstruction.expectedReturn.expectedNetAmount, 58)
+  assert.match(
+    result.entryInstruction.expectedReturn.explanation,
+    /达到目标价58\.60元对应8\.92%价格空间/,
   )
 })

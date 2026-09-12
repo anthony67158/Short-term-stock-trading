@@ -318,6 +318,22 @@ test('持仓初评生成加仓观察价并保留账户核定预算', async () =>
   assert.ok(result.result.pullbackWatchPrice > 0)
   assert.equal(result.result.holdingAddPlan.route, 'PULLBACK')
   assert.equal(result.result.decisionRationale.context, 'POSITION')
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.intent,
+    'ADD_POSITION',
+  )
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.state,
+    'WAIT_TRIGGER',
+  )
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.quantity.plannedLots,
+    result.result.decisionPlan.entryBudget.lots,
+  )
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.price.observationPrice,
+    result.result.pullbackWatchPrice,
+  )
   assert.equal(result.result.decisionRationale.pathComparison.length, 0)
   assert.ok(
     result.result.decisionRationale.actionComparison.some(
@@ -417,6 +433,22 @@ test('持仓加仓到价后由决策模型和账户风控共同核定手数', as
   assert.equal(result.result.decisionPlan.actionability, 'READY')
   assert.ok(result.result.decisionPlan.quantity.lots > 0)
   assert.equal(result.result.addPrice, 10)
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.intent,
+    'ADD_POSITION',
+  )
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.state,
+    'READY',
+  )
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.price.executablePrice,
+    10,
+  )
+  assert.equal(
+    result.result.decisionRationale.entryInstruction.quantity.plannedLots,
+    result.result.decisionPlan.quantity.lots,
+  )
   assert.equal(result.result.reviewDecision.terminal, true)
   assert.equal(
     result.result.reviewDecision.quantity,
@@ -432,6 +464,10 @@ test('持仓加仓到价后由决策模型和账户风控共同核定手数', as
   })
   assert.notEqual(blocked.result.decisionPlan.action, 'ADD')
   assert.equal(blocked.result.decisionPlan.quantity.lots, 0)
+  assert.equal(
+    blocked.result.decisionRationale.entryInstruction.state,
+    'NO_TRADE',
+  )
   assert.equal(blocked.result.reviewDecision.quantity, 0)
 })
 
