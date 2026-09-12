@@ -15,6 +15,7 @@ from archive_public_market_day import (  # noqa: E402
 )
 from opportunity_market_archive import (  # noqa: E402
     build_market_day_artifact,
+    load_market_day,
     market_close_ms,
     publish_market_days,
 )
@@ -296,6 +297,7 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
             fetch_page=page,
             fetch_tickflow=tickflow,
             fetch_fuyao=lambda: self.fail("扶摇不应在TickFlow完整时调用"),
+            tickflow_mode="primary",
             workers=2,
         )
 
@@ -377,6 +379,7 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
             },
             minute_loader=fallback,
             batch_minute_loader=tickflow,
+            tickflow_mode="primary",
             universe_size=100,
             workers=2,
         )
@@ -385,6 +388,57 @@ class ArchivePublicMarketDayTest(unittest.TestCase):
         self.assertEqual(result["source"], "TICKFLOW_EM_TENCENT_DAILY_INCREMENT")
         self.assertEqual(len(fallback_calls), 10)
         self.assertEqual(result["entry"]["universe"]["coverage"], 1)
+
+    def test_shadow_mode_does_not_publish_tickflow_minutes(self):
+        target_bucket = FakeBucket()
+        previous = build_market_day_artifact(
+            date="20260908",
+            daily=daily_rows("20260908"),
+            funds=fund_rows("20260908"),
+            minutes={
+                "date": "20260908",
+                "codes": {
+                    "000001": minute_bars("000001", "20260908"),
+                },
+            },
+            universe_source_date="20260905",
+            requested_codes=1,
+        )
+        publish_market_days(target_bucket, [previous])
+        fallback_calls = []
+
+        result = archive_latest_public(
+            target_bucket=target_bucket,
+            snapshot_loader=lambda: {
+                "date": "20260909",
+                "daily": daily_rows("20260909"),
+                "funds": fund_rows("20260909"),
+                "priceSource": "EASTMONEY",
+                "tickflowDiagnostics": {
+                    "mode": "shadow",
+                    "dailyCoverage": 1,
+                },
+            },
+            batch_minute_loader=lambda codes, date: {
+                code: minute_bars(code, date)
+                for code in codes
+            },
+            minute_loader=lambda code, date: (
+                fallback_calls.append(code)
+                or minute_bars(code, date)
+            ),
+            tickflow_mode="shadow",
+            universe_size=100,
+            workers=2,
+        )
+
+        self.assertEqual(result["source"], "EASTMONEY_TENCENT_DAILY_INCREMENT")
+        self.assertEqual(len(fallback_calls), 100)
+        artifact = load_market_day(target_bucket, "20260909")
+        self.assertEqual(
+            artifact["sourceDiagnostics"]["tickflow"]["minuteCoverage"],
+            1,
+        )
 
 
 if __name__ == "__main__":
