@@ -14,6 +14,8 @@ sys.path.insert(0, SERVICE_ROOT)
 
 from decision_engine.contracts import FEATURE_NAMES  # noqa: E402
 from decision_engine.training.trainer import (  # noqa: E402
+    _apply_rank_value_calibrator,
+    _fit_rank_value_calibrator,
     _rank_relevance,
     _training_weights,
     load_decision_dataset,
@@ -90,6 +92,26 @@ class FakeRanker(FakeRegressor):
 
 
 class TrainOpportunityScoreTest(unittest.TestCase):
+    def test_rank_value_calibration_preserves_order_inside_merged_blocks(self):
+        scores = np.arange(24, dtype=np.float64)
+        net_r = np.concatenate([
+            np.linspace(-1.0, -0.3, 8),
+            np.full(4, 0.4),
+            np.full(4, 0.2),
+            np.linspace(0.6, 1.0, 8),
+        ])
+
+        artifact = _fit_rank_value_calibrator(scores, net_r)
+        adjusted = _apply_rank_value_calibrator(scores, artifact)
+
+        self.assertEqual(artifact["method"], "centered_isotonic")
+        self.assertTrue(bool(np.all(np.diff(adjusted) >= -1e-12)))
+        # 传统 PAVA 会把中间倒置的 0.4/0.2 块都压成 0.3；CIR 在合并块质心之间插值，
+        # 保留块内次序，使高分尾部不会因平台化丢失正期望覆盖。
+        self.assertLess(float(adjusted[9]), float(adjusted[14]))
+        self.assertGreater(float(adjusted[-1]), 0)
+        self.assertTrue(bool(np.all(np.diff(artifact["score"]) > 0)))
+
     def test_training_weights_balance_classes_and_emphasize_hard_negatives(self):
         value = dataset(samples=40, dates_count=20)
         formula_index = FEATURE_NAMES.index("formulaScore")
