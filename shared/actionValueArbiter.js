@@ -256,10 +256,14 @@ export function arbitrateActionValues({
   if (!state.eligibility.held) {
     const selected = bestCandidate(candidates)
     const selectedPlan = selected?.plan || null
+    const entryRouteActive = (
+      selectedPlan?.route === 'IMMEDIATE'
+      || isTriggeredReviewEvent(state.review)
+    )
     const executable = (
       selected?.value?.feasible === true
       && Number(selected?.value?.actionUtilityR) > 0
-      && selectedPlan.route === 'IMMEDIATE'
+      && entryRouteActive
       && state.quote.live === true
       && state.eligibility.actions.includes('BUY')
       && (!selectedPlan.targetPosition || selectedPlan.targetPosition.state === 'READY')

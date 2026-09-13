@@ -246,3 +246,39 @@ test('统一仲裁器按账户状态选择买入加仓与退出', () => {
   assert.equal(add.action, 'ADD')
   assert.equal(exit.action, 'EXIT')
 })
+
+test('触价复核允许已触发的条件路径买入，未触发时继续等待', () => {
+  const conditionalPlan = {
+    ...path('BREAKOUT'),
+    opportunityScore: score(0.4),
+  }
+  const base = {
+    code: '600001',
+    asOf: 1,
+    quote: { price: 10, live: true },
+    position: { totalLots: 0 },
+    account: { complete: true },
+    evidence: { complete: true },
+    model: { ready: true },
+    paths: [conditionalPlan],
+  }
+  const waiting = arbitrateActionValues({
+    state: buildDecisionState(base),
+    plans: [conditionalPlan],
+  })
+  const confirmed = arbitrateActionValues({
+    state: buildDecisionState({
+      ...base,
+      review: {
+        kind: 'price-review',
+        reviewMode: 'ENTRY_CONFIRMATION',
+        plannedAction: 'BUY',
+      },
+    }),
+    plans: [conditionalPlan],
+  })
+
+  assert.equal(waiting.action, 'WAIT')
+  assert.equal(confirmed.action, 'BUY')
+  assert.equal(confirmed.selectedPlan.route, 'BREAKOUT')
+})
