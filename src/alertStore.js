@@ -574,7 +574,7 @@ export const alertStore = {
       Date.now() >= decisionDeadlineAt
     ) {
       const conclusion =
-        '复核已到2分钟期限，维持原计划；本次触发结束，不新增复核价'
+        '复核已到12分钟期限，维持原计划；本次触发结束，不新增复核价'
       const notification = buildAlertNotification({
         alert: a,
         quote: q,
@@ -693,7 +693,7 @@ export const alertStore = {
             )
           }
         })
-        .catch(() => { /* 网络失败由云端接力；2分钟期限到达后强制落终态 */ })
+        .catch(() => { /* 网络失败由云端接力；12分钟期限到达后强制落终态 */ })
         .finally(clear)
     } catch { clear() }  // fetch 同步抛错:立即清理,避免 id 永久滞留
   },

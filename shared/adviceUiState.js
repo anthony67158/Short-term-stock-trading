@@ -288,7 +288,7 @@ export function adviceReviewCardState(
     return {
       kind: 'queued',
       label: '条件已触发，正在启动持续观察',
-      detail: `持续观察后，在${TRIGGERED_REVIEW_TIME_LIMIT_MINUTES}分钟内给出明确结论`,
+      detail: '先观察约10分钟，随后约2分钟内给出明确结论',
     }
   }
   if (

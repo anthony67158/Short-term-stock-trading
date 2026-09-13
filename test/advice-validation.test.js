@@ -126,7 +126,7 @@ test('一手持仓减仓一手必须归一化为清仓并声明止损为未成�
   assert.equal(result.action, '清仓')
   assert.equal(result.opQty, '清仓1手')
   assert.match(result.actionPlan, /清仓1手/)
-  assert.match(result.exitTiming, /观察约60秒/)
+  assert.match(result.exitTiming, /观察约10分钟/)
   assert.match(result.exitTiming, /未执行前.*38\.67.*止损清仓/)
   assert.match(result.exitTiming, /任一路径成交后.*失效/)
 })

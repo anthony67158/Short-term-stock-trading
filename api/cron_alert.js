@@ -75,7 +75,7 @@ import {
 const OP_LABEL = { gte: '≥', lte: '≤' };
 
 // 单账号单轮「智能确认(LLM judge)」调用上限:watching 态预警很多时,若逐条 judge 会烧光 token/超时,
-// 拖垮整轮拨测。超出本轮预算的任务由下一轮优先处理；超过2分钟总期限则直接落终态。
+// 拖垮整轮拨测。超出本轮预算的任务由下一轮优先处理；超过12分钟总期限则直接落终态。
 const JUDGE_BUDGET_PER_ROUND = 4;
 const JUDGE_INTERVAL_MS = { buy: 45000, sell: 30000, stop: 20000 };
 const WATCHING_MAX_MS = 90 * 60 * 1000;
@@ -731,7 +731,7 @@ async function processAccount(
             decision: 'wait',
             side,
             terminalInstruction:
-              '复核已到2分钟期限，维持原计划；本次触发结束，不新增复核价',
+              '复核已到12分钟期限，维持原计划；本次触发结束，不新增复核价',
           },
           now,
         );
@@ -768,7 +768,7 @@ async function processAccount(
         strategyPatternConfirmation:
           a.strategyPatternConfirmation,
       })) continue;
-      // ★预算护栏:本轮 judge 调用达上限时留给下一轮优先处理；2分钟期限会强制收敛。
+      // ★预算护栏:本轮 judge 调用达上限时留给下一轮优先处理；12分钟期限会强制收敛。
       if (judgeCalls >= judgeLimit || !hasJudgeBudget(deadline)) continue;
       // 现价缺失(接口异常/休市返回空)时不判定,省一次无谓的 judge 调用。
       if (!q || q.price == null || !(Number(q.price) > 0)) continue;

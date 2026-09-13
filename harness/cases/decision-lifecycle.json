@@ -84,7 +84,7 @@
           "review": 0,
           "judge": 0
         },
-        "notificationIncludes": ["星河材料", "观察价已到", "复核中"]
+        "notificationIncludes": ["星河材料", "观察价已到", "约10分钟后给结论"]
       }
     },
     {

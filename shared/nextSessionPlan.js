@@ -123,7 +123,7 @@ function scenarioInstruction({
   }
   if (['EXIT', 'REDUCE'].includes(action)) {
     const label = action === 'EXIT' ? '清仓' : '减仓'
-    return `首笔有效报价后观察约60秒；复核仍支持${label}时，卖出${plannedLots}手。`
+    return `首笔有效报价后观察约10分钟；复核仍支持${label}时，卖出${plannedLots}手。`
   }
   if (key === 'STRONG') {
     return '进入目标区域后复核是否止盈；复核前不追涨加仓。'

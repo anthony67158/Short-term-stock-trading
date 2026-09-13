@@ -99,7 +99,7 @@ export function normalizeFullExitAdvice(
   normalized.exitTiming = source.decisionPlan?.activeExitPath === 'stop'
     ? '止损价到达后观察约20秒，确认有效跌破再清仓；快速深破等硬风险立即退出；成交后持仓归零，另一条退出路径自动失效'
     : [
-        '反弹清仓位到达后观察约60秒，确认不能站稳且资金未改善再清仓',
+        '反弹清仓位到达后观察约10分钟，确认不能站稳且资金未改善再清仓',
         `${fallback}；快速深破等硬风险立即退出；任一路径成交后持仓归零，另一条自动失效`,
       ].join('；')
   if (source.decisionPlan?.schemaVersion === 'decision-plan.v2') {

@@ -46,6 +46,7 @@ import {
   buildTriggeredReviewFallback,
   enforceTriggeredReviewDecisionPlan,
   normalizeTriggeredReviewDecision,
+  TRIGGERED_REVIEW_OBSERVATION_MS,
 } from '../../shared/triggeredReviewDecision.js'
 
 const DEFAULT_NOW = Date.parse('2026-08-24T02:10:00.000Z')
@@ -447,7 +448,7 @@ async function runFastReview({
   now,
 }) {
   const triggerQuote = liveQuote(input.trigger.quote, now)
-  const activation = activatePriceReviewTrigger(
+  const observation = activatePriceReviewTrigger(
     data,
     {
       alertId: alert?.id,
@@ -456,7 +457,23 @@ async function runFastReview({
     },
     now,
   )
+  const reviewRequestedAt =
+    Number(observation.alert?.monitoringUntilAt)
+    || now + TRIGGERED_REVIEW_OBSERVATION_MS
+  const activation = observation.ok
+    ? activatePriceReviewTrigger(
+        data,
+        {
+          alertId: alert?.id,
+          code: input.security.code,
+          quote: triggerQuote,
+        },
+        reviewRequestedAt,
+      )
+    : observation
   traceStep(trace, 'activate-price-review', {
+    observationStarted:
+      observation.reason === 'observation-started',
     activated: activation.ok === true,
     created: activation.created === true,
   })
@@ -469,7 +486,7 @@ async function runFastReview({
         code: input.security.code,
         quote: triggerQuote,
       },
-      now + 1,
+      reviewRequestedAt + 1,
     )
     traceStep(trace, 'replay-price-review', {
       created: duplicate.created === true,
@@ -487,7 +504,7 @@ async function runFastReview({
     trends: review.trends,
     reviewEvent: activation.job.trigger,
     previousAdvice: initialAdvice,
-    now: now + 1000,
+    now: reviewRequestedAt + 1000,
     mode: input.mode,
   })
   const prompt = buildUserPrompt(

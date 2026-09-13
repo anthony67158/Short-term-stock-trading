@@ -149,7 +149,7 @@ export function buildDecisionAction({
         : selling
           ? reviewedExit
             ? `退出前复核后持仓价值仍不为正，${actionLabel}${actionLots}手`
-            : `持仓价值不为正，先观察约60秒并重新评估；复核仍不为正再${actionLabel}${actionLots}手`
+            : `持仓价值不为正，先观察约10分钟并重新评估；复核仍不为正再${actionLabel}${actionLots}手`
           : decision.action === 'HOLD_LOCKED'
             ? '模型提示退出，但今日仓位受T+1锁定，下一可卖时段优先处理'
             : holdingAddPlan

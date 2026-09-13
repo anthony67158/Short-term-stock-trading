@@ -1102,7 +1102,7 @@ test('一手持仓卡把减仓一手展示为二选一清仓路径', () => {
     ],
   )
   assert.equal(view.trigger.price, 40.22)
-  assert.match(view.cardInstruction, /观察约60秒/)
+  assert.match(view.cardInstruction, /观察约10分钟/)
   assert.match(view.cardInstruction, /任一路径成交后.*失效/)
 })
 

@@ -191,7 +191,7 @@ test('旧版非止损清仓建议也先显示退出复核，复核终态后才�
   })
   assert.equal(pending.executable, false)
   assert.equal(pending.headline, '等待退出前复核')
-  assert.match(pending.reason, /约60秒/)
+  assert.match(pending.reason, /约10分钟/)
 
   const reviewed = decisionPresentation({
     advice: {
@@ -235,7 +235,7 @@ test('休市退出复核在所有决策卡片统一延期到下个交易时段',
   assert.equal(view.headline, '下个交易时段复核')
   assert.equal(view.timing, '下个交易时段收到有效报价后')
   assert.match(view.reason, /当前休市/)
-  assert.doesNotMatch(view.reason, /约60秒/)
+  assert.doesNotMatch(view.reason, /约10分钟/)
 })
 
 test('收盘持仓卡投影次日预案且盘中保持原决策结构', () => {

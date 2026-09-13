@@ -123,12 +123,14 @@ test('页面轮询发现观察价到达后立即提交复核并显示同内容�
         alert: {
           id: 'review-000636',
           code: '000636',
-          phase: 'reviewing',
-          enabled: false,
-          triggeredAt,
-          triggeredMsg: '观察价已到：现价 55.34 ≤ 55.37',
+          phase: 'watching',
+          enabled: true,
+          watchingAt: triggeredAt,
+          watchingPrice: 55.34,
+          watchingMsg: '观察价已到：现价 55.34 ≤ 55.37',
           decisionPrice: 55.34,
-          decisionDeadlineAt: triggeredAt + 120000,
+          monitoringUntilAt: triggeredAt + 600000,
+          decisionDeadlineAt: triggeredAt + 720000,
         },
       }),
     }
@@ -147,9 +149,9 @@ test('页面轮询发现观察价到达后立即提交复核并显示同内容�
 
     assert.equal(requestBody.op, 'triggerPriceReview')
     assert.equal(requestBody.alertId, 'review-000636')
-    assert.equal(planStore.get().alerts[0].phase, 'reviewing')
-    assert.equal(planStore.get().alerts[0].enabled, false)
-    assert.equal(alertStore.get().banners[0].title, '风华高科｜回踩加仓已到')
+    assert.equal(planStore.get().alerts[0].phase, 'watching')
+    assert.equal(planStore.get().alerts[0].enabled, true)
+    assert.equal(alertStore.get().banners[0].title, '风华高科｜观察价已到')
     assert.match(alertStore.get().banners[0].body, /55\.34.*55\.37/)
   } finally {
     global.fetch = originalFetch

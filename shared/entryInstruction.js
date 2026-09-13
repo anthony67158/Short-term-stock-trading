@@ -108,7 +108,7 @@ function timingOf({
       headline: `到${observationPrice.toFixed(2)}元后复核`,
       explanation: [
         trigger,
-        '首次到价后观察约60秒，再复核一次',
+        '首次到价后观察约10分钟，再复核一次',
         confirmation,
       ].filter(Boolean).join('；') + '。',
     }

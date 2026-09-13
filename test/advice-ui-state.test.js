@@ -510,7 +510,7 @@ test('卡片复核状态只由真实price-review任务状态驱动', () => {
     {
       kind: 'queued',
       label: '条件已触发，正在启动持续观察',
-      detail: '持续观察后，在2分钟内给出明确结论',
+      detail: '先观察约10分钟，随后约2分钟内给出明确结论',
     },
   )
   assert.equal(stateFor('queued').label, '条件已触发，等待后台复核')
@@ -558,7 +558,7 @@ test('触价超过总期限缓冲仍没有后台任务时明确提示启动失�
   assert.deepEqual(adviceReviewCardState(
     { reviews: [] },
     '600000',
-    { alerts, now: 160_000 },
+    { alerts, now: 752_000 },
   ), {
     kind: 'failed',
     label: '自动复核未启动，点“重新评估”立即处理',

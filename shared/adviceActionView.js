@@ -982,7 +982,7 @@ export function buildHoldingCardDecisionView({
     const reference = stopSide ? stopPrice : targetPrice
     const timing = stopSide
       ? '止损价到达后先观察约20秒，确认有效跌破再退出；快速深破等硬风险立即退出'
-      : '反弹退出价到达后先观察约60秒，确认冲高不能站稳且资金未改善再退出'
+      : '反弹退出价到达后先观察约10分钟，确认冲高不能站稳且资金未改善再退出'
     return {
       ...source,
       action: effect.fullExit ? '清仓' : '减仓',
