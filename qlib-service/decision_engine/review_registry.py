@@ -18,6 +18,9 @@ from .registry import CatBoostJsonRanker
 REVIEW_MANIFEST_SCHEMA_VERSION = "decision-review-model-manifest.v1"
 REVIEW_MODEL_SCHEMA_VERSION = "decision-review-model.v1"
 REVIEW_ARTIFACT_SCHEMA_VERSION = "decision-review-ensemble.v1"
+REVIEW_OBSERVATION_POLICY_VERSION = "trigger-review-observation.v1"
+REVIEW_OBSERVATION_DURATION_MS = 10 * 60 * 1000
+REVIEW_ENTRY_TIMING = "NEXT_BAR_AFTER_OBSERVATION"
 REVIEW_ARTIFACT_FILENAMES = {
     "ensemble": "review_seed_ensemble.json",
     "meta": "review_meta.json",
@@ -45,6 +48,11 @@ def sha256_file(path):
 
 
 def validate_review_metadata(metadata, model_version=None):
+    observation = (
+        metadata.get("observationPolicy")
+        if isinstance(metadata, dict)
+        else None
+    )
     if (
         not isinstance(metadata, dict)
         or metadata.get("schemaVersion") != REVIEW_MODEL_SCHEMA_VERSION
@@ -53,6 +61,12 @@ def validate_review_metadata(metadata, model_version=None):
         or metadata.get("predictionContract")
         != "trigger-review-action-value.v1"
         or not str(metadata.get("modelVersion") or "")
+        or not isinstance(observation, dict)
+        or observation.get("schemaVersion")
+        != REVIEW_OBSERVATION_POLICY_VERSION
+        or observation.get("durationMs")
+        != REVIEW_OBSERVATION_DURATION_MS
+        or observation.get("entryTiming") != REVIEW_ENTRY_TIMING
     ):
         raise ValueError("触价复核模型元数据无效")
     members = metadata.get("ensembleMembers")

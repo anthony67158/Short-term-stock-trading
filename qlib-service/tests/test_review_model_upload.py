@@ -10,7 +10,10 @@ from decision_engine.heads.review_contract import (
 )
 from decision_engine.review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
+    REVIEW_ENTRY_TIMING,
     REVIEW_MODEL_SCHEMA_VERSION,
+    REVIEW_OBSERVATION_DURATION_MS,
+    REVIEW_OBSERVATION_POLICY_VERSION,
 )
 from upload_review_model import publish_review_release
 
@@ -50,6 +53,11 @@ def metadata(*, eligible=True):
         "featureNames": list(FEATURE_NAMES),
         "predictionContract": "trigger-review-action-value.v1",
         "modelVersion": "decision-review.1789298000.ensemble2",
+        "observationPolicy": {
+            "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
+            "durationMs": REVIEW_OBSERVATION_DURATION_MS,
+            "entryTiming": REVIEW_ENTRY_TIMING,
+        },
         "ensembleSize": 2,
         "ensembleMembers": [member, {**member, "seed": 7}],
         "productionEligible": eligible,

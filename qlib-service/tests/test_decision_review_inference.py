@@ -8,6 +8,11 @@ from decision_engine.heads.review_contract import (
 )
 from decision_engine.review_inference import predict_review_items
 from decision_engine.review_registry import REVIEW_MODEL_SCHEMA_VERSION
+from decision_engine.review_registry import (
+    REVIEW_ENTRY_TIMING,
+    REVIEW_OBSERVATION_DURATION_MS,
+    REVIEW_OBSERVATION_POLICY_VERSION,
+)
 
 
 class FakeModel:
@@ -46,6 +51,11 @@ def metadata(**overrides):
         "featureNames": list(FEATURE_NAMES),
         "predictionContract": "trigger-review-action-value.v1",
         "modelVersion": "review-test-v1",
+        "observationPolicy": {
+            "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
+            "durationMs": REVIEW_OBSERVATION_DURATION_MS,
+            "entryTiming": REVIEW_ENTRY_TIMING,
+        },
         "ensembleSize": 2,
         "ensembleMembers": [member, {**member, "seed": 7}],
         "calibrationSampleCount": 200,
@@ -94,6 +104,18 @@ class ReviewInferenceTests(unittest.TestCase):
 
         self.assertEqual(result["state"], "NOT_READY")
         self.assertEqual(result["reason"], "REVIEW_MODEL_NOT_PROMOTED")
+
+    def test_legacy_short_observation_model_fails_closed(self):
+        legacy = metadata()
+        legacy.pop("observationPolicy")
+        result = predict_review_items(
+            {"items": [request_item()]},
+            models=models(),
+            metadata=legacy,
+        )[0]
+
+        self.assertEqual(result["state"], "NOT_READY")
+        self.assertEqual(result["reason"], "REVIEW_MODEL_INVALID")
 
     def test_review_request_rejects_feature_contract_drift(self):
         invalid = request_item()

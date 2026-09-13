@@ -14,7 +14,10 @@ from ..heads.review_contract import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
 from ..review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
     REVIEW_ARTIFACT_SCHEMA_VERSION,
+    REVIEW_ENTRY_TIMING,
     REVIEW_MODEL_SCHEMA_VERSION,
+    REVIEW_OBSERVATION_DURATION_MS,
+    REVIEW_OBSERVATION_POLICY_VERSION,
     validate_review_metadata,
 )
 from .bakeoff import (
@@ -257,6 +260,11 @@ def train_review_ensemble(
         "featureNames": list(FEATURE_NAMES),
         "predictionContract": "trigger-review-action-value.v1",
         "modelVersion": model_version,
+        "observationPolicy": {
+            "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
+            "durationMs": REVIEW_OBSERVATION_DURATION_MS,
+            "entryTiming": REVIEW_ENTRY_TIMING,
+        },
         "ensembleSize": len(members),
         "ensembleMembers": [
             member["config"] for member in members

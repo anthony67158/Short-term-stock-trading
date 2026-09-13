@@ -144,6 +144,24 @@ test('历史结算复用生产费用和T加一结果合同', () => {
       },
       {
         date: '2026-06-02',
+        tradeTime: '2026-06-02 09:45:00',
+        open: 10.1,
+        high: 10.3,
+        low: 10,
+        close: 10.2,
+        volume: 1200,
+      },
+      {
+        date: '2026-06-02',
+        tradeTime: '2026-06-02 09:50:00',
+        open: 10.2,
+        high: 10.4,
+        low: 10.1,
+        close: 10.3,
+        volume: 1100,
+      },
+      {
+        date: '2026-06-02',
         tradeTime: '2026-06-02 15:00:00',
         open: 10.1,
         high: 10.5,
@@ -185,6 +203,14 @@ test('历史结算复用生产费用和T加一结果合同', () => {
     'opportunity-review-feature.v1',
   )
   assert.equal(outcome.reviewScoreInput.factors.observationBars, 2)
+  assert.equal(
+    outcome.reviewScoreInput.asOf,
+    Date.parse('2026-06-02T09:45:00+08:00'),
+  )
+  assert.equal(
+    outcome.entry.at,
+    Date.parse('2026-06-02T09:50:00+08:00'),
+  )
 })
 
 test('历史样本合并按决策ID去重并保留最新值', () => {

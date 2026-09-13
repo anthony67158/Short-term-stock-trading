@@ -11,6 +11,8 @@ import {
   buildOpportunityReviewFeatureInput,
 } from '../../shared/opportunityReviewFeatures.js'
 
+const REVIEW_OBSERVATION_MS = 10 * 60 * 1000
+
 function routeKey(decision, index) {
   return String(
     decision?.route || decision?.priceType || index + 1,
@@ -124,6 +126,7 @@ function barTimestamp(value) {
 function reviewFeatureInput(event, outcome, bars) {
   const triggeredAt = Number(outcome?.trigger?.at)
   if (!(triggeredAt > 0)) return null
+  const observationCompleteAt = triggeredAt + REVIEW_OBSERVATION_MS
   const rows = (Array.isArray(bars) ? bars : [])
     .map((bar) => ({
       ...bar,
@@ -131,11 +134,12 @@ function reviewFeatureInput(event, outcome, bars) {
     }))
     .filter((bar) =>
       bar.at != null
-      && bar.at >= triggeredAt
-      && bar.at <= triggeredAt + 10 * 60 * 1000
+      && bar.at > triggeredAt
+      && bar.at <= observationCompleteAt
     )
     .sort((left, right) => left.at - right.at)
     .slice(0, 2)
+  if (rows.at(-1)?.at < observationCompleteAt) return null
   return buildOpportunityReviewFeatureInput({
     code: event.code,
     asOf: rows.at(-1)?.at,
@@ -159,6 +163,7 @@ export function settleHistoricalEvent({
     event,
     bars,
     evaluatedAt,
+    postTriggerObservationMs: REVIEW_OBSERVATION_MS,
   })
   return {
     ...outcome,

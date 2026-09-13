@@ -341,6 +341,7 @@ export function resolveOpportunityOutcome({
   lotSize = 100,
   slippageBps = 5,
   feePolicy = A_SHARE_STANDARD_FEE_POLICY,
+  postTriggerObservationMs = 0,
 } = {}) {
   const timestamp = finite(evaluatedAt)
   if (!(timestamp > 0)) throw new Error('机会结果结算时间无效')
@@ -392,7 +393,20 @@ export function resolveOpportunityOutcome({
     price: entryPrice,
   }
   const triggerIndex = rows.indexOf(triggerBar)
-  const entryBar = rows[triggerIndex + 1]
+  const observationMs = Math.max(
+    0,
+    Math.trunc(finite(postTriggerObservationMs) || 0),
+  )
+  const observationCompleteAt = triggerBar.at == null
+    ? null
+    : triggerBar.at + observationMs
+  const entryBar = rows
+    .slice(triggerIndex + 1)
+    .find((bar) => (
+      observationCompleteAt == null
+      || bar.at == null
+      || bar.at > observationCompleteAt
+    ))
   const validUntil = finite(decision.validUntil)
   const entryWindowExpired = (
     triggerBar.at != null

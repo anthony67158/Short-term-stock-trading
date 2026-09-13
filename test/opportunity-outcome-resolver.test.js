@@ -166,6 +166,51 @@ test('触发后下一根K线一字涨停时记录为触发但未成交', () => {
   assert.equal(result.entry.rejectionReason, 'LIMIT_UP_UNFILLED')
 })
 
+test('触价观察完整经过十分钟后才允许下一根K线成交', () => {
+  const result = resolveOpportunityOutcome({
+    event: event(),
+    postTriggerObservationMs: 10 * 60 * 1000,
+    bars: [
+      bar('2026-09-01', { close: 10 }),
+      bar('2026-09-02', {
+        tradeTime: '09:35:00',
+        low: 9.9,
+        close: 10,
+      }),
+      bar('2026-09-02', {
+        tradeTime: '09:40:00',
+        open: 10,
+        close: 10.1,
+      }),
+      bar('2026-09-02', {
+        tradeTime: '09:45:00',
+        open: 10.1,
+        close: 10.2,
+      }),
+      bar('2026-09-02', {
+        tradeTime: '09:50:00',
+        open: 10.2,
+        close: 10.25,
+      }),
+      bar('2026-09-03', {
+        tradeTime: '09:35:00',
+        open: 9.4,
+        high: 9.5,
+        low: 9.3,
+        close: 9.4,
+        preClose: 10.25,
+      }),
+    ],
+    evaluatedAt: Date.parse('2026-09-03T08:00:00.000Z'),
+  })
+
+  assert.equal(
+    result.entry.at,
+    Date.parse('2026-09-02T09:50:00+08:00'),
+  )
+  assert.equal(result.outcome, 'STOP_LOSS')
+})
+
 test('买入当日触发止损只能记录T+1锁定，不能伪造成可卖出', () => {
   const result = resolveOpportunityOutcome({
     event: event(),
