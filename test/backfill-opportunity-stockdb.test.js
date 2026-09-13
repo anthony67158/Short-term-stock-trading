@@ -68,6 +68,34 @@ test('Tushare回填使用独立工作目录和受限请求速率', () => {
   assert.equal(options.maxPerMinute, 120)
 })
 
+test('本地缓存回放要求显式工作目录且不改变数据源类型', () => {
+  assert.throws(
+    () => parseStockDbBackfillArgs([
+      '--provider',
+      'cache',
+      '--from',
+      '20250901',
+      '--to',
+      '20260911',
+    ]),
+    /必须显式指定--work-dir/,
+  )
+
+  const options = parseStockDbBackfillArgs([
+    '--provider',
+    'cache',
+    '--work-dir',
+    '/tmp/year-cache',
+    '--from',
+    '20250901',
+    '--to',
+    '20260911',
+  ])
+
+  assert.equal(options.provider, 'cache')
+  assert.equal(options.workDir, '/tmp/year-cache')
+})
+
 test('StockDB回填缓存严格按本次日期范围裁剪', () => {
   assert.deepEqual(
     filterStockDbRowsByRange([

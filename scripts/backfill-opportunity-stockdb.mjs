@@ -115,8 +115,11 @@ export function parseStockDbBackfillArgs(argv = []) {
     throw new Error('StockDB回填日期范围无效')
   }
   const provider = String(values.provider || 'stockdb').toLowerCase()
-  if (!['stockdb', 'tushare', 'archive'].includes(provider)) {
+  if (!['stockdb', 'tushare', 'archive', 'cache'].includes(provider)) {
     throw new Error('历史回填数据源无效')
+  }
+  if (provider === 'cache' && !values['work-dir']) {
+    throw new Error('本地缓存回放必须显式指定--work-dir')
   }
   return {
     provider,
@@ -369,6 +372,9 @@ async function main() {
     await runArchiveExporter(options)
     cachedDaily = await readGzipJson(dailyFile)
     cachedFunds = await readGzipJson(fundFile)
+  } else if (options.provider === 'cache') {
+    cachedDaily = await readGzipJson(dailyFile)
+    cachedFunds = await readGzipJson(fundFile)
   } else if (options.provider === 'tushare') {
     await runTushareMetadataExporter(options)
     if (!await fileExists(sectorFile)) {
@@ -409,7 +415,9 @@ async function main() {
     : []
   const plan = selectReplayDates(daily, {
     signalDays: options.signalDays,
-    settlementDays: options.provider === 'archive' ? 6 : 7,
+    settlementDays: ['archive', 'cache'].includes(options.provider)
+      ? 6
+      : 7,
   })
   validateCoverage(daily, funds, plan, options.universeSize)
   const universesByDate = new Map()
@@ -436,13 +444,14 @@ async function main() {
     processingDates: manifest.dates.length,
     maximumCodes: Math.max(...manifest.dates.map((row) => row.codes.length)),
   })
-  if (options.provider !== 'archive') {
+  if (!['archive', 'cache'].includes(options.provider)) {
     await runMinuteExporter(options, manifestPath, minuteDirectory)
   }
 
   const sourceType = {
     tushare: 'TUSHARE_CAUSAL_REPLAY',
     archive: 'OSS_MARKET_CAUSAL_REPLAY',
+    cache: 'LOCAL_CACHE_CAUSAL_REPLAY',
   }[options.provider] || 'STOCKDB_CAUSAL_REPLAY'
   const replayDates = replayDatesFromManifest(manifest)
   const signalSet = new Set(plan.signalDates)
@@ -504,7 +513,7 @@ async function main() {
     })
   }
 
-  const existing = options.provider === 'archive'
+  const existing = ['archive', 'cache'].includes(options.provider)
     ? []
     : await loadExistingOutcomes()
   const merged = mergeHistoricalOutcomes(outcomes, existing)
@@ -521,6 +530,8 @@ async function main() {
         ? 'proxy-v1'
         : options.provider === 'archive'
           ? 'market-data-v1'
+          : options.provider === 'cache'
+            ? 'merged-cache-v1'
           : '0.3.5',
       signalDates: plan.signalDates.length,
       universeSize: options.universeSize,
