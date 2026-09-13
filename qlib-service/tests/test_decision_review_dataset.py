@@ -15,6 +15,9 @@ from decision_engine.heads.review_contract import (  # noqa: E402
 from decision_engine.training.review_dataset import (  # noqa: E402
     build_opportunity_review_dataset,
 )
+from decision_engine.training.review_bakeoff import (  # noqa: E402
+    select_review_candidate,
+)
 
 
 def review_input():
@@ -30,6 +33,39 @@ def review_input():
 
 
 class OpportunityReviewDatasetTest(unittest.TestCase):
+    def test_review_candidate_selects_strongest_when_multiple_models_pass(self):
+        def family(lower_bound, mean_net_r):
+            return {
+                "aggregate": {
+                    "pWinBrierSkill": 0.01,
+                    "netRMaeSkill": 0.02,
+                    "valueTop5LowerBound": lower_bound,
+                    "valueTop5MeanNetR": mean_net_r,
+                    "q10Coverage": 0.9,
+                },
+            }
+
+        self.assertEqual(
+            select_review_candidate({
+                "lightgbm": family(0.07, 0.16),
+                "catboost": family(0.15, 0.25),
+            }),
+            "catboost",
+        )
+
+    def test_review_candidate_rejects_when_no_model_passes(self):
+        self.assertIsNone(select_review_candidate({
+            "lightgbm": {
+                "aggregate": {
+                    "pWinBrierSkill": 0.01,
+                    "netRMaeSkill": 0.02,
+                    "valueTop5LowerBound": -0.01,
+                    "valueTop5MeanNetR": 0.2,
+                    "q10Coverage": 0.9,
+                },
+            },
+        }))
+
     def test_review_contract_preserves_order(self):
         self.assertEqual(
             feature_vector(review_input()),
