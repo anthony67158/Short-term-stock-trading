@@ -135,7 +135,7 @@ export function parseStockDbBackfillArgs(argv = []) {
     baseUrl: values['base-url'] || 'http://127.0.0.1:7899',
     from,
     to,
-    signalDays: positiveInteger(values['signal-days'], 90, 120),
+    signalDays: positiveInteger(values['signal-days'], 90, 250),
     universeSize: positiveInteger(values['universe-size'], 1000, 2000),
     maxPerMinute: positiveInteger(values['max-per-min'], 90, 120),
   }

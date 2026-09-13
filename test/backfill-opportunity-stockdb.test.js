@@ -26,7 +26,7 @@ test('StockDB回填命令限制日期、样本天数和股票池规模', () => {
   assert.equal(options.from, '20260101')
   assert.equal(options.to, '20260909')
   assert.equal(options.provider, 'stockdb')
-  assert.equal(options.signalDays, 120)
+  assert.equal(options.signalDays, 200)
   assert.equal(options.universeSize, 2000)
   assert.equal(options.maxPerMinute, 90)
 })
