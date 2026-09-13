@@ -1,10 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import {
+  mkdtemp,
+  readFile,
+  rm,
+} from 'node:fs/promises'
+import os from 'node:os'
+import path from 'node:path'
 
 import {
   filterStockDbRowsByRange,
   parseStockDbBackfillArgs,
   replayDatesFromManifest,
+  writeOutcomeExport,
 } from '../scripts/backfill-opportunity-stockdb.mjs'
 
 test('StockDB回填命令限制日期、样本天数和股票池规模', () => {
@@ -129,4 +137,31 @@ test('StockDB回放只读取分钟导出清单中的实际日期', () => {
     }),
     /日期无效/,
   )
+})
+
+test('历史结果使用流式原子文件写入并可完整读回', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'outcome-export-'))
+  const output = path.join(directory, 'outcomes.json')
+  try {
+    await writeOutcomeExport(
+      output,
+      {
+        schemaVersion: 'opportunity-outcome-export.v1',
+        summary: { historical: 2 },
+      },
+      [
+        { decisionId: 'decision-1', maturity: 'MATURED' },
+        { decisionId: 'decision-2', maturity: 'MATURED' },
+      ],
+    )
+
+    const payload = JSON.parse(await readFile(output, 'utf8'))
+    assert.equal(payload.summary.historical, 2)
+    assert.deepEqual(
+      payload.outcomes.map((item) => item.decisionId),
+      ['decision-1', 'decision-2'],
+    )
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
 })

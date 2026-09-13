@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { createWriteStream } from 'node:fs'
 import {
   mkdir,
   readFile,
@@ -209,6 +211,25 @@ async function cachedJson(file, loader) {
   const value = await loader()
   await writeGzipJson(file, value)
   return value
+}
+
+export async function writeOutcomeExport(file, header, outcomes) {
+  const temporary = `${file}.part`
+  const stream = createWriteStream(temporary, {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
+  const prefix = JSON.stringify(header)
+  stream.write(`${prefix.slice(0, -1)},"outcomes":[`)
+  for (let index = 0; index < outcomes.length; index += 1) {
+    if (index > 0) stream.write(',')
+    if (!stream.write(JSON.stringify(outcomes[index]))) {
+      await once(stream, 'drain')
+    }
+  }
+  stream.end(']}')
+  await once(stream, 'finish')
+  await rename(temporary, file)
 }
 
 function writeProgress(stage, details = {}) {
@@ -543,16 +564,15 @@ async function main() {
       merged: merged.length,
       pending: pending.length,
     },
-    outcomes: merged,
   }
   const outputPath = path.join(
     options.workDir,
     'opportunity-outcomes-combined.json',
   )
-  await writeFile(
+  await writeOutcomeExport(
     outputPath,
-    JSON.stringify(output),
-    { mode: 0o600 },
+    output,
+    merged,
   )
   writeProgress('DONE', { output: outputPath, ...output.summary })
 }
