@@ -2,6 +2,8 @@ import os
 import sys
 import unittest
 
+import numpy as np
+
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SERVICE_ROOT = os.path.abspath(os.path.join(HERE, ".."))
@@ -18,6 +20,7 @@ from decision_engine.training.review_dataset import (  # noqa: E402
 from decision_engine.training.review_bakeoff import (  # noqa: E402
     select_review_candidate,
 )
+from decision_engine.training.review_ensemble import _evaluate  # noqa: E402
 
 
 def review_input():
@@ -33,6 +36,40 @@ def review_input():
 
 
 class OpportunityReviewDatasetTest(unittest.TestCase):
+    def test_review_release_does_not_fill_top5_with_negative_expectation(self):
+        dataset = {
+            "y_win": np.asarray([0, 1, 1, 0, 0]),
+            "y_net_r": np.asarray([-1.0, 1.0, 1.0, -5.0, -5.0]),
+            "dates": np.asarray([
+                "2026-08-01",
+                "2026-08-02",
+                "2026-09-01",
+                "2026-09-01",
+                "2026-09-02",
+            ]),
+            "codes": np.asarray([
+                "600001",
+                "600002",
+                "600003",
+                "600004",
+                "600005",
+            ]),
+        }
+        predictions = [{
+            "pWinGivenFill": np.asarray([0.7, 0.2, 0.2]),
+            "expectedNetR": np.asarray([0.2, -0.1, -0.2]),
+            "netRLowerBound": np.asarray([0.1, -0.3, -0.4]),
+        }]
+
+        metrics, _ = _evaluate(
+            dataset,
+            np.asarray([0, 1]),
+            np.asarray([2, 3, 4]),
+            predictions,
+        )
+
+        self.assertEqual(metrics["valueTop5MeanNetR"], 0.5)
+
     def test_review_candidate_selects_strongest_when_multiple_models_pass(self):
         def family(lower_bound, mean_net_r):
             return {

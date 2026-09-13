@@ -159,11 +159,13 @@ def _evaluate(dataset, development, holdout, predictions):
         dataset["y_net_r"][holdout],
         median,
     )
+    risk_adjusted_value = 0.75 * expected + 0.25 * lower
     ranking = _ranking(
         dataset["y_net_r"][holdout],
-        expected,
+        risk_adjusted_value,
         dataset,
         holdout,
+        eligible_mask=expected > 0,
     )["top5"]
     coverage = float(np.mean(
         dataset["y_net_r"][holdout] >= lower
@@ -262,6 +264,12 @@ def train_review_ensemble(
         "calibrationSampleCount": int(len(calibration)),
         "productionEligible": not blockers,
         "baselineSelected": False,
+        "rankingPolicy": {
+            "schemaVersion": "review-ranking.v1",
+            "expectedNetRWeight": 0.75,
+            "netRLowerBoundWeight": 0.25,
+            "eligibility": "expectedNetR>0",
+        },
         "risk": {
             "expectedShortfall10": round(expected_shortfall, 6),
         },
