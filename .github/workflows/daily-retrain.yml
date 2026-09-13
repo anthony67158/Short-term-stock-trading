@@ -373,6 +373,17 @@ jobs:
             --estimators 180 \
             --threads 4
 
+      - name: Evaluate trigger-review head without production activation
+        run: |
+          for seed in 42 7 2026; do
+            python -m decision_engine.training.review_bakeoff \
+              --input opportunity-outcomes.json \
+              --output-dir "opportunity-model/review-seed-${seed}" \
+              --seed "$seed" \
+              --estimators 180 \
+              --threads 4
+          done
+
       - name: Train and evaluate opportunity challenger
         run: |
           python -m decision_engine.training.ensemble \
@@ -461,6 +472,9 @@ jobs:
             qlib-service/opportunity-model/seed-42/report.json
             qlib-service/opportunity-model/seed-7/report.json
             qlib-service/opportunity-model/seed-2026/report.json
+            qlib-service/opportunity-model/review-seed-42/report.json
+            qlib-service/opportunity-model/review-seed-7/report.json
+            qlib-service/opportunity-model/review-seed-2026/report.json
             qlib-service/opportunity-outcomes.json
           if-no-files-found: warn
 
