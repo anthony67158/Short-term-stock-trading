@@ -287,7 +287,7 @@ jobs:
         && needs.market-data-archive.result == 'success'
       }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: qlib-service
