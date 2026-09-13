@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import AdaptiveWorkbench from './AdaptiveWorkbench.jsx'
 
+const previewNow = Date.now()
+
 const market = {
   breadth: {
     up: 3180,
@@ -20,11 +22,39 @@ const book = {
     totalAssets: 120000,
     cash: 68000,
   },
-  holding: [],
+  holding: [{
+    id: 'holding-600036',
+    code: '600036',
+    name: '招商银行',
+    qty: 2,
+    buyPrice: 39.2,
+    sl: 38.6,
+  }],
   plan: [],
-  alerts: [],
+  alerts: [{
+    id: 'review-300750',
+    code: '300750',
+    name: '宁德时代',
+    reviewOnly: true,
+    phase: 'watching',
+    watchingMsg: '回踩观察价已到，正在采集承接路径',
+    monitoringUntilAt: previewNow + 7 * 60_000,
+  }],
   executionPlans: [],
   closed: [],
+  advice: {
+    '600036': {
+      advice: {
+        executionRules: [{
+          conditions: [{
+            metric: 'price',
+            op: 'lte',
+            value: 40.18,
+          }],
+        }],
+      },
+    },
+  },
 }
 
 const opportunities = [
@@ -149,7 +179,11 @@ export default function AdaptiveWorkbenchPreview() {
       <AdaptiveWorkbench
         market={market}
         book={book}
-        quotes={[]}
+        quotes={[{
+          code: '600036',
+          name: '招商银行',
+          price: 42.3,
+        }]}
         previewSnapshot={previewSnapshot}
       />
     </main>

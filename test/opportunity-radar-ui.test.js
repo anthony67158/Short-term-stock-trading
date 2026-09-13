@@ -144,6 +144,18 @@ test('自适应作战台提示上一模型版本结果需要重新扫描', () =>
   )
 })
 
+test('自适应作战台首屏按指令观察和退出保护三层组织', () => {
+  assert.match(adaptive, /唯一当前指令/)
+  assert.match(adaptive, /触价观察/)
+  assert.match(adaptive, /动态保护/)
+  assert.match(adaptive, /monitoringUntilAt/)
+  assert.match(adaptive, /reviewOnly === true/)
+  assert.match(adaptive, /等待触发的候选机会/)
+  assert.match(adaptive, /<details className="aw-edge">/)
+  assert.match(styles, /\.aw-command-grid\s*\{[\s\S]*repeat\(3,/)
+  assert.match(styles, /@media \(max-width: 720px\)[\s\S]*\.aw-command-grid\s*\{[\s\S]*grid-template-columns: 1fr/)
+})
+
 test('重算无正期望机会时展示扫描总数和最高净期望', () => {
   const summary = opportunityRadarLaneSummary([
     {

@@ -83,6 +83,15 @@ function phaseTone(phase) {
   return 'neutral'
 }
 
+function countdown(untilAt, now) {
+  const deadline = Number(untilAt)
+  if (!Number.isFinite(deadline) || deadline <= 0) return '--:--'
+  const remaining = Math.max(0, deadline - now)
+  const minutes = Math.floor(remaining / 60_000)
+  const seconds = Math.floor((remaining % 60_000) / 1000)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 function WorkbenchHeader({ context, risk, commandCount }) {
   const availableRisk = risk?.availableRisk == null
     ? null
@@ -118,31 +127,29 @@ function WorkbenchHeader({ context, risk, commandCount }) {
   )
 }
 
-function ActionQueue({ commands, onOpen }) {
+function CurrentInstruction({ commands, onOpen }) {
   const urgent = commands.filter((item) => COMMAND_STATES.has(item.state))
   const waiting = commands.filter((item) => !COMMAND_STATES.has(item.state))
-    .slice(0, 4)
-  const rows = urgent.length ? urgent : waiting
+  const command = urgent[0] || waiting[0] || null
   return (
-    <section className="aw-section aw-actions" aria-labelledby="aw-actions-title">
+    <section className="aw-section aw-focus" aria-labelledby="aw-actions-title">
       <div className="aw-section-head">
         <div>
-          <span className="aw-kicker">账户动作</span>
-          <h2 id="aw-actions-title">
-            {urgent.length ? `${urgent.length}项现在处理` : '当前无需立即操作'}
-          </h2>
+          <span className="aw-kicker">现在该做什么</span>
+          <h2 id="aw-actions-title">唯一当前指令</h2>
         </div>
         <span className="aw-section-meta">
-          {waiting.length}项等待条件
+          {urgent.length > 1
+            ? `另有${urgent.length - 1}项待处理`
+            : `${waiting.length}项等待条件`}
         </span>
       </div>
       <div className="aw-command-list">
-        {rows.length ? rows.map((command) => (
+        {command ? (
           <button
             type="button"
             className="aw-command"
             data-state={command.state}
-            key={`${command.code}-${command.executionPlanId || command.state}`}
             onClick={() => onOpen(command.code, command.name)}
           >
             <span className="aw-command-stock">
@@ -162,10 +169,124 @@ function ActionQueue({ commands, onOpen }) {
             </span>
             <Icon name="chevronRight" size={15} />
           </button>
-        )) : (
+        ) : (
           <div className="aw-empty">
             <Icon name="check" size={18} />
-            <span>持仓风险和待成交计划均无待办</span>
+            <span>当前无需操作，继续等待系统确认</span>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function ObservationQueue({ alerts, now, onOpen }) {
+  const rows = (Array.isArray(alerts) ? alerts : [])
+    .filter((item) =>
+      item?.reviewOnly === true
+      && ['watching', 'reviewing'].includes(item.phase))
+    .sort((left, right) =>
+      Number(left.monitoringUntilAt || Infinity)
+      - Number(right.monitoringUntilAt || Infinity))
+    .slice(0, 4)
+  return (
+    <section className="aw-section aw-observations" aria-labelledby="aw-observations-title">
+      <div className="aw-section-head">
+        <div>
+          <span className="aw-kicker">正在等待什么</span>
+          <h2 id="aw-observations-title">触价观察</h2>
+        </div>
+        <span className="aw-section-meta">{rows.length}项进行中</span>
+      </div>
+      <div className="aw-compact-list">
+        {rows.length ? rows.map((alert) => {
+          const observing = alert.phase === 'watching'
+          return (
+            <button
+              type="button"
+              className="aw-compact-row"
+              key={alert.id}
+              onClick={() => onOpen(alert.code, alert.name)}
+            >
+              <Icon name={observing ? 'clock' : 'refresh'} size={16} />
+              <span>
+                <strong>{alert.name || alert.code}</strong>
+                <small>
+                  {observing
+                    ? alert.watchingMsg || '正在采集触价后路径'
+                    : '观察完成，正在重新评估'}
+                </small>
+              </span>
+              <b>{observing
+                ? countdown(alert.monitoringUntilAt, now)
+                : '复核中'}</b>
+            </button>
+          )
+        }) : (
+          <div className="aw-empty">
+            <Icon name="clock" size={18} />
+            <span>暂无触价后的观察任务</span>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function PositionProtection({ book, quoteMap, onOpen }) {
+  const rows = (book.holding || []).slice(0, 5).map((holding) => {
+    const advice = book.advice?.[holding.code]?.advice || {}
+    const stopRule = (advice.executionRules || []).find((rule) =>
+      (rule.conditions || []).some((condition) =>
+        condition.metric === 'price' && condition.op === 'lte'))
+    const stop = Number(
+      stopRule?.conditions?.find((condition) =>
+        condition.metric === 'price' && condition.op === 'lte')?.value
+      ?? holding.sl,
+    )
+    const price = Number(quoteMap[holding.code]?.price)
+    const distance = stop > 0 && price > 0
+      ? (price / stop - 1) * 100
+      : null
+    return { holding, advice, stop, price, distance }
+  })
+  return (
+    <section className="aw-section aw-protection" aria-labelledby="aw-protection-title">
+      <div className="aw-section-head">
+        <div>
+          <span className="aw-kicker">持仓如何退出</span>
+          <h2 id="aw-protection-title">动态保护</h2>
+        </div>
+        <span className="aw-section-meta">{rows.length}只持仓</span>
+      </div>
+      <div className="aw-compact-list">
+        {rows.length ? rows.map(({ holding, stop, distance }) => (
+          <button
+            type="button"
+            className="aw-compact-row"
+            data-risk={distance != null && distance <= 0}
+            key={holding.id || holding.code}
+            onClick={() => onOpen(holding.code, holding.name)}
+          >
+            <Icon name="shield" size={16} />
+            <span>
+              <strong>{holding.name || holding.code}</strong>
+              <small>
+                {stop > 0
+                  ? `动态保护价 ¥${number(stop)}`
+                  : '等待系统核定保护价'}
+              </small>
+            </span>
+            <b>{distance == null
+              ? '--'
+              : distance <= 0
+                ? '已触发'
+                : `余量 ${number(distance, 1)}%`}</b>
+          </button>
+        )) : (
+          <div className="aw-empty">
+            <Icon name="shield" size={18} />
+            <span>当前没有需要管理的持仓</span>
           </div>
         )}
       </div>
@@ -208,19 +329,6 @@ export function OpportunityRow({
       <div className="aw-playbook">
         <span>{adaptive.playbook?.label || '等待分类'}</span>
         <strong>{adaptive.actionLabel || opportunity.stateLabel}</strong>
-      </div>
-      <div className="aw-edge">
-        <span>
-          成交 <b>{probability(estimate.pFill)}</b>
-        </span>
-        <span>
-          模型胜率 <b>{probability(estimate.pWinGivenFill)}</b>
-        </span>
-        <span>
-          净期望 <b data-positive={Number(estimate.expectedNetR) > 0}>
-            {signed(estimate.expectedNetR, 'R')}
-          </b>
-        </span>
       </div>
       <div className="aw-route">
         <span>{ROUTE_LABELS[entry.type] || entry.type || '观察'}</span>
@@ -268,6 +376,22 @@ export function OpportunityRow({
           />
         </button>
       </div>
+      <details className="aw-edge">
+        <summary>模型依据</summary>
+        <div>
+          <span>
+            成交 <b>{probability(estimate.pFill)}</b>
+          </span>
+          <span>
+            胜率 <b>{probability(estimate.pWinGivenFill)}</b>
+          </span>
+          <span>
+            净期望 <b data-positive={Number(estimate.expectedNetR) > 0}>
+              {signed(estimate.expectedNetR, 'R')}
+            </b>
+          </span>
+        </div>
+      </details>
       <StrategyPatternEvidence
         pattern={opportunity.strategyPattern}
         confirmation={
@@ -422,8 +546,8 @@ function OpportunityBoard({
     <section className="aw-section aw-opportunities" aria-labelledby="aw-opportunities-title">
       <div className="aw-section-head">
         <div>
-          <span className="aw-kicker">资本竞争结果</span>
-          <h2 id="aw-opportunities-title">当前最值得处理的机会</h2>
+          <span className="aw-kicker">条件待命</span>
+          <h2 id="aw-opportunities-title">等待触发的候选机会</h2>
         </div>
         <div className="aw-board-controls">
           <div className="aw-segmented" role="tablist" aria-label="机会时段">
@@ -566,6 +690,18 @@ export default function AdaptiveWorkbench({
   const urgentCount = commands.filter(
     (item) => COMMAND_STATES.has(item.state),
   ).length
+  const hasActiveObservation = (book.alerts || []).some((item) =>
+    item?.reviewOnly === true
+    && ['watching', 'reviewing'].includes(item.phase))
+  const [clockNow, setClockNow] = useState(Date.now())
+  useEffect(() => {
+    if (!hasActiveObservation) return undefined
+    const timer = window.setInterval(
+      () => setClockNow(Date.now()),
+      1000,
+    )
+    return () => window.clearInterval(timer)
+  }, [hasActiveObservation])
 
   return (
     <div className="adaptive-workbench">
@@ -574,15 +710,28 @@ export default function AdaptiveWorkbench({
         risk={risk}
         commandCount={urgentCount}
       />
-      <div className="aw-grid">
-        <ActionQueue commands={commands} onOpen={openStockDetail} />
-        <OpportunityBoard
+      <div className="aw-command-grid">
+        <CurrentInstruction
+          commands={commands}
+          onOpen={openStockDetail}
+        />
+        <ObservationQueue
+          alerts={book.alerts}
+          now={clockNow}
+          onOpen={openStockDetail}
+        />
+        <PositionProtection
           book={book}
           quoteMap={quoteMap}
           onOpen={openStockDetail}
-          initialSnapshot={previewSnapshot}
         />
       </div>
+      <OpportunityBoard
+        book={book}
+        quoteMap={quoteMap}
+        onOpen={openStockDetail}
+        initialSnapshot={previewSnapshot}
+      />
     </div>
   )
 }
