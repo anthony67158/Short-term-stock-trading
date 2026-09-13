@@ -309,6 +309,16 @@ test('完整决策评估在模型未就绪时独立返回明确状态与零LLM�
 
 const now = Date.parse('2026-09-10T02:10:00Z')
 function scenario(overrides = {}) {
+  const score = overrides.score || (async ([input]) => new Map([[input.code, {
+    ...plan.opportunityScore,
+    expectedNetR: input.dimensions?.route === 'IMMEDIATE' ? 0.8 : 0.1,
+  }]]))
+  const reviewScore = overrides.reviewScore || (async ([input]) =>
+    new Map([[input.code, {
+      ...plan.opportunityScore,
+      formulaId: input.formulaId,
+      expectedNetR: 0.8,
+    }]]))
   return {
     code: '600001', now,
     book: { account: { cash: 100000 }, holding: [], closed: [], executionPlans: [] },
@@ -320,10 +330,8 @@ function scenario(overrides = {}) {
       retailNetYi: -1,
     },
     market: { breadth: { up: 3000, down: 1000, flat: 100 } },
-    score: async ([input]) => new Map([[input.code, {
-      ...plan.opportunityScore,
-      expectedNetR: input.dimensions.route === 'IMMEDIATE' ? 0.8 : 0.1,
-    }]]),
+    score,
+    reviewScore,
     ...overrides,
   }
 }
@@ -529,6 +537,12 @@ test('持仓加仓到价后由决策模型和账户风控共同核定手数', as
         buyAt: now - 86400000,
       }],
     },
+    trends: Array.from({ length: 12 }, (_, index) => ({
+      time: `10:${String(index).padStart(2, '0')}`,
+      price: 10 + index * 0.01,
+      avg: 10,
+      volume: 1000 + index * 100,
+    })),
     reviewEvent: addEvent,
     score: async ([row]) => new Map([[row.code, {
       ...plan.opportunityScore,
@@ -571,8 +585,7 @@ test('持仓加仓到价后由决策模型和账户风控共同核定手数', as
     },
   })
   assert.notEqual(blocked.result.decisionPlan.action, 'ADD')
-  assert.equal(blocked.result.decisionPlan.action, 'REDUCE')
-  assert.equal(blocked.result.decisionPlan.quantity.lots, 1)
+  assert.equal(blocked.result.decisionPlan.action, 'HOLD')
   assert.equal(
     blocked.result.decisionRationale.entryInstruction.state,
     'NO_TRADE',
@@ -674,6 +687,33 @@ test('触发后路径特征只在复核事件中生成', async () => {
   assert.equal(
     review.meta.reviewScoreInput.factors.direction_BREAKOUT,
     1,
+  )
+})
+
+test('触价后复核模型不可用时不回退初始买入结论', async () => {
+  const result = await evaluateDecision(scenario({
+    trends: Array.from({ length: 12 }, (_, index) => ({
+      time: `10:${String(10 + index).padStart(2, '0')}`,
+      price: 10 + index * 0.01,
+      avg: 10,
+      volume: 100 + index * 10,
+    })),
+    reviewEvent: {
+      kind: 'price-review',
+      at: now,
+      threshold: 10,
+      direction: 'gte',
+      plannedAction: 'BUY',
+    },
+    reviewScore: async () => new Map(),
+  }))
+
+  assert.notEqual(result.result.decisionPlan.action, 'BUY')
+  assert.equal(result.result.decisionPlan.quantity.lots, 0)
+  assert.equal(result.result.reviewEvaluation.state, 'NOT_READY')
+  assert.equal(
+    result.result.reviewEvaluation.reason,
+    'REVIEW_MODEL_UNAVAILABLE',
   )
 })
 
@@ -874,6 +914,8 @@ test('退出前复核用最新模型结果撤销反弹后的旧清仓或确认�
     reviewEvent: {
       kind: 'price-review',
       price: 53.9,
+      threshold: 53.9,
+      at: now - 10 * 60_000,
     },
     score: async ([input]) => new Map([[input.code, {
       ...plan.opportunityScore,
@@ -897,9 +939,16 @@ test('退出前复核用最新模型结果撤销反弹后的旧清仓或确认�
     reviewEvent: {
       kind: 'price-review',
       price: 53.9,
+      threshold: 53.9,
+      at: now - 10 * 60_000,
     },
     score: async ([input]) => new Map([[input.code, {
       ...plan.opportunityScore,
+      expectedNetR: -0.2,
+    }]]),
+    reviewScore: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      formulaId: input.formulaId,
       expectedNetR: -0.2,
     }]]),
   }))

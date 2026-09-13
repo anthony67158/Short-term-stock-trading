@@ -1,0 +1,261 @@
+"""Hot-reloaded registry for trigger-review action-value models."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+import threading
+import time
+
+from model_lib import _oss_bucket
+
+from .heads.review_contract import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
+from .registry import CatBoostJsonRanker
+
+
+REVIEW_MANIFEST_SCHEMA_VERSION = "decision-review-model-manifest.v1"
+REVIEW_MODEL_SCHEMA_VERSION = "decision-review-model.v1"
+REVIEW_ARTIFACT_SCHEMA_VERSION = "decision-review-ensemble.v1"
+REVIEW_ARTIFACT_FILENAMES = {
+    "ensemble": "review_seed_ensemble.json",
+    "meta": "review_meta.json",
+}
+REVIEW_MODEL_PREFIX = os.environ.get(
+    "DECISION_REVIEW_MODEL_PREFIX",
+    "opportunitymodel/review/",
+)
+REVIEW_MANIFEST_KEY = REVIEW_MODEL_PREFIX + "manifest.json"
+LOCAL_RELEASE_ROOT = "/tmp/decision-review-model-releases"
+MODEL_TTL_SECONDS = 60
+
+_MODELS = None
+_META = None
+_LAST_CHECK_AT = 0.0
+_LOAD_LOCK = threading.Lock()
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def validate_review_metadata(metadata, model_version=None):
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("schemaVersion") != REVIEW_MODEL_SCHEMA_VERSION
+        or metadata.get("featureSchemaVersion") != FEATURE_SCHEMA_VERSION
+        or tuple(metadata.get("featureNames") or ()) != FEATURE_NAMES
+        or metadata.get("predictionContract")
+        != "trigger-review-action-value.v1"
+        or not str(metadata.get("modelVersion") or "")
+    ):
+        raise ValueError("触价复核模型元数据无效")
+    members = metadata.get("ensembleMembers")
+    size = int(metadata.get("ensembleSize") or 0)
+    if (
+        not isinstance(members, list)
+        or not 2 <= size <= 5
+        or len(members) != size
+        or any(
+            not isinstance(member, dict)
+            or not isinstance(member.get("activeFeatures"), list)
+            or not isinstance(member.get("pWinCalibration"), dict)
+            or not isinstance(member.get("q10CalibrationOffset"), (int, float))
+            for member in members
+        )
+    ):
+        raise ValueError("触价复核模型集成元数据无效")
+    for member in members:
+        active = member["activeFeatures"]
+        calibration = member["pWinCalibration"]
+        if (
+            not active
+            or len(active) != len(set(active))
+            or any(
+                not isinstance(index, int)
+                or index < 0
+                or index >= len(FEATURE_NAMES)
+                for index in active
+            )
+            or calibration.get("method") not in {"sigmoid", "isotonic"}
+        ):
+            raise ValueError("触价复核模型成员配置无效")
+    if model_version and metadata["modelVersion"] != model_version:
+        raise ValueError("触价复核模型版本不一致")
+    return metadata
+
+
+def validate_review_manifest(manifest):
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schemaVersion")
+        != REVIEW_MANIFEST_SCHEMA_VERSION
+    ):
+        raise ValueError("触价复核模型清单版本无效")
+    run_id = str(manifest.get("runId") or "")
+    if (
+        not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,95}", run_id)
+        or ".." in run_id
+    ):
+        raise ValueError("触价复核模型runId无效")
+    files = manifest.get("files")
+    if not isinstance(files, dict) or set(files) != set(
+        REVIEW_ARTIFACT_FILENAMES
+    ):
+        raise ValueError("触价复核模型文件清单不完整")
+    expected_prefix = (
+        f"{REVIEW_MODEL_PREFIX.rstrip('/')}/runs/{run_id}/"
+    )
+    for slot, filename in REVIEW_ARTIFACT_FILENAMES.items():
+        item = files.get(slot) or {}
+        key = str(item.get("key") or "")
+        checksum = str(item.get("sha256") or "")
+        if (
+            not key.startswith(expected_prefix)
+            or not key.endswith(filename)
+            or ".." in key
+            or not re.fullmatch(r"[0-9a-f]{64}", checksum)
+        ):
+            raise ValueError("触价复核模型文件清单无效")
+    return manifest
+
+
+def load_review_release(artifact_path, metadata_path):
+    with open(metadata_path, encoding="utf-8") as handle:
+        metadata = validate_review_metadata(json.load(handle))
+    with open(artifact_path, encoding="utf-8") as handle:
+        artifact = json.load(handle)
+    members = artifact.get("members")
+    if (
+        artifact.get("schemaVersion")
+        != REVIEW_ARTIFACT_SCHEMA_VERSION
+        or artifact.get("featureSchemaVersion")
+        != FEATURE_SCHEMA_VERSION
+        or not isinstance(members, list)
+        or len(members) != metadata["ensembleSize"]
+    ):
+        raise ValueError("触价复核模型集成文件无效")
+    required = {
+        "pWinGivenFill",
+        "winPayoffR",
+        "lossPayoffR",
+        "netRLower10",
+    }
+    loaded = []
+    for index, member in enumerate(members):
+        models = member.get("models") or {}
+        if (
+            set(models) != required
+            or int(member.get("seed") or 0)
+            != int(metadata["ensembleMembers"][index].get("seed") or 0)
+        ):
+            raise ValueError("触价复核模型集成成员不完整")
+        loaded.append({
+            slot: CatBoostJsonRanker(payload=models[slot])
+            for slot in required
+        })
+    return {"ensemble": loaded}, metadata
+
+
+def _read_remote_manifest(bucket):
+    try:
+        payload = bucket.get_object(REVIEW_MANIFEST_KEY).read()
+    except Exception as error:
+        if (
+            getattr(error, "status", None) == 404
+            or getattr(error, "code", None) == "NoSuchKey"
+        ):
+            return None
+        raise
+    return validate_review_manifest(
+        json.loads(payload.decode("utf-8"))
+    )
+
+
+def _download_release():
+    bucket = _oss_bucket()
+    if bucket is None:
+        return None
+    manifest = _read_remote_manifest(bucket)
+    if manifest is None:
+        return None
+    run_id = manifest["runId"]
+    if _MODELS and (_META or {}).get("modelVersion") == run_id:
+        return _MODELS, _META
+    release_dir = os.path.join(LOCAL_RELEASE_ROOT, run_id)
+    os.makedirs(release_dir, exist_ok=True)
+    final_paths = {
+        slot: os.path.join(release_dir, filename)
+        for slot, filename in REVIEW_ARTIFACT_FILENAMES.items()
+    }
+    temporary = []
+    try:
+        for slot, destination in final_paths.items():
+            temp = destination + ".part"
+            temporary.append(temp)
+            payload = bucket.get_object(
+                manifest["files"][slot]["key"]
+            ).read()
+            with open(temp, "wb") as handle:
+                handle.write(payload)
+            if sha256_file(temp) != manifest["files"][slot]["sha256"]:
+                raise ValueError("触价复核模型文件摘要不匹配")
+        loaded = load_review_release(
+            final_paths["ensemble"] + ".part",
+            final_paths["meta"] + ".part",
+        )
+        validate_review_metadata(loaded[1], run_id)
+        metadata = {
+            **loaded[1],
+            "usagePolicy": manifest.get("usagePolicy", "QUALIFIED"),
+            "productionEligible": manifest.get(
+                "productionEligible",
+                False,
+            ),
+            "baselineSelected": manifest.get(
+                "baselineSelected",
+                False,
+            ),
+        }
+        for destination in final_paths.values():
+            os.replace(destination + ".part", destination)
+        return loaded[0], metadata
+    except Exception:
+        for path in temporary:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return None
+
+
+def get_review_models(force=False):
+    global _MODELS, _META, _LAST_CHECK_AT
+    now = time.time()
+    if (
+        not force
+        and _LAST_CHECK_AT > 0
+        and now - _LAST_CHECK_AT < MODEL_TTL_SECONDS
+    ):
+        return _MODELS, _META
+    with _LOAD_LOCK:
+        now = time.time()
+        if (
+            not force
+            and _LAST_CHECK_AT > 0
+            and now - _LAST_CHECK_AT < MODEL_TTL_SECONDS
+        ):
+            return _MODELS, _META
+        try:
+            loaded = _download_release()
+        except Exception:
+            loaded = None
+        _LAST_CHECK_AT = now
+        if loaded is not None:
+            _MODELS, _META = loaded
+        return _MODELS, _META

@@ -19,11 +19,12 @@ async function fetchBatch(inputs, {
   key,
   fetchImpl,
   timeoutMs,
+  endpoint = '/decision-score',
 }) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), timeoutMs)
   try {
-    const response = await fetchImpl(`${base}/decision-score`, {
+    const response = await fetchImpl(`${base}${endpoint}`, {
       method: 'POST',
       signal: controller.signal,
       headers: {
@@ -98,5 +99,27 @@ export async function fetchDecisionScores(inputs, {
   for (const result of results) {
     for (const [code, score] of result) scores.set(code, score)
   }
+  return scores
+}
+
+export async function fetchDecisionReviewScores(inputs, {
+  env = process.env,
+  fetchImpl = fetch,
+  timeoutMs = ACTION_VALUE_TIMEOUT_MS,
+} = {}) {
+  const values = (Array.isArray(inputs) ? inputs : [])
+    .filter((item) => /^\d{6}$/.test(String(item?.code || '')))
+  if (!values.length) return new Map()
+  const base = String(env.QUANT_URL || '').trim().replace(/\/+$/, '')
+  if (!base) return fallbackMap(values, 'SERVICE_NOT_CONFIGURED')
+  const results = await fetchBatch(values.slice(0, REQUEST_BATCH_SIZE), {
+    base,
+    key: env.QUANT_KEY,
+    fetchImpl,
+    timeoutMs,
+    endpoint: '/decision-review-score',
+  })
+  const scores = fallbackMap(values, 'DEFERRED')
+  for (const [code, score] of results) scores.set(code, score)
   return scores
 }

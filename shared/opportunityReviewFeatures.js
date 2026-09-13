@@ -72,6 +72,7 @@ function normalizedRows(values = []) {
 export function buildOpportunityReviewFeatureInput({
   code,
   asOf,
+  formulaId = 'TRIGGER_REVIEW',
   triggerPrice,
   direction,
   rows = [],
@@ -151,6 +152,7 @@ export function buildOpportunityReviewFeatureInput({
     schemaVersion: OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION,
     asOf: timestamp,
     code: normalizedCode,
+    formulaId: String(formulaId || 'TRIGGER_REVIEW').slice(0, 60),
     factors: Object.fromEntries(
       OPPORTUNITY_REVIEW_FEATURE_NAMES.map((name) => [
         name,

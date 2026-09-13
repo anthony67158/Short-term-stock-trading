@@ -3,8 +3,13 @@ import assert from 'node:assert/strict'
 
 import {
   ACTION_VALUE_TIMEOUT_MS,
+  fetchDecisionReviewScores,
   fetchDecisionScores,
 } from '../api/_action_value_client.js'
+import {
+  OPPORTUNITY_REVIEW_FEATURE_NAMES,
+  OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION,
+} from '../shared/opportunityReviewFeatures.js'
 import {
   OPPORTUNITY_SCORE_FEATURE_NAMES,
   OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
@@ -149,4 +154,63 @@ test('超时或非法响应只降级影子评分而不抛出', async () => {
 
   assert.equal(scores.get('600001').state, 'NOT_READY')
   assert.equal(scores.get('600001').reason, 'INVALID_RESPONSE')
+})
+
+test('触价后动作价值使用独立复核端点和标准评分合同', async () => {
+  let request = null
+  const reviewInput = {
+    schemaVersion: OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION,
+    asOf: 1_788_320_000_000,
+    code: '600001',
+    formulaId: 'TRIGGER_REVIEW',
+    factors: Object.fromEntries(
+      OPPORTUNITY_REVIEW_FEATURE_NAMES.map((name) => [name, 0]),
+    ),
+  }
+  const scores = await fetchDecisionReviewScores([reviewInput], {
+    env: {
+      QUANT_URL: 'https://quant.example.com/',
+      QUANT_KEY: 'test-key',
+    },
+    fetchImpl: async (url, options) => {
+      request = { url, options }
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            predictions: [{
+              schemaVersion: OPPORTUNITY_SCORE_SCHEMA_VERSION,
+              state: 'READY',
+              modelVersion: 'decision-review.test',
+              asOf: reviewInput.asOf,
+              code: reviewInput.code,
+              formulaId: reviewInput.formulaId,
+              pFill: 1,
+              pWinGivenFill: 0.6,
+              expectedNetR: 0.3,
+              netRLowerBound: 0.1,
+              expectedShortfall10: -1,
+              usagePolicy: 'DIRECT',
+              productionEligible: true,
+              baselineSelected: true,
+              shadowOnly: false,
+              outOfDistribution: false,
+              calibration: {
+                method: 'trigger-review-seed-ensemble',
+                sampleCount: 100,
+              },
+            }],
+          }
+        },
+      }
+    },
+  })
+
+  assert.equal(
+    request.url,
+    'https://quant.example.com/decision-review-score',
+  )
+  assert.equal(scores.get('600001').state, 'READY')
+  assert.equal(scores.get('600001').pFill, 1)
 })

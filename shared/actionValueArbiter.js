@@ -193,7 +193,7 @@ export function arbitrateActionValues({
         - actionUtility(left, state.eligibility.held ? 'HOLD' : 'BUY'),
     )
   const immediate = scored.find((plan) => plan.route === 'IMMEDIATE')
-    || null
+    || (isTriggeredReviewEvent(state.review) ? scored[0] : null)
   const positionOptimization = state.eligibility.held
     ? positionOptimizationFor(immediate, state)
     : null

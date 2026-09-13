@@ -36,7 +36,10 @@ else
     "$PKG/opportunity_evaluation.py" \
     "$PKG/opportunity_model.py"
   mkdir -p "$PKG/contracts"
-  cp "$HERE/contracts/opportunity-score-features.json" "$PKG/contracts/"
+  cp \
+    "$HERE/contracts/opportunity-score-features.json" \
+    "$HERE/contracts/opportunity-review-features.json" \
+    "$PKG/contracts/"
   for file in \
     lgb_signal.txt \
     signal_meta.json \

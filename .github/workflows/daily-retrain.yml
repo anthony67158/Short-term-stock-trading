@@ -65,6 +65,8 @@ jobs:
             test_sector_app.py \
             tests/test_decision_contract.py \
             tests/test_decision_review_dataset.py \
+            tests/test_decision_review_inference.py \
+            tests/test_review_model_upload.py \
             tests/test_decision_dataset.py \
             tests/test_decision_evaluation.py \
             tests/test_decision_backtest_dataset.py \
@@ -373,7 +375,7 @@ jobs:
             --estimators 180 \
             --threads 4
 
-      - name: Evaluate trigger-review head without production activation
+      - name: Evaluate trigger-review model families
         run: |
           for seed in 42 7 2026; do
             python -m decision_engine.training.review_bakeoff \
@@ -383,6 +385,40 @@ jobs:
               --estimators 180 \
               --threads 4
           done
+
+      - name: Train trigger-review action-value ensemble
+        id: review-training
+        run: |
+          python -m decision_engine.training.review_ensemble \
+            --input opportunity-outcomes.json \
+            --output-dir opportunity-model/review-release \
+            --seeds 42,7,2026 \
+            --estimators 180 \
+            --threads 4
+          publish=$(python - <<'PY'
+          import json
+          with open(
+              "opportunity-model/review-release/review_meta.json",
+              encoding="utf-8",
+          ) as handle:
+              metadata = json.load(handle)
+          print(
+              "true"
+              if metadata.get("productionEligible") is True
+              else "false"
+          )
+          PY
+          )
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+      - name: Publish trigger-review ensemble atomically
+        id: review-production
+        if: steps.review-training.outputs.publish == 'true'
+        run: |
+          python upload_review_model.py \
+            --directory opportunity-model/review-release \
+            --prefix opportunitymodel/review/
+          echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Train and evaluate opportunity challenger
         run: |
@@ -475,6 +511,7 @@ jobs:
             qlib-service/opportunity-model/review-seed-42/report.json
             qlib-service/opportunity-model/review-seed-7/report.json
             qlib-service/opportunity-model/review-seed-2026/report.json
+            qlib-service/opportunity-model/review-release/
             qlib-service/opportunity-outcomes.json
           if-no-files-found: warn
 

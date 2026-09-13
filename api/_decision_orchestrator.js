@@ -2,7 +2,10 @@ import { fetchQuotes } from './quote.js'
 import { fetchResilientKline, fetchTrendsTx } from './stock_detail.js'
 import { fetchResilientStockFund } from './_stock_fund.js'
 import { loadSectorOpportunity } from './_sector_opportunity.js'
-import { fetchDecisionScores } from './_action_value_client.js'
+import {
+  fetchDecisionReviewScores,
+  fetchDecisionScores,
+} from './_action_value_client.js'
 import { internalApiOrigin } from './_internal_origin.js'
 import { accountFrom, buildHoldPayload, computePortfolio } from './_portfolio.js'
 import { buildAccountRiskContext, accountRiskCodes } from '../shared/accountRiskBudget.js'
@@ -226,6 +229,8 @@ function buildDecisionEvidence({
 export async function evaluateDecision({
   code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
   score = (inputs) => fetchDecisionScores(inputs, { timeoutMs: 8000 }),
+  reviewScore = (inputs) =>
+    fetchDecisionReviewScores(inputs, { timeoutMs: 8000 }),
   reviewEvent = null,
 }) {
   const quoteMap = Object.fromEntries(quotes.map((item) => [item.code, item]))
@@ -420,7 +425,7 @@ export async function evaluateDecision({
   }))
   // Budget every path on the same account snapshot before comparing them.
   // These hypothetical compilations are never published as executable plans.
-  for (const plan of evaluated) {
+  const attachTargetPosition = (plan) => {
     const adding = holding.length > 0
     const full = !adding || Number(plan.opportunityScore?.meanConfidenceLowerBound) > 0
     const hypothetical = compileDecisionPlan({
@@ -445,30 +450,117 @@ export async function evaluateDecision({
         maxPortfolioPositionPct: 85,
       },
     })
-    plan.targetPosition = hypothetical.targetPosition
+    return {
+      ...plan,
+      targetPosition: hypothetical.targetPosition,
+    }
+  }
+  let decisionPlans = evaluated.map(attachTargetPosition)
+  const initialAdvice = buildDecisionAction({
+    payload,
+    plans: decisionPlans,
+    now,
+  })
+  let reviewScoreInput = null
+  let reviewEvaluation = null
+  if (isTriggeredReviewEvent(reviewEvent)) {
+    const direction = String(reviewEvent?.direction || '').toUpperCase()
+    const requestedRoute = direction.includes('GTE')
+      ? 'BREAKOUT'
+      : direction.includes('LTE') ? 'PULLBACK' : null
+    const triggeredPlan = (
+      decisionPlans.find((plan) => plan.route === requestedRoute)
+      || initialAdvice.selectedDecisionPlan
+      || decisionPlans[0]
+    )
+    const plannedAction = String(
+      reviewEvent?.plannedAction || '',
+    ).toUpperCase()
+    const reviewedPlan = (
+      triggeredPlan
+      && /BUY|ADD|PROBE/.test(plannedAction)
+      && Number(quote.price) > 0
+    ) ? {
+        ...triggeredPlan,
+        entryPlan: {
+          ...triggeredPlan.entryPlan,
+          price: Number(quote.price),
+        },
+        riskReward: (
+          Number(triggeredPlan.exitPlan?.takeProfitPrice)
+          - Number(quote.price)
+        ) / Math.max(
+          0.01,
+          Number(quote.price)
+          - Number(triggeredPlan.exitPlan?.hardStopPrice),
+        ),
+      }
+      : triggeredPlan
+    reviewScoreInput = reviewedPlan
+      ? buildOpportunityReviewFeatureInput({
+          code,
+          asOf: now,
+          formulaId: 'TRIGGER_REVIEW',
+          triggerPrice:
+            reviewEvent.threshold
+            ?? reviewEvent.price,
+          direction:
+            reviewEvent.direction
+            ?? reviewEvent.plannedAction,
+          rows: postTriggerRows(trendRows, reviewEvent.at),
+          initialScore: reviewedPlan.opportunityScore,
+        })
+      : null
+    const fallbackInput = reviewScoreInput || {
+      code,
+      asOf: now,
+      formulaId: 'TRIGGER_REVIEW',
+    }
+    const reviewedScores = reviewScoreInput
+      ? await reviewScore([reviewScoreInput]).catch(() => new Map())
+      : new Map()
+    const opportunityScore = {
+      ...(reviewedScores.get(code) || unavailableOpportunityScore(
+        fallbackInput,
+        reviewScoreInput
+          ? 'REVIEW_MODEL_UNAVAILABLE'
+          : 'REVIEW_FEATURES_INCOMPLETE',
+      )),
+      serverVerified: true,
+      priceContract: reviewedPlan ? {
+        ...reviewedPlan.opportunityScore?.priceContract,
+        entryPrice: reviewedPlan.entryPlan.price,
+        stopPrice: reviewedPlan.exitPlan.hardStopPrice,
+        targetPrice: reviewedPlan.exitPlan.takeProfitPrice,
+        modelPriceRiskPerShare: Math.max(
+          0,
+          reviewedPlan.entryPlan.price
+          - reviewedPlan.exitPlan.hardStopPrice,
+        ),
+      } : undefined,
+    }
+    reviewEvaluation = {
+      state: opportunityScore.state,
+      reason: opportunityScore.reason || null,
+      modelVersion: opportunityScore.modelVersion || null,
+      expectedNetR: finite(opportunityScore.expectedNetR),
+      netRLowerBound: finite(opportunityScore.netRLowerBound),
+    }
+    decisionPlans = reviewedPlan
+      ? [attachTargetPosition({
+          ...reviewedPlan,
+          opportunityScore,
+        })]
+      : []
+    payload.reviewScoreInput = reviewScoreInput
   }
   let advice = {
-    ...buildDecisionAction({ payload, plans: evaluated, now }),
+    ...buildDecisionAction({ payload, plans: decisionPlans, now }),
+    ...(reviewEvaluation ? { reviewEvaluation } : {}),
     fundNote: '',
     strategyPattern,
     strategyPatternCapabilities,
   }
-  const reviewScoreInput = isTriggeredReviewEvent(reviewEvent)
-    ? buildOpportunityReviewFeatureInput({
-        code,
-        asOf: now,
-        triggerPrice:
-          reviewEvent.threshold
-          ?? reviewEvent.price,
-        direction:
-          reviewEvent.direction
-          ?? reviewEvent.plannedAction,
-        rows: postTriggerRows(trendRows, reviewEvent.at),
-        initialScore:
-          advice.selectedDecisionPlan?.opportunityScore,
-      })
-    : null
-  if (reviewScoreInput) payload.reviewScoreInput = reviewScoreInput
   if (reviewEvent) {
     advice.pullbackWatchPrice = null
     advice.breakoutWatchPrice = null
@@ -641,6 +733,7 @@ export async function evaluateDecision({
       todayQuote: payload.todayQuote,
       decisionSource: advice.decisionSource,
       reviewScoreInput,
+      reviewEvaluation,
       llmCalls: 0,
     },
     news: [], truncated: false,

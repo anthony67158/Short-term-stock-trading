@@ -13,6 +13,10 @@ from decision_engine.contracts import (  # noqa: E402
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
 )
+from decision_engine.heads.review_contract import (  # noqa: E402
+    FEATURE_NAMES as REVIEW_FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION as REVIEW_FEATURE_SCHEMA_VERSION,
+)
 
 
 def item():
@@ -89,6 +93,45 @@ class DecisionAppTest(unittest.TestCase):
                 app.decision_score({"items": []}, x_api_key="")
 
         self.assertEqual(error.exception.status_code, 400)
+
+    def test_review_endpoint_exposes_gate_state_without_deciding_action(self):
+        review_item = {
+            "schemaVersion": REVIEW_FEATURE_SCHEMA_VERSION,
+            "asOf": 1_788_320_000_000,
+            "code": "600001",
+            "formulaId": "TRIGGER_REVIEW",
+            "factors": {
+                name: 0.0 for name in REVIEW_FEATURE_NAMES
+            },
+        }
+        prediction = {
+            "schemaVersion": "opportunity-score.v1",
+            "state": "NOT_READY",
+            "reason": "REVIEW_MODEL_NOT_PROMOTED",
+            "code": "600001",
+        }
+        metadata = {
+            "modelVersion": "decision-review.test",
+            "productionEligible": True,
+            "baselineSelected": False,
+        }
+        with patch.object(
+            app,
+            "predict_review_items",
+            return_value=[prediction],
+        ), patch.object(
+            app,
+            "get_review_models",
+            return_value=({"ensemble": []}, metadata),
+        ):
+            response = app.decision_review_score(
+                {"items": [review_item]},
+                x_api_key="",
+            )
+
+        self.assertEqual(response["usagePolicy"], "QUALIFIED")
+        self.assertFalse(response["productionEligible"])
+        self.assertEqual(response["predictions"], [prediction])
 
     def test_archive_endpoint_runs_public_source_pipeline(self):
         with patch.object(
