@@ -70,6 +70,31 @@ export function activatePriceReviewTrigger(
       alert: { ...alert },
     }
   }
+  if (alert.phase === 'watching') {
+    const monitoringUntilAt = Number(alert.monitoringUntilAt)
+      || Number(alert.watchingAt) + TRIGGERED_REVIEW_OBSERVATION_MS
+    if (now < monitoringUntilAt) {
+      return {
+        ok: true,
+        queued: false,
+        created: false,
+        reason: 'observation-active',
+        workerNeeded: false,
+        alert: { ...alert, monitoringUntilAt },
+      }
+    }
+    const queued = queueAdviceReviewForPriceTrigger(
+      data,
+      alert,
+      now,
+    )
+    return {
+      ok: queued.queued === true,
+      ...queued,
+      already: queued.created !== true,
+      alert: { ...alert },
+    }
+  }
   if (!alert.enabled || alert.triggeredAt) {
     return { ok: false, reason: 'alert-not-armed' }
   }
@@ -99,21 +124,24 @@ export function activatePriceReviewTrigger(
   }
 
   Object.assign(alert, {
-    phase: 'reviewing',
-    triggeredAt: now,
-    triggeredMsg:
+    phase: 'watching',
+    watchingAt: now,
+    watchingPrice: price,
+    watchingMsg:
       `观察价已到：现价 ${price} ${PRICE_OPERATOR_LABEL[alert.op]} ${threshold}`,
     decisionPrice: price,
     decisionDeadlineAt:
       now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
     monitoringUntilAt:
       now + TRIGGERED_REVIEW_OBSERVATION_MS,
-    enabled: false,
+    enabled: true,
   })
-  const queued = queueAdviceReviewForPriceTrigger(data, alert, now)
   return {
-    ok: queued.queued === true,
-    ...queued,
+    ok: true,
+    queued: false,
+    created: false,
+    reason: 'observation-started',
+    workerNeeded: false,
     alert: { ...alert },
   }
 }
@@ -127,6 +155,17 @@ export function queueAdviceReviewForPriceTrigger(
   if (!code) return { queued: false, reason: 'missing-code' }
   if (!alert?.reviewOnly) {
     return { queued: false, reason: 'not-review-alert' }
+  }
+  const monitoringUntilAt = Number(alert?.monitoringUntilAt)
+    || Number(alert?.watchingAt) + TRIGGERED_REVIEW_OBSERVATION_MS
+  if (
+    alert.phase === 'watching'
+    && (
+      !(Number(alert.watchingAt) > 0)
+      || now < monitoringUntilAt
+    )
+  ) {
+    return { queued: false, reason: 'observation-active' }
   }
   if (!isAdviceReviewEnabled(data?.settings, code)) {
     return { queued: false, reason: 'review-disabled' }
@@ -217,13 +256,15 @@ export function queueAdviceReviewForPriceTrigger(
       : holdingReview
         ? '持仓加仓复核价已触发，重新评估是否加仓'
         : '观察价已触发，重新评估买入方向',
-    at: now,
+    at: Number(alert?.watchingAt) || now,
+    reviewRequestedAt: now,
     timeLimitMinutes: TRIGGERED_REVIEW_TIME_LIMIT_MINUTES,
     decisionDeadlineAt:
-      now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+      Number(alert?.decisionDeadlineAt)
+      || (Number(alert?.watchingAt) || now)
+        + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
     observationWindowMs: TRIGGERED_REVIEW_OBSERVATION_MS,
-    monitoringUntilAt: Number(alert?.monitoringUntilAt)
-      || now + TRIGGERED_REVIEW_OBSERVATION_MS,
+    monitoringUntilAt,
     terminalRequired: true,
   }
   const idempotencyKey = [
@@ -240,6 +281,12 @@ export function queueAdviceReviewForPriceTrigger(
     trigger,
     idempotencyKey,
   }, now)
+  Object.assign(alert, {
+    phase: 'reviewing',
+    enabled: false,
+    reviewRequestedAt: now,
+    monitoringUntilAt,
+  })
   if (queued.created) {
     for (const sibling of data.alerts || []) {
       if (sibling.id !== alert.id && sibling.code === code && sibling.reviewOnly

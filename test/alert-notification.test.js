@@ -27,7 +27,7 @@ test('到价观察通知明确禁止立即执行并只保留价位与复核时�
   assert.equal(notification.title, '中利集团｜减仓观察已到')
   assert.equal(
     notification.body,
-    '002309｜现价3.06≥3.05｜先不减仓，复核中，约60秒后给结论',
+    '002309｜现价3.06≥3.05｜先不减仓，观察触价后路径，约10分钟后给结论',
   )
   assert.equal(notification.tag, 'trade-alert-reduce-1')
   assert.equal(notification.renotify, false)
@@ -58,7 +58,7 @@ test('一手清仓观察只在确认后提示执行', () => {
   })
 
   assert.equal(watching.title, '中利集团｜清仓观察已到')
-  assert.match(watching.body, /先不清仓，复核中，约60秒后给结论/)
+  assert.match(watching.body, /先不清仓，观察触价后路径，约10分钟后给结论/)
   assert.equal(confirmed.title, '中利集团｜立即清仓1手')
   assert.match(confirmed.body, /002309｜现价40\.18/)
   assert.doesNotMatch(confirmed.body, /执行[:：]/)
@@ -75,7 +75,7 @@ test('买入加仓和止损到价都只提示观察，不提前显示执行手�
         opQty: '买入2手',
       },
       title: '中利集团｜买入观察已到',
-      instruction: '先不买入，复核中，约60秒后给结论',
+      instruction: '先不买入，观察触价后路径，约10分钟后给结论',
     },
     {
       alert: {
@@ -86,7 +86,7 @@ test('买入加仓和止损到价都只提示观察，不提前显示执行手�
         opQty: '加仓2手',
       },
       title: '中利集团｜加仓观察已到',
-      instruction: '先不加仓，复核中，约60秒后给结论',
+      instruction: '先不加仓，观察触价后路径，约10分钟后给结论',
     },
     {
       alert: {
@@ -212,7 +212,7 @@ test('观察价命中时明确通知正在复核且不暗示下单', () => {
   assert.equal(notification.title, '贵州茅台｜观察价已到')
   assert.equal(
     notification.body,
-    '600519｜现价145.3≥145.24｜复核中，约2分钟内给结论',
+    '600519｜现价145.3≥145.24｜观察完成，约2分钟内给结论',
   )
   assert.equal(notification.tag, 'trade-alert-600519')
   assert.equal(notification.ttl, 180)

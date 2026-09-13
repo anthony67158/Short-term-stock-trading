@@ -104,18 +104,18 @@ function watchInstruction(action) {
     return '先不卖出，复核中，约20秒后给结论'
   }
   if (/清仓/.test(action)) {
-    return '先不清仓，复核中，约60秒后给结论'
+    return '先不清仓，观察触价后路径，约10分钟后给结论'
   }
   if (/减仓|止盈/.test(action)) {
-    return '先不减仓，复核中，约60秒后给结论'
+    return '先不减仓，观察触价后路径，约10分钟后给结论'
   }
   if (/加仓/.test(action)) {
-    return '先不加仓，复核中，约60秒后给结论'
+    return '先不加仓，观察触价后路径，约10分钟后给结论'
   }
   if (/买入/.test(action)) {
-    return '先不买入，复核中，约60秒后给结论'
+    return '先不买入，观察触价后路径，约10分钟后给结论'
   }
-  return '先不操作，复核中，约60秒后给结论'
+  return '先不操作，观察触价后路径，约10分钟后给结论'
 }
 
 function waitOutcome(action, holdingMode) {
@@ -252,7 +252,7 @@ export function buildAlertNotification({
     stage === 'watch'
       ? [pendingFacts, watchInstruction(action)]
       : stage === 'review'
-        ? [pendingFacts, '复核中，约2分钟内给结论']
+        ? [pendingFacts, '观察完成，约2分钟内给结论']
         : stage === 'confirm'
           ? [decisionFacts, conciseReason || '信号已确认']
           : stage === 'wait'

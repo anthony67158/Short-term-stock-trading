@@ -38,7 +38,7 @@ test('同一建议的回踩和突破共用一次复核，终态后另一条路�
   assert.equal(second.job.id, first.job.id)
 })
 
-test('页面发现观察价已到时立即进入复核并排入紧急任务', () => {
+test('页面发现观察价已到时先观察十分钟再排入紧急复核', () => {
   const now = Date.parse('2026-08-28T05:30:00.000Z')
   const data = {
     plan: [{ code: '000636', name: '风华高科' }],
@@ -86,20 +86,36 @@ test('页面发现观察价已到时立即进入复核并排入紧急任务', ()
   }, now)
 
   assert.equal(result.ok, true)
-  assert.equal(result.queued, true)
-  assert.equal(result.alert.phase, 'reviewing')
-  assert.equal(result.alert.enabled, false)
-  assert.equal(result.alert.triggeredAt, now)
+  assert.equal(result.queued, false)
+  assert.equal(result.alert.phase, 'watching')
+  assert.equal(result.alert.enabled, true)
+  assert.equal(result.alert.watchingAt, now)
   assert.equal(result.alert.decisionPrice, 55.34)
-  assert.match(result.alert.triggeredMsg, /55\.34.*55\.37/)
+  assert.match(result.alert.watchingMsg, /55\.34.*55\.37/)
+  assert.equal(data.reviewJobs, undefined)
+
+  const queued = activatePriceReviewTrigger(data, {
+    alertId: 'review-000636',
+    code: '000636',
+    quote: {
+      code: '000636',
+      price: 55.62,
+      tradeDate: '2026-08-28',
+      isLivePrice: true,
+    },
+  }, now + TRIGGERED_REVIEW_OBSERVATION_MS)
+
+  assert.equal(queued.queued, true)
+  assert.equal(queued.alert.phase, 'reviewing')
+  assert.equal(queued.alert.enabled, false)
   assert.equal(data.reviewJobs['000636'].source, 'judge')
   assert.equal(data.reviewJobs['000636'].trigger.kind, 'price-review')
   assert.equal(
     data.reviewJobs['000636'].trigger.monitoringUntilAt,
     now + TRIGGERED_REVIEW_OBSERVATION_MS,
   )
-  assert.equal(data.reviewJobs['000636'].stage, 'monitoring')
-  assert.match(data.reviewJobs['000636'].phase, /持续观察/)
+  assert.equal(data.reviewJobs['000636'].stage, 'queued')
+  assert.match(data.reviewJobs['000636'].phase, /排队/)
 })
 
 test('V3退出建议后价格反弹也会启动退出前复核', () => {
@@ -166,8 +182,16 @@ test('V3退出建议后价格反弹也会启动退出前复核', () => {
   }, now)
 
   assert.equal(result.ok, true)
-  assert.equal(result.alert.phase, 'reviewing')
+  assert.equal(result.alert.phase, 'watching')
   assert.equal(result.alert.decisionPrice, 53.9)
+  assert.equal(data.reviewJobs, undefined)
+
+  const queued = activatePriceReviewTrigger(data, {
+    alertId: 'review-v3-exit',
+    code: '003036',
+    quote: reboundQuote,
+  }, now + TRIGGERED_REVIEW_OBSERVATION_MS)
+  assert.equal(queued.queued, true)
   assert.equal(
     data.reviewJobs['003036'].trigger.reviewMode,
     'EXIT_REASSESSMENT',
@@ -380,7 +404,7 @@ test('Judge判定计划失效时才排入一次军师复核', () => {
   assert.equal(data.reviewJobs['600000'].source, 'judge')
 })
 
-test('观察价命中直接排队复核而不调用Judge确认交易', () => {
+test('观察窗口完成后直接排队复核而不调用Judge确认交易', () => {
   const data = {
     plan: [{ code: '600519', name: '贵州茅台' }],
     advice: {
@@ -401,12 +425,15 @@ test('观察价命中直接排队复核而不调用Judge确认交易', () => {
     value: 145.24,
     decisionPrice: 145.3,
     judgeContext: { planId: 'plan-watch', planRevision: 3 },
+    phase: 'watching',
+    watchingAt: 1000,
+    monitoringUntilAt: 1000 + TRIGGERED_REVIEW_OBSERVATION_MS,
   }
 
   const result = queueAdviceReviewForPriceTrigger(
     data,
     alert,
-    1000,
+    1000 + TRIGGERED_REVIEW_OBSERVATION_MS,
   )
 
   assert.equal(result.queued, true)
@@ -414,10 +441,10 @@ test('观察价命中直接排队复核而不调用Judge确认交易', () => {
   assert.equal(data.reviewJobs['600519'].source, 'judge')
   assert.equal(data.reviewJobs['600519'].trigger.kind, 'price-review')
   assert.equal(data.reviewJobs['600519'].trigger.price, 145.3)
-  assert.equal(data.reviewJobs['600519'].trigger.timeLimitMinutes, 2)
+  assert.equal(data.reviewJobs['600519'].trigger.timeLimitMinutes, 12)
   assert.equal(
     data.reviewJobs['600519'].trigger.decisionDeadlineAt,
-    121000,
+    721000,
   )
   assert.equal(data.reviewJobs['600519'].trigger.terminalRequired, true)
   assert.equal(data.reviewJobs['600519'].maxAttempts, 1)
@@ -470,7 +497,7 @@ test('持仓加仓复核价命中后明确评估加仓而不是普通买入', ()
   assert.match(result.job.trigger.reason, /重新评估是否加仓/)
 })
 
-test('回踩与突破观察价都闭环触发提醒并排队自动复核', () => {
+test('回踩与突破观察价都先观察十分钟再排队自动复核', () => {
   const now = Date.parse('2026-08-27T02:00:00.000Z')
   const cases = [
     {
@@ -557,20 +584,32 @@ test('回踩与突破观察价都闭环触发提醒并排队自动复核', () =>
     )
 
     assert.ok(outcome)
-    assert.equal(outcome.alert.phase, 'reviewing')
-    assert.equal(outcome.alert.enabled, false)
-    assert.equal(outcome.wakeup.kind, 'price-review')
-    assert.match(outcome.notification.title, new RegExp(`${item.label}已到`))
+    assert.equal(outcome.alert.phase, 'watching')
+    assert.equal(outcome.alert.enabled, true)
+    assert.equal(outcome.wakeup, null)
+    assert.match(outcome.notification.title, /观察价已到/)
     assert.match(
       outcome.notification.body,
       new RegExp(`现价${item.quote}${item.symbol}${item.price}`),
     )
-    assert.match(outcome.notification.body, /约2分钟内给结论/)
+    assert.match(outcome.notification.body, /约10分钟后给结论/)
 
+    const completed = cronAlertTest.reviewPriceTriggerOutcome(
+      outcome.alert,
+      {
+        price: item.quote,
+        tradeDate: '2026-08-27',
+      },
+      now + TRIGGERED_REVIEW_OBSERVATION_MS,
+    )
+    assert.equal(completed.alert.phase, 'reviewing')
+    assert.equal(completed.alert.enabled, false)
+    assert.equal(completed.wakeup.kind, 'price-review')
+    Object.assign(alert, completed.alert)
     const queued = queueAdviceReviewForPriceTrigger(
       data,
-      outcome.alert,
-      now,
+      completed.alert,
+      now + TRIGGERED_REVIEW_OBSERVATION_MS,
     )
     assert.equal(queued.queued, true)
     assert.equal(queued.created, true)

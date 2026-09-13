@@ -63,6 +63,7 @@ import { buildAlertNotification } from '../shared/alertNotification.js';
 import { isFreshAlertQuote } from '../shared/alertQuotePolicy.js';
 import { evaluateAccountMonitoring } from './_monitoring.js';
 import {
+  TRIGGERED_REVIEW_OBSERVATION_MS,
   TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
 } from '../shared/triggeredReviewDecision.js';
 import {
@@ -171,30 +172,55 @@ function hit(a, q, now = Date.now()) {
 
 function reviewPriceTriggerOutcome(alert, quote, now = Date.now()) {
   if (!alert?.reviewOnly) return null;
+  if (alert.phase === 'watching') {
+    const monitoringUntilAt = Number(alert.monitoringUntilAt)
+      || Number(alert.watchingAt) + TRIGGERED_REVIEW_OBSERVATION_MS;
+    if (!(Number(alert.watchingAt) > 0) || now < monitoringUntilAt) {
+      return null;
+    }
+    const nextAlert = {
+      ...alert,
+      phase: 'reviewing',
+      enabled: false,
+      reviewRequestedAt: now,
+      monitoringUntilAt,
+    };
+    return {
+      msg: '',
+      countedHit: false,
+      notification: null,
+      alert: nextAlert,
+      wakeup: {
+        kind: 'price-review',
+        alert: { ...nextAlert },
+        at: now,
+      },
+    };
+  }
   const msg = hit(alert, quote, now);
   if (!msg) return null;
   const nextAlert = {
     ...alert,
-    phase: 'reviewing',
-    triggeredAt: now,
-    triggeredMsg: `观察价已到：${msg}`,
+    phase: 'watching',
+    watchingAt: now,
+    watchingPrice: Number(quote?.price) || null,
+    watchingMsg: `观察价已到：${msg}`,
     decisionPrice: Number(quote?.price) || null,
-    enabled: false,
+    decisionDeadlineAt: now + TRIGGERED_REVIEW_TOTAL_BUDGET_MS,
+    monitoringUntilAt: now + TRIGGERED_REVIEW_OBSERVATION_MS,
+    enabled: true,
   };
   return {
     msg,
+    countedHit: true,
     notification: buildAlertNotification({
       alert: nextAlert,
       quote,
-      stage: 'review',
+      stage: 'watch',
       reason: msg,
     }),
     alert: nextAlert,
-    wakeup: {
-      kind: 'price-review',
-      alert: { ...nextAlert },
-      at: now,
-    },
+    wakeup: null,
   };
 }
 
@@ -580,18 +606,22 @@ async function processAccount(
       }
       const outcome = reviewPriceTriggerOutcome(a, q);
       if (!outcome) continue;
-      hits++;
-      collectDead(await sendPush(subs, {
-        ...outcome.notification,
-        code: a.code,
-        name: a.name,
-        url: '/',
-      }));
+      if (outcome.countedHit) hits++;
+      if (outcome.notification) {
+        collectDead(await sendPush(subs, {
+          ...outcome.notification,
+          code: a.code,
+          name: a.name,
+          url: '/',
+        }));
+      }
       Object.assign(a, outcome.alert);
-      wakeups.push({
-        ...outcome.wakeup,
-        alert: { ...a },
-      });
+      if (outcome.wakeup) {
+        wakeups.push({
+          ...outcome.wakeup,
+          alert: { ...a },
+        });
+      }
       changed = true;
       continue;
     }

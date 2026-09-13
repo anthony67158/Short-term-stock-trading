@@ -435,6 +435,10 @@ export const alertStore = {
         continue
       }
       if (storedAlert.reviewOnly) {
+        if (storedAlert.phase === 'watching') {
+          this._triggerReviewOnly(storedAlert, q)
+          continue
+        }
         const msg = hit(storedAlert, q, now)
         if (msg) this._triggerReviewOnly(storedAlert, q)
         continue
@@ -523,9 +527,11 @@ export const alertStore = {
         if (result.alert) {
           planStore.markAlertReviewing(alert.id, result.alert)
         }
-        void import('./serverAdvice.js')
-          .then((module) => module.kickServerAdviceStatusSync())
-          .catch(() => {})
+        if (result.queued) {
+          void import('./serverAdvice.js')
+            .then((module) => module.kickServerAdviceStatusSync())
+            .catch(() => {})
+        }
       })
       .finally(() => {
         _reviewTriggering.delete(alert.id)

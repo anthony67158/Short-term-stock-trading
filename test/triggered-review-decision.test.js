@@ -40,9 +40,9 @@ function payload(overrides = {}) {
   }
 }
 
-test('价格触发复核保留两分钟硬截止并将模型预算收紧到45秒', () => {
+test('价格触发复核保留十二分钟硬截止并将模型预算收紧到45秒', () => {
   const runtime = triggeredReviewRuntime(payload().reviewEvent, NOW)
-  assert.equal(runtime.remainingMs, 120000)
+  assert.equal(runtime.remainingMs, 720000)
   assert.equal(TRIGGERED_REVIEW_MODEL_BUDGET_MS, 45000)
   assert.equal(runtime.runtimeBudgetMs, TRIGGERED_REVIEW_MODEL_BUDGET_MS)
   assert.equal(runtime.maxAttempts, 1)
@@ -50,12 +50,12 @@ test('价格触发复核保留两分钟硬截止并将模型预算收紧到45秒
 
   const expired = triggeredReviewRuntime(
     payload().reviewEvent,
-    NOW + 115000,
+    NOW + 715000,
   )
   assert.equal(expired.expired, true)
 })
 
-test('观察价到达后持续观察一分钟再执行唯一一次终局复核', () => {
+test('观察价到达后持续观察十分钟再执行唯一一次终局复核', () => {
   const event = payload({
     reviewEvent: {
       ...payload().reviewEvent,
@@ -66,9 +66,9 @@ test('观察价到达后持续观察一分钟再执行唯一一次终局复核',
   }).reviewEvent
 
   const started = triggeredReviewMonitoringWindow(event, NOW)
-  assert.equal(TRIGGERED_REVIEW_OBSERVATION_MS, 60_000)
+  assert.equal(TRIGGERED_REVIEW_OBSERVATION_MS, 600_000)
   assert.equal(started.active, true)
-  assert.equal(started.remainingMs, 60_000)
+  assert.equal(started.remainingMs, 600_000)
   assert.equal(started.direction, 'pullback')
 
   const completed = triggeredReviewMonitoringWindow(
@@ -81,7 +81,7 @@ test('观察价到达后持续观察一分钟再执行唯一一次终局复核',
     event,
     NOW + TRIGGERED_REVIEW_OBSERVATION_MS,
   )
-  assert.equal(runtime.remainingMs, 60_000)
+  assert.equal(runtime.remainingMs, 120_000)
   assert.equal(runtime.runtimeBudgetMs, TRIGGERED_REVIEW_MODEL_BUDGET_MS)
   assert.equal(runtime.expired, false)
 

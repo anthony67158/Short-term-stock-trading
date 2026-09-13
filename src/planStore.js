@@ -2834,7 +2834,7 @@ export const planStore = {
     emit()
   },
   // 页面发现观察价命中后，采用服务端已持久化的权威状态立即更新卡片。
-  // 终态不可被迟到的受理响应回滚为 reviewing。
+  // 终态不可被迟到的受理响应回滚为 watching/reviewing。
   markAlertReviewing(id, accepted = {}) {
     let changed = false
     state.alerts = (state.alerts || []).map((alert) => {
@@ -2846,19 +2846,39 @@ export const planStore = {
         'superseded',
       ].includes(alert.phase)) return alert
       changed = true
+      const phase = ['watching', 'reviewing'].includes(accepted.phase)
+        ? accepted.phase
+        : 'reviewing'
       return {
         ...alert,
-        phase: 'reviewing',
-        enabled: false,
-        triggeredAt:
-          Number(accepted.triggeredAt) || Date.now(),
+        phase,
+        enabled: phase === 'watching',
+        watchingAt:
+          Number(accepted.watchingAt)
+          || alert.watchingAt
+          || Date.now(),
+        watchingPrice:
+          Number(accepted.watchingPrice)
+          || alert.watchingPrice
+          || null,
+        watchingMsg:
+          accepted.watchingMsg
+          || alert.watchingMsg
+          || '观察价已到，正在采集触价后路径',
+        triggeredAt: Number(accepted.triggeredAt) || null,
         triggeredMsg:
           accepted.triggeredMsg
           || alert.triggeredMsg
-          || '观察价已到，正在限时复核',
+          || (phase === 'reviewing'
+            ? '观察窗口完成，正在重新评估'
+            : ''),
         decisionPrice:
           Number(accepted.decisionPrice)
           || alert.decisionPrice
+          || null,
+        monitoringUntilAt:
+          Number(accepted.monitoringUntilAt)
+          || alert.monitoringUntilAt
           || null,
         decisionDeadlineAt:
           Number(accepted.decisionDeadlineAt)
