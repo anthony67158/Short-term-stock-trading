@@ -387,6 +387,10 @@ def _fit_isotonic(labels, probabilities):
     sums = np.bincount(inverse, weights=y).astype(np.float64)
     weights = np.bincount(inverse).astype(np.float64)
     values = sums / weights
+    # 块内加权 x 质心，供“居中保序回归”（CIR）在块之间插值使用——
+    # 消除块内平台把大量样本压到同一常数导致的排序退化（rank_correlation≈0）
+    # 与高分段“硬封顶”，同时保持单调与校准；不外推、不抬高数据不支持的尾部。
+    x_sums = np.bincount(inverse, weights=x).astype(np.float64)
     blocks = [
         [float(value), float(weight), index, index]
         for index, (value, weight) in enumerate(zip(values, weights))
@@ -407,14 +411,51 @@ def _fit_isotonic(labels, probabilities):
         ]
         blocks[cursor:cursor + 2] = [merged]
         cursor = max(0, cursor - 1)
-    fitted = np.empty(len(unique_x), dtype=np.float64)
-    for value, _, start, end in blocks:
-        fitted[start:end + 1] = value
+    nodes_x, nodes_y = _centered_isotonic_nodes(
+        blocks,
+        unique_x,
+        x_sums,
+        weights,
+    )
     return {
         "method": "isotonic",
-        "x": unique_x.astype(float).tolist(),
-        "y": fitted.astype(float).tolist(),
+        "x": nodes_x,
+        "y": nodes_y,
     }
+
+
+def _centered_isotonic_nodes(blocks, unique_x, x_sums, weights):
+    """把 PAVA 单调块转成居中保序回归节点：块均值挂在块的加权 x 质心上，
+    并锚定定义域两端，保证插值单调、可覆盖 [min, max]、且尾部不超过数据支持。"""
+    node_x = []
+    node_y = []
+    for value, _weight, start, end in blocks:
+        block_weight = float(weights[start:end + 1].sum())
+        centroid = (
+            float(x_sums[start:end + 1].sum()) / block_weight
+            if block_weight > 0
+            else float(unique_x[start])
+        )
+        node_x.append(centroid)
+        node_y.append(float(value))
+    lo = float(unique_x[0])
+    hi = float(unique_x[-1])
+    if node_x[0] > lo:
+        node_x.insert(0, lo)
+        node_y.insert(0, node_y[0])
+    if node_x[-1] < hi:
+        node_x.append(hi)
+        node_y.append(node_y[-1])
+    # 去除因质心重合可能出现的非严格递增 x，保证 np.interp 输入合法。
+    deduped_x = [node_x[0]]
+    deduped_y = [node_y[0]]
+    for xi, yi in zip(node_x[1:], node_y[1:]):
+        if xi > deduped_x[-1] + 1e-12:
+            deduped_x.append(xi)
+            deduped_y.append(yi)
+        else:
+            deduped_y[-1] = max(deduped_y[-1], yi)
+    return deduped_x, deduped_y
 
 
 def fit_probability_calibrator(

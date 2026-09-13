@@ -226,32 +226,41 @@ test('T+1锁定期跌破止损后在下一可卖时段优先退出', () => {
   assert.equal(result.observations.t1LockedStopHit, true)
 })
 
-test('T+1后目标先到时按统一费用与滑点口径结算净结果', () => {
+test('T+1后创新高再回吐给定风险时按吊灯跟踪止盈结算净结果', () => {
   const result = resolveOpportunityOutcome({
     event: event(),
     bars: [
       bar('2026-09-01', { close: 10 }),
       bar('2026-09-02', { low: 9.9, close: 10 }),
-      bar('2026-09-03', { open: 10, low: 9.8, close: 10.2 }),
+      bar('2026-09-03', { open: 10, high: 10.2, low: 9.9, close: 10.1 }),
       bar('2026-09-04', {
-        open: 10.2,
+        open: 10.3,
+        high: 11,
+        low: 10.3,
+        close: 10.9,
+        preClose: 10.1,
+      }),
+      bar('2026-09-05', {
+        open: 10.8,
         high: 10.9,
-        low: 10.1,
-        close: 10.8,
-        preClose: 10.2,
+        low: 10.6,
+        close: 10.7,
+        preClose: 10.9,
       }),
     ],
-    evaluatedAt: Date.parse('2026-09-04T08:00:00.000Z'),
+    evaluatedAt: Date.parse('2026-09-05T08:00:00.000Z'),
   })
 
   assert.equal(result.maturity, 'MATURED')
-  assert.equal(result.outcome, 'TAKE_PROFIT')
-  assert.equal(result.exitStatus, 'TARGET_FILLED')
+  assert.equal(result.outcome, 'TRAILING_EXIT')
+  assert.equal(result.exitStatus, 'TRAILING_FILLED')
   assert.equal(result.entry.tradeDate, '20260903')
-  assert.equal(result.exit.tradeDate, '20260904')
+  assert.equal(result.exit.tradeDate, '20260905')
+  // 峰值 11 从入场后累计，回吐 0.5R(=0.25) 触发跟踪线 10.75。
+  assert.equal(result.exit.referencePrice, 10.75)
   assert.ok(result.metrics.netPnl > 0)
   assert.ok(result.metrics.netR > 0)
-  assert.equal(result.metrics.holdingTradingSessions, 2)
+  assert.equal(result.metrics.holdingTradingSessions, 3)
 })
 
 test('成交价贴近止损时仍按计划价格合同计算R值', () => {
@@ -294,7 +303,7 @@ test('成交价贴近止损时仍按计划价格合同计算R值', () => {
   )
 })
 
-test('同一根K线止盈止损均触及时按止损优先并标记路径不明', () => {
+test('同一根K线创新高与跌破止损同现时按止损优先并标记路径不明', () => {
   const result = resolveOpportunityOutcome({
     event: event(),
     bars: [
@@ -313,8 +322,9 @@ test('同一根K线止盈止损均触及时按止损优先并标记路径不明'
   })
 
   assert.equal(result.maturity, 'MATURED')
-  assert.equal(result.outcome, 'AMBIGUOUS_STOP_LOSS')
-  assert.equal(result.exitStatus, 'AMBIGUOUS_STOP_FILLED')
+  // 尚未创出新高前跟踪线仍在初始硬止损，故按硬止损优先。
+  assert.equal(result.outcome, 'STOP_LOSS')
+  assert.equal(result.exitStatus, 'STOP_FILLED')
   assert.equal(result.observations.pathAmbiguous, true)
   assert.ok(result.metrics.netPnl < 0)
 })
@@ -366,7 +376,7 @@ test('止损遇连续跌停不能卖出，打开后按首个可成交开盘价�
   assert.ok(result.metrics.netPnl < -150)
 })
 
-test('到期未触发边界时在冻结的第N个交易日按收盘价退出', () => {
+test('持有到期未触发跟踪线时在第N个交易日按收盘价退出', () => {
   const result = resolveOpportunityOutcome({
     event: event({
       decision: {
@@ -390,8 +400,8 @@ test('到期未触发边界时在冻结的第N个交易日按收盘价退出', (
   })
 
   assert.equal(result.maturity, 'MATURED')
-  assert.equal(result.outcome, 'TIME_EXIT')
-  assert.equal(result.exitStatus, 'TIME_FILLED')
+  assert.equal(result.outcome, 'HORIZON_EXIT')
+  assert.equal(result.exitStatus, 'HORIZON_FILLED')
   assert.equal(result.exit.referencePrice, 10.2)
 })
 

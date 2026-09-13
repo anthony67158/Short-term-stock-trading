@@ -229,6 +229,38 @@ class OpportunityEvaluationTest(unittest.TestCase):
 
         np.testing.assert_allclose(adjusted, [0.0, 0.3, 1.0])
 
+    def test_isotonic_calibration_uncaps_and_preserves_rank(self):
+        # 生产窗口的病灶：原始分被压缩且封顶（如 pWin≤0.345），传统 PAVA 会把
+        # 大量样本压进同一常数块，导致高分段“硬封顶”、排序退化（rank≈0）。
+        # 居中保序回归（CIR）用块质心插值，应同时：解封顶、保序、仍校准。
+        rng = np.random.default_rng(7)
+        z = rng.normal(0, 1, 6000)
+        true_p = 1 / (1 + np.exp(-(0.8 * z - 0.6)))
+        labels = (rng.random(6000) < true_p).astype(int)
+        raw = np.clip(0.15 + 0.4 * (1 / (1 + np.exp(-z))), 0.05, 0.345)
+
+        artifact = fit_probability_calibrator(
+            labels,
+            raw,
+            isotonic_minimum=1000,
+        )
+        adjusted = apply_probability_calibrator(raw, artifact)
+
+        self.assertEqual(artifact["method"], "isotonic")
+        # 解封顶：校准后的上界必须显著高于原始封顶 0.345。
+        self.assertGreater(float(adjusted.max()), 0.4)
+        # 保序：CIR 单调映射对严格单调的原始分不得打乱名次。
+        rank_raw = np.argsort(np.argsort(raw))
+        rank_adj = np.argsort(np.argsort(adjusted))
+        self.assertGreater(float(np.corrcoef(rank_raw, rank_adj)[0, 1]), 0.99)
+        # 仍校准：整体均值贴近真实基础发生率。
+        self.assertLess(abs(float(adjusted.mean()) - float(labels.mean())), 0.02)
+        # 插值节点必须 x 严格递增、y 单调不减，供 np.interp 合法消费。
+        nodes_x = np.asarray(artifact["x"])
+        nodes_y = np.asarray(artifact["y"])
+        self.assertTrue(bool(np.all(np.diff(nodes_x) > 0)))
+        self.assertTrue(bool(np.all(np.diff(nodes_y) >= -1e-12)))
+
     def test_stratified_probability_calibration_uses_specific_groups(self):
         probabilities = np.full(16, 0.5)
         playbooks = np.asarray(["A"] * 8 + ["B"] * 8)

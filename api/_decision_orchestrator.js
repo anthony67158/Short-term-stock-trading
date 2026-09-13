@@ -28,6 +28,7 @@ import { deriveMarketRegime } from '../shared/marketRegime.js'
 import { buildStockFundNote } from '../shared/retailFundFlow.js'
 import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
 import { attachMonitoringPlan } from '../shared/monitoringPlan.js'
+import { trailingStopForHold } from '../shared/trailingExit.js'
 import { isTriggeredReviewEvent } from '../shared/triggeredReviewDecision.js'
 import { allocationMarketFrom } from '../shared/targetPositionModel.js'
 
@@ -609,11 +610,25 @@ export async function evaluateDecision({
     },
   }
   if (decisionPlan.action === 'HOLD' && payload.holdingStopPrice > 0) {
+    // 吊灯式跟踪止盈对齐：HOLD 自动跟踪的止损位随持有期最高价上移，与训练标签同口径
+    // （shared/trailingExit.js）。跟踪位永远不低于账本硬止损，只在已创出新高、锁定
+    // 部分盈利时抬高——只收紧风险、绝不放松，账本硬止损仍是地板（AGENTS.md 铁律）。
+    const trailStop = trailingStopForHold({
+      holdCost: payload.holdCost,
+      holdingStopPrice: payload.holdingStopPrice,
+      entryDayKey: payload.holdingStartedAt
+        ? beijingDayKey(payload.holdingStartedAt)
+        : null,
+      candles,
+      quote: payload.todayQuote,
+      trailingStop: advice.selectedDecisionPlan?.exitPlan?.trailingStop,
+    })
+    const stopValue = Math.max(payload.holdingStopPrice, trailStop || 0)
     advice.executionRules = [{
       id: 'ledger-stop', action: 'EXIT', kind: 'RISK_EXIT',
       lots: Math.max(0, Math.trunc(Number(payload.holdQty) || 0)),
       logic: 'ALL', session: 'CONTINUOUS', sustainSeconds: 0,
-      conditions: [{ metric: 'price', op: 'lte', value: payload.holdingStopPrice }],
+      conditions: [{ metric: 'price', op: 'lte', value: stopValue }],
     }]
     advice = attachMonitoringPlan({ advice, payload, decisionPlan, now })
   }

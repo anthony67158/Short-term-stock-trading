@@ -2,6 +2,11 @@ import {
   A_SHARE_STANDARD_FEE_POLICY,
   assessAshareExecution,
 } from './ashareStrategyExecution.js'
+import {
+  TRAILING_EXIT_DEFAULTS,
+  chandelierStop,
+  trailLockedProfit,
+} from './trailingExit.js'
 
 export const OPPORTUNITY_OUTCOME_SCHEMA_VERSION =
   'opportunity-outcome.v1'
@@ -266,26 +271,25 @@ function rejectionOutcome(reason) {
   return 'ENTRY_REJECTED'
 }
 
-function exitReference(reason, bar, stopPrice, targetPrice) {
-  if (reason === 'STOP' || reason === 'AMBIGUOUS_STOP') {
+function exitReference(reason, bar, stopPrice, trailStop) {
+  if (reason === 'STOP') {
+    // 硬止损：跳空穿损时按开盘价成交（更差），否则按止损位。
     return Math.min(bar.open, stopPrice)
   }
-  if (reason === 'TARGET') return targetPrice
+  if (reason === 'TRAIL') {
+    // 吊灯跟踪止盈：跳空穿破跟踪线时按开盘价成交，否则按跟踪线。
+    return Math.min(bar.open, trailStop)
+  }
+  // 持有到期：在持有期末的收盘价退出。
   return bar.close
 }
 
 function exitOutcome(reason) {
-  if (reason === 'TARGET') {
-    return { outcome: 'TAKE_PROFIT', exitStatus: 'TARGET_FILLED' }
+  if (reason === 'TRAIL') {
+    return { outcome: 'TRAILING_EXIT', exitStatus: 'TRAILING_FILLED' }
   }
-  if (reason === 'AMBIGUOUS_STOP') {
-    return {
-      outcome: 'AMBIGUOUS_STOP_LOSS',
-      exitStatus: 'AMBIGUOUS_STOP_FILLED',
-    }
-  }
-  if (reason === 'TIME') {
-    return { outcome: 'TIME_EXIT', exitStatus: 'TIME_FILLED' }
+  if (reason === 'HORIZON') {
+    return { outcome: 'HORIZON_EXIT', exitStatus: 'HORIZON_FILLED' }
   }
   return { outcome: 'STOP_LOSS', exitStatus: 'STOP_FILLED' }
 }
@@ -486,10 +490,15 @@ export function resolveOpportunityOutcome({
   const sessionOrdinals = new Map(
     holdingDates.map((date, index) => [date, index + 1]),
   )
-  const timeStopTradingDays = Math.max(
+  // 最长持有交易日=退出结构的 horizon，与训练标签 horizon 对齐。
+  const horizonTradingDays = Math.max(
     1,
-    Math.trunc(finite(decision.timeStopTradingDays) || 5),
+    Math.trunc(
+      finite(decision.timeStopTradingDays)
+      || TRAILING_EXIT_DEFAULTS.horizonTradingDays,
+    ),
   )
+  const giveBackR = TRAILING_EXIT_DEFAULTS.giveBackR
   const observations = {
     ...base.observations,
   }
@@ -499,47 +508,63 @@ export function resolveOpportunityOutcome({
   }
   let forcedExit = null
   let lastExitRejection = null
+  // 吊灯跟踪止盈：peakHigh 只累计入场日之后的最高价（与训练标签口径一致），
+  // 未创新高前跟踪线保持在初始硬止损 stopPrice。
+  let peakHigh = entryPrice
 
   for (let index = 0; index < holdingRows.length; index += 1) {
     const bar = holdingRows[index]
     extremes.high = Math.max(extremes.high, bar.high)
     extremes.low = Math.min(extremes.low, bar.low)
-    const hitStop = bar.low <= stopPrice
-    const hitTarget = bar.high >= targetPrice
     if (bar.date === entryBar.date) {
+      // T+1：入场当日不可卖出，只记录锁定期是否已破止损。
+      const hitStop = bar.low <= stopPrice
       observations.t1LockedStopHit ||= hitStop
-      observations.t1LockedTargetHit ||= hitTarget
+      observations.t1LockedTargetHit ||= bar.high >= peakHigh
       if (hitStop) forcedExit = 'STOP'
       continue
     }
 
     let reason = forcedExit
+    let trailStop = stopPrice
     if (!reason) {
-      if (hitStop && hitTarget) {
-        reason = 'AMBIGUOUS_STOP'
-        observations.pathAmbiguous = true
-      } else if (hitStop) {
-        reason = 'STOP'
-      } else if (hitTarget) {
-        reason = 'TARGET'
+      // 用「本 bar 之前」的峰值算跟踪线，先测触损，再更新峰值——悲观日内顺序，
+      // 当前 bar 的新高不保护当前 bar 的低点。
+      trailStop = chandelierStop({
+        entryPrice,
+        initialStop: stopPrice,
+        peakHigh,
+        giveBackR,
+      })
+      const hitTrail = bar.low <= trailStop
+      const wouldRaise = bar.high > peakHigh
+      if (hitTrail) {
+        if (wouldRaise) observations.pathAmbiguous = true
+        reason = trailLockedProfit({
+          entryPrice,
+          initialStop: stopPrice,
+          trailStop,
+        }) ? 'TRAIL' : 'STOP'
       } else {
         const session = sessionOrdinals.get(bar.date) || 1
         const next = holdingRows[index + 1]
         const endOfSession = !next || next.date !== bar.date
         if (
-          session >= timeStopTradingDays
+          session >= horizonTradingDays
           && endOfSession
           && isSessionCloseBar(bar)
         ) {
-          reason = 'TIME'
+          reason = 'HORIZON'
         }
       }
     }
+    // 峰值在触损判定之后更新，供后续 bar 使用。
+    if (bar.high > peakHigh) peakHigh = bar.high
     if (!reason) continue
 
     const referencePrice = forcedExit
       ? bar.open
-      : exitReference(reason, bar, stopPrice, targetPrice)
+      : exitReference(reason, bar, stopPrice, trailStop)
     const exitExecution = assessAshareExecution({
       side: 'SELL',
       security: {

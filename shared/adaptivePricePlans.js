@@ -13,6 +13,10 @@ import {
 import {
   buildStrategyPatternConfirmation,
 } from './strategyPatternConfirmation.js'
+import {
+  TRAILING_EXIT_DEFAULTS,
+  TRAILING_EXIT_VERSION,
+} from './trailingExit.js'
 
 export const ADAPTIVE_PRICE_PLAN_VERSION = 'adaptive-price-plan.v1'
 
@@ -177,9 +181,21 @@ function plan({
     },
     exitPlan: {
       hardStopPrice: normalizedStop,
+      // takeProfitPrice 保留为「结构参考目标」——用于展示 R:R、价格合同匹配与
+      // 下游解释；真正的退出由吊灯式跟踪止盈驱动（与训练标签同口径，AGENTS.md 铁律 5/6）。
       takeProfitPrice: normalizedTarget,
+      trailingStop: {
+        schemaVersion: TRAILING_EXIT_VERSION,
+        // 创出新高后从峰值回吐 giveBackR 倍初始风险即止盈；未创新高前保持初始硬止损。
+        giveBackR: TRAILING_EXIT_DEFAULTS.giveBackR,
+        // 初始风险 = 入场价 − 硬止损，跟踪线以此为单位回吐。
+        initialRisk: +(normalizedEntry - normalizedStop).toFixed(2),
+        horizonTradingDays: tradingDaysFor(playbook),
+        referenceTarget: normalizedTarget,
+      },
       timeStopTradingDays: tradingDaysFor(playbook),
-      rule: '结构失效、目标到达或相对机会价值转负时，以先发生者为准',
+      rule: '创新高后从峰值回吐设定风险即跟踪止盈；未创新高前守初始硬止损；'
+        + '结构失效或持有到期以先发生者为准',
       t1Constraint: '当日买入不可卖出，下一可卖时段优先处理风险',
     },
     riskReward: +(reward / risk).toFixed(2),
