@@ -10,6 +10,8 @@
 
 export const ALPHA158_SIGNAL_FEATURE_VERSION =
   'opportunity-alpha158-signal.v1'
+export const ALPHA158_RUNTIME_SNAPSHOT_VERSION =
+  'alpha158-ranking-snapshot.v1'
 
 // 与契约 featureNames 完全同序。
 export const ALPHA158_SIGNAL_FEATURE_NAMES = Object.freeze([
@@ -49,6 +51,58 @@ function dateTimestamp(value) {
     `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6)}T00:00:00+08:00`,
   )
   return Number.isFinite(timestamp) ? timestamp : null
+}
+
+export function normalizeAlpha158RuntimeSnapshot(payload = {}) {
+  if (
+    payload?.schemaVersion !== ALPHA158_RUNTIME_SNAPSHOT_VERSION
+    || !compactDate(payload.asOfDate)
+    || !payload.stocks
+    || typeof payload.stocks !== 'object'
+    || Array.isArray(payload.stocks)
+  ) return null
+  const stocks = new Map()
+  for (const [code, value] of Object.entries(payload.stocks)) {
+    const percentile = finite(value?.percentile)
+    if (
+      /^(000|001|002|003|600|601|603|605)\d{3}$/.test(code)
+      && percentile != null
+      && percentile >= 0
+      && percentile <= 1
+    ) {
+      stocks.set(code, {
+        percentile,
+        scoreMomentum5: finite(value?.scoreMomentum5),
+      })
+    }
+  }
+  return {
+    schemaVersion: ALPHA158_RUNTIME_SNAPSHOT_VERSION,
+    state: (
+      payload.state === 'ACTIVE'
+      && payload.productionEligible === true
+    ) ? 'ACTIVE' : 'RESEARCH',
+    asOfDate: compactDate(payload.asOfDate),
+    modelVersion: String(payload.modelVersion || '') || null,
+    recentRankIc: finite(payload.metrics?.recentRankIc),
+    overallRankIc: finite(payload.metrics?.overallRankIc),
+    stocks,
+  }
+}
+
+export function alpha158SignalFromSnapshot(snapshot, code) {
+  const stock = snapshot?.stocks instanceof Map
+    ? snapshot.stocks.get(String(code || ''))
+    : null
+  return {
+    state: snapshot?.state === 'ACTIVE' && stock ? 'ACTIVE' : 'UNAVAILABLE',
+    asOfDate: snapshot?.asOfDate || null,
+    modelVersion: snapshot?.modelVersion || null,
+    percentile: stock?.percentile ?? null,
+    recentRankIc: snapshot?.recentRankIc ?? null,
+    overallRankIc: snapshot?.overallRankIc ?? null,
+    scoreMomentum5: stock?.scoreMomentum5 ?? null,
+  }
 }
 
 // 把 percentile(0..1)映射到以 0 为中心的近似 z 分（[-1,1] 线性），

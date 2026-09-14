@@ -2,9 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  ALPHA158_RUNTIME_SNAPSHOT_VERSION,
   ALPHA158_SIGNAL_FEATURE_NAMES,
+  alpha158SignalFromSnapshot,
   alpha158FeatureBlock,
   neutralAlpha158FeatureBlock,
+  normalizeAlpha158RuntimeSnapshot,
 } from '../shared/alpha158SignalFeatures.js'
 
 const EXPECTED_DATE = '20260911'
@@ -82,4 +85,30 @@ test('极端值被夹到[-1,1]与[0,1]', () => {
   assert.equal(block.values.alphaRankIc20, 1)
   assert.equal(block.values.alphaRankIc60, -1)
   assert.equal(block.values.alphaScoreMomentum5, 1)
+})
+
+test('生产排名快照只转换为连续特征信号，不产生联合排序', () => {
+  const snapshot = normalizeAlpha158RuntimeSnapshot({
+    schemaVersion: ALPHA158_RUNTIME_SNAPSHOT_VERSION,
+    state: 'ACTIVE',
+    productionEligible: true,
+    asOfDate: '20260911',
+    modelVersion: 'alpha158.test',
+    metrics: {
+      recentRankIc: 0.05,
+      overallRankIc: 0.03,
+    },
+    stocks: {
+      600001: { percentile: 0.9, scoreMomentum5: 0.2 },
+      300001: { percentile: 0.8 },
+    },
+  })
+  const signal = alpha158SignalFromSnapshot(snapshot, '600001')
+
+  assert.equal(snapshot.stocks.size, 1)
+  assert.equal(signal.state, 'ACTIVE')
+  assert.equal(signal.percentile, 0.9)
+  assert.equal(signal.recentRankIc, 0.05)
+  assert.equal(signal.overallRankIc, 0.03)
+  assert.equal(signal.scoreMomentum5, 0.2)
 })

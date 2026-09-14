@@ -1,6 +1,6 @@
 import {
-  normalizeAlpha158Snapshot,
-} from '../shared/alpha158Signal.js'
+  normalizeAlpha158RuntimeSnapshot,
+} from '../shared/alpha158SignalFeatures.js'
 
 const SNAPSHOT_TIMEOUT_MS = 5_000
 const SNAPSHOT_CACHE_MS = 30 * 60 * 1000
@@ -32,7 +32,7 @@ export async function fetchAlpha158Snapshot({
         },
       })
       if (!response.ok) return null
-      const normalized = normalizeAlpha158Snapshot(
+      const normalized = normalizeAlpha158RuntimeSnapshot(
         await response.json(),
       )
       if (normalized) {
