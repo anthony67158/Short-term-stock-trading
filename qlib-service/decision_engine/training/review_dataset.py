@@ -174,18 +174,21 @@ def build_opportunity_review_dataset(outcomes):
         conditional_row = conditional_by_event.get(event_index)
         if filled and conditional_row is None:
             continue
+        # 费后奖励塑形：默认全 0 权重时等于原始 netR，y_opportunity_r 逐字节不变；
+        # 未成交事件仍恒为 0。惩罚系数只在离线搜索到的挑战者训练中显式开启。
+        shaped_r = (
+            cost_aware_opportunity_reward(
+                (event[0] or {}).get("metrics"),
+                filled=True,
+                base_r=float(conditional_row[3]),
+            )
+            if filled
+            else 0.0
+        )
         opportunity.append((
             event[0],
             event[1],
-            (
-                cost_aware_opportunity_reward(
-                    conditional_row[1].get("metrics"),
-                    filled=True,
-                    base_r=float(conditional_row[3]),
-                )
-                if filled
-                else 0.0
-            ),
+            shaped_r,
             event[3],
             conditional_row[5] if filled else event[4],
         ))
