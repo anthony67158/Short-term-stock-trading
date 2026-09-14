@@ -90,11 +90,20 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                 "pFill": np.full(len(matrix), 0.5),
                 "pWinGivenFill": np.full(len(matrix), 0.5),
                 "expectedNetR": np.zeros(len(matrix)),
+                "decomposedExpectedNetR": np.zeros(len(matrix)),
+                "directExpectedNetR": np.full(len(matrix), 0.1),
+                "netRLower10": np.full(len(matrix), -1.0),
                 "netRLowerBound": np.full(len(matrix), -1.0),
             }
 
-        def evaluation(_dataset, _development, indices, _predictions):
-            return {"samples": len(indices)}, []
+        def evaluation(_dataset, _development, indices, predictions):
+            score = float(np.mean(predictions[0]["expectedNetR"]))
+            return {
+                "samples": len(indices),
+                "valueTop5LowerBound": score,
+                "valueTop5MeanNetR": score,
+                "netRMaeSkill": score,
+            }, []
 
         with tempfile.TemporaryDirectory() as output:
             with ExitStack() as stack:
@@ -131,10 +140,12 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                 )
 
         selection = evaluate.call_args_list[0].args[2]
-        confirmation = evaluate.call_args_list[1].args[2]
+        confirmation = evaluate.call_args_list[2].args[2]
         self.assertFalse(set(selection.tolist()) & set(confirmation.tolist()))
         self.assertEqual(
-            metadata["validation"]["selectionMetrics"]["samples"],
+            metadata["validation"]["selectionMetrics"][
+                "candidates"
+            ]["DIRECT"]["metrics"]["samples"],
             len(selection),
         )
         self.assertEqual(
@@ -145,6 +156,11 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             metadata["validation"]["selectionEndDate"],
             metadata["validation"]["confirmationStartDate"],
         )
+        self.assertEqual(metadata["valueHead"], "DIRECT")
+        self.assertTrue(np.allclose(
+            evaluate.call_args_list[2].args[3][0]["expectedNetR"],
+            0.1,
+        ))
 
     def test_training_rejects_fill_labels_without_both_classes(self):
         dataset = self.dataset()

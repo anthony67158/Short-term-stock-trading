@@ -69,6 +69,7 @@ def metadata(*, eligible=True):
         "exitPolicyVersion": REVIEW_EXIT_POLICY_VERSION,
         "riskProfileVersion": REVIEW_RISK_PROFILE_VERSION,
         "modelVersion": "decision-review.1789298000.ensemble2",
+        "valueHead": "DECOMPOSED",
         "observationPolicy": {
             "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
             "durationMs": REVIEW_OBSERVATION_DURATION_MS,

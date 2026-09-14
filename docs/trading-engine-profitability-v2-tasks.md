@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-9 已完成）。
+状态：IN PROGRESS（Tasks 1-10 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -175,14 +175,14 @@
 
 **Estimated scope:** M
 
-### Task 10：训练条件收益与直接净R消融
+### Task 10：训练条件收益与直接净R消融（已完成）
 
 **Description:** 对已成交样本训练胜率、正负幅度和直接净R挑战头，固定消融协议。
 
 **Acceptance criteria:**
-- [ ] 输出`pWinGivenFill`、条件正负幅度和`expectedNetRGivenFill`。
-- [ ] 直接净R模型与分解模型在选择段比较。
-- [ ] 最终确认段不重新选择两者。
+- [x] 输出`pWinGivenFill`、条件正负幅度和`expectedNetRGivenFill`。
+- [x] 直接净R模型与分解模型在选择段比较。
+- [x] 最终确认段不重新选择两者。
 
 **Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_review_training qlib-service.tests.test_decision_review_bakeoff`
 

@@ -54,7 +54,8 @@ def _prediction_arrays(models, metadata, matrix):
         raise ValueError("触价复核模型集成成员不匹配")
     probabilities = []
     fill_probabilities = []
-    expected_values = []
+    decomposed_values = []
+    direct_values = []
     lower_values = []
     for model_set, config in zip(members, configs):
         active_fill = np.asarray(
@@ -85,15 +86,23 @@ def _prediction_arrays(models, metadata, matrix):
             model_set["lossPayoffR"].predict(selected),
         )
         expected = probability * win + (1 - probability) * loss
+        direct = model_set["directNetR"].predict(selected)
         lower = (
             model_set["netRLower10"].predict(selected)
             + float(config.get("q10CalibrationOffset") or 0)
         )
         fill_probabilities.append(fill_probability)
         probabilities.append(probability)
-        expected_values.append(expected)
+        decomposed_values.append(expected)
+        direct_values.append(direct)
         lower_values.append(lower)
-    expected = np.mean(expected_values, axis=0)
+    decomposed = np.mean(decomposed_values, axis=0)
+    direct = np.mean(direct_values, axis=0)
+    expected = (
+        direct
+        if metadata.get("valueHead") == "DIRECT"
+        else decomposed
+    )
     return {
         "pFill": np.mean(fill_probabilities, axis=0),
         "pWinGivenFill": np.mean(probabilities, axis=0),

@@ -81,6 +81,7 @@ def metadata(**overrides):
         "exitPolicyVersion": REVIEW_EXIT_POLICY_VERSION,
         "riskProfileVersion": REVIEW_RISK_PROFILE_VERSION,
         "modelVersion": "review-test-v1",
+        "valueHead": "DECOMPOSED",
         "observationPolicy": {
             "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
             "durationMs": REVIEW_OBSERVATION_DURATION_MS,
@@ -103,6 +104,7 @@ def models():
         "pWinGivenFill": FakeModel(0.0),
         "winPayoffR": FakeModel(1.5),
         "lossPayoffR": FakeModel(-0.5),
+        "directNetR": FakeModel(0.9),
         "netRLower10": FakeModel(0.1),
     }
     return {"ensemble": [member, member]}
@@ -143,6 +145,16 @@ class ReviewInferenceTests(unittest.TestCase):
 
         self.assertEqual(result["state"], "NOT_READY")
         self.assertEqual(result["reason"], "REVIEW_MODEL_NOT_PROMOTED")
+
+    def test_frozen_direct_value_head_controls_confirmation_inference(self):
+        result = predict_review_items(
+            {"items": [request_item()]},
+            models=models(),
+            metadata=metadata(valueHead="DIRECT"),
+        )[0]
+
+        self.assertAlmostEqual(result["expectedNetRGivenFill"], 0.9)
+        self.assertAlmostEqual(result["expectedOpportunityR"], 0.36)
 
     def test_legacy_short_observation_model_fails_closed(self):
         legacy = metadata()

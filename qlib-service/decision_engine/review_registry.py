@@ -76,6 +76,7 @@ def validate_review_metadata(metadata, model_version=None):
         != REVIEW_EXIT_POLICY_VERSION
         or metadata.get("riskProfileVersion")
         != REVIEW_RISK_PROFILE_VERSION
+        or metadata.get("valueHead") not in {"DECOMPOSED", "DIRECT"}
         or not str(metadata.get("modelVersion") or "")
         or not isinstance(
             metadata.get("fillCalibrationSampleCount"),
@@ -206,6 +207,7 @@ def load_review_release(artifact_path, metadata_path):
         "pWinGivenFill",
         "winPayoffR",
         "lossPayoffR",
+        "directNetR",
         "netRLower10",
     }
     loaded = []

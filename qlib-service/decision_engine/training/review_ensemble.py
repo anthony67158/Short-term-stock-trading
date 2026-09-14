@@ -100,6 +100,9 @@ def _fit_member(
     loss_payoff = family.regressor()
     negative_labels, _ = clip_labels(dataset["y_net_r"][negative])
     loss_payoff.fit(dataset["X"][negative][:, mask], negative_labels)
+    direct_net_r = family.regressor()
+    direct_labels, _ = clip_labels(dataset["y_net_r"][development])
+    direct_net_r.fit(X_development, direct_labels)
     quantile = family.quantile()
     quantile_labels, _ = clip_labels(
         dataset["y_net_r"][development]
@@ -139,6 +142,7 @@ def _fit_member(
             "pWinGivenFill": win_model,
             "winPayoffR": win_payoff,
             "lossPayoffR": loss_payoff,
+            "directNetR": direct_net_r,
             "netRLower10": quantile,
         },
     }
@@ -173,6 +177,10 @@ def _member_predictions(member, matrix):
         member["models"]["winPayoffR"].predict(selected),
         member["models"]["lossPayoffR"].predict(selected),
     )
+    direct = np.asarray(
+        member["models"]["directNetR"].predict(selected),
+        dtype=np.float64,
+    )
     q10 = (
         member["models"]["netRLower10"].predict(selected)
         + float(member["config"]["q10CalibrationOffset"])
@@ -181,8 +189,46 @@ def _member_predictions(member, matrix):
         "pFill": p_fill,
         "pWinGivenFill": p_win,
         "expectedNetR": expected,
+        "decomposedExpectedNetR": expected,
+        "directExpectedNetR": direct,
+        "netRLower10": q10,
         "netRLowerBound": np.minimum(q10, expected),
     }
+
+
+def _value_head_predictions(predictions, value_head):
+    key = {
+        "DECOMPOSED": "decomposedExpectedNetR",
+        "DIRECT": "directExpectedNetR",
+    }.get(value_head)
+    if key is None:
+        raise ValueError("触价复核价值头无效")
+    output = []
+    for value in predictions:
+        expected = np.asarray(value[key], dtype=np.float64)
+        output.append({
+            **value,
+            "expectedNetR": expected,
+            "netRLowerBound": np.minimum(
+                np.asarray(value["netRLower10"], dtype=np.float64),
+                expected,
+            ),
+        })
+    return output
+
+
+def _select_value_head(candidates):
+    if set(candidates) != {"DECOMPOSED", "DIRECT"}:
+        raise ValueError("触价复核消融候选不完整")
+    return max(
+        candidates,
+        key=lambda name: (
+            candidates[name]["metrics"]["valueTop5LowerBound"],
+            candidates[name]["metrics"]["valueTop5MeanNetR"],
+            candidates[name]["metrics"]["netRMaeSkill"],
+            name == "DECOMPOSED",
+        ),
+    )
 
 
 def _evaluate_fill(dataset, development, holdout, predictions):
@@ -346,12 +392,29 @@ def train_review_ensemble(
         _member_predictions(member, dataset["X"][selection])
         for member in members
     ]
-    selection_metrics, selection_blockers = _evaluate(
-        dataset,
-        development,
-        selection,
-        selection_predictions,
-    )
+    value_candidates = {}
+    for value_head in ("DECOMPOSED", "DIRECT"):
+        metrics, candidate_blockers = _evaluate(
+            dataset,
+            development,
+            selection,
+            _value_head_predictions(
+                selection_predictions,
+                value_head,
+            ),
+        )
+        value_candidates[value_head] = {
+            "metrics": metrics,
+            "blockers": candidate_blockers,
+        }
+    selected_value_head = _select_value_head(value_candidates)
+    selection_metrics = {
+        "selectedValueHead": selected_value_head,
+        "candidates": value_candidates,
+    }
+    selection_blockers = value_candidates[
+        selected_value_head
+    ]["blockers"]
     fill_selection_predictions = [
         _member_predictions(member, dataset["X_all"][fill_selection])
         for member in members
@@ -371,7 +434,10 @@ def train_review_ensemble(
         dataset,
         development,
         confirmation,
-        confirmation_predictions,
+        _value_head_predictions(
+            confirmation_predictions,
+            selected_value_head,
+        ),
     )
     fill_confirmation_predictions = [
         _member_predictions(member, dataset["X_all"][fill_confirmation])
@@ -414,6 +480,7 @@ def train_review_ensemble(
         "exitPolicyVersion": REVIEW_EXIT_POLICY_VERSION,
         "riskProfileVersion": REVIEW_RISK_PROFILE_VERSION,
         "modelVersion": model_version,
+        "valueHead": selected_value_head,
         "observationPolicy": {
             "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
             "durationMs": REVIEW_OBSERVATION_DURATION_MS,
