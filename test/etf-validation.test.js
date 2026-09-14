@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { prepareHistory } from '../backtest/etf/data.mjs'
 import { runPortfolio } from '../backtest/etf/engine.mjs'
+import { auditLedger } from '../backtest/etf/ledger-audit.mjs'
 
 function fixture({ split = false } = {}) {
   const spec = JSON.parse(fs.readFileSync(new URL('../backtest/etf/experiment.json', import.meta.url)))
@@ -35,4 +36,45 @@ test('a later split cannot mutate the earlier signal snapshot', () => {
   const prefix = runPortfolio({ ...data, spec: { ...spec, end: '20250103' },
     model: 'weekly_rotation', slippageBps: 5 })
   assert.deepEqual(full.signals.filter(row => row.date <= '20250103'), prefix.signals)
+})
+
+test('accounting reconstruction detects cash, fee, position and attribution corruption', () => {
+  const { spec, history, actions } = fixture({ split: true })
+  const data = { ...prepareHistory(history, spec, actions), spec }
+  const result = runPortfolio({ ...data, model: 'buy_hold_reference', slippageBps: 5 })
+  assert.equal(auditLedger(result, data).maxEquityError, 0)
+  for (const corrupt of [
+    run => { run.curve[1].cash += 1 },
+    run => { run.fills[0].fees.total += 1 },
+    run => { run.openPositions[spec.assets[0].code].quantity -= 1 },
+    run => { run.netPnl += 1 },
+    run => { run.fills[0].signalDate = run.fills[0].date },
+  ]) {
+    const copy = structuredClone(result)
+    corrupt(copy)
+    assert.throws(() => auditLedger(copy, data))
+  }
+})
+
+test('latency stress never sells at an earlier intraday stop after learning daily low', () => {
+  const { spec, history, actions } = fixture()
+  const code = spec.assets[0].code
+  // A T+0 security separates observation delay from the T+1 lock.
+  spec.assets[0].tPlusOne = false
+  const day = history.assets[0].daily.find(row => row.trade_date === '20250103')
+  day.low = day.open * 0.97
+  const later = history.assets[0].daily.find(row => row.trade_date === '20250106')
+  later.open *= 0.98
+  later.low = later.open
+  const data = { ...prepareHistory(history, spec, actions), spec }
+  const original = runPortfolio({ ...data, model: 'static_risk_matched', slippageBps: 10 })
+  const delayed = runPortfolio({ ...data, model: 'static_risk_matched',
+    slippageBps: 10, stopExecution: 'NEXT_OPEN' })
+  assert.equal(original.trades[0].exitDate, '20250103')
+  assert.equal(delayed.trades[0].exitDate, '20250106')
+  const sell = delayed.fills.find(fill => fill.side === 'SELL' && fill.code === code)
+  assert.ok(sell.fillPrice < later.open)
+  assert.equal(auditLedger(delayed, data).state, 'PASS')
+  assert.throws(() => runPortfolio({ ...data, model: 'cash',
+    slippageBps: 10, stopExecution: 'UNKNOWN' }), /UNKNOWN_STOP_EXECUTION/)
 })

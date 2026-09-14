@@ -1,0 +1,30 @@
+{
+  "schemaVersion": "etf-validation.v2",
+  "frozenOn": "2026-09-14",
+  "purpose": "Falsify first study without choosing new strategy parameters",
+  "priorResult": "backtest/reports/etf-v1/result-c75e69ea6a06b795b124315dc37751ef0ea224826ab01763703a6c197d03ee41.json",
+  "priorSha256": "cf77b6d332e2b9168dccbcffd8723cda150e5cba5a09d16e1530b106ebc1317f",
+  "models": ["cash", "static_risk_matched", "monthly_trend", "weekly_rotation", "buy_hold_reference"],
+  "executionScenarios": [
+    {"id": "original_5bps", "stopExecution": "INTRADAY_STOP", "slippageBps": 5},
+    {"id": "original_10bps", "stopExecution": "INTRADAY_STOP", "slippageBps": 10},
+    {"id": "delayed_10bps", "stopExecution": "NEXT_OPEN", "slippageBps": 10},
+    {"id": "delayed_20bps", "stopExecution": "NEXT_OPEN", "slippageBps": 20}
+  ],
+  "subperiods": [
+    {"start": "20160104", "end": "20191231"},
+    {"start": "20200102", "end": "20221230"},
+    {"start": "20230103", "end": "20260911"}
+  ],
+  "prefixCutoffs": ["20191231", "20220826", "20251231"],
+  "assetExclusions": ["gold", "bond", "equity"],
+  "annualOperatingCosts": [0, 1200, 3000],
+  "notes": [
+    "Subperiods restart with 100000; they are historical robustness checks, NOT unseen out-of-sample folds.",
+    "Delayed stop means a daily-low breach exits at the next available opening, not yesterday's stop price.",
+    "Delayed execution can improve or worsen PnL. It is a latency scenario, not a guaranteed lower bound.",
+    "Excluded asset allocation remains cash; no reranking into other groups or leverage.",
+    "Operating cost is a post-hoc cash drag estimate, not a trading-account rerun.",
+    "No model training, whole-universe selection, minute execution certification or production deployment is authorized by these results."
+  ]
+}

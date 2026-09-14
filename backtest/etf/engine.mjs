@@ -29,8 +29,11 @@ export function selectTargets(assets, date, spec, model) {
     }).slice(0, spec.maxPositions)
 }
 
-export function runPortfolio({ calendar, assets, spec, model, slippageBps }) {
+export function runPortfolio({
+  calendar, assets, spec, model, slippageBps, stopExecution = 'INTRADAY_STOP',
+}) {
   if (!spec.models.includes(model) && model !== 'buy_hold_reference') throw new Error('UNKNOWN_STRATEGY')
+  if (!['INTRADAY_STOP', 'NEXT_OPEN'].includes(stopExecution)) throw new Error('UNKNOWN_STOP_EXECUTION')
   const dates = calendar.filter(date => date >= spec.start && date <= spec.end)
   const assetMap = new Map(assets.map(asset => [asset.code, asset]))
   const positions = new Map()
@@ -179,7 +182,10 @@ export function runPortfolio({ calendar, assets, spec, model, slippageBps }) {
       const asset = assetMap.get(code), bar = asset.byDate.get(date)
       // Test the previously known stop first; today's high only raises tomorrow's stop.
       if (model !== 'buy_hold_reference' && bar.low <= position.stop && !position.exitPending) {
-        if (sell(code, date, Math.min(bar.open, position.stop), 'HARD_OR_TRAILING_STOP')) continue
+        if (stopExecution === 'NEXT_OPEN') {
+          position.exitPending = true
+          events.push({ date, code, reason: 'DAILY_BREACH_EXIT_NEXT_OPEN' })
+        } else if (sell(code, date, Math.min(bar.open, position.stop), 'HARD_OR_TRAILING_STOP')) continue
       }
       const feature = featuresAt(asset, date, spec)
       position.peak = Math.max(position.peak, bar.high)
@@ -232,7 +238,7 @@ export function runPortfolio({ calendar, assets, spec, model, slippageBps }) {
     previous = last
   }
   return {
-    model, slippageBps, productionEligible: false,
+    model, slippageBps, stopExecution, productionEligible: false,
     finalEquity: final.equity, netPnl: money(final.equity - spec.initialCash),
     returnPct: (final.equity / spec.initialCash - 1) * 100,
     cagrPct: ((final.equity / spec.initialCash) ** (1 / years) - 1) * 100,
