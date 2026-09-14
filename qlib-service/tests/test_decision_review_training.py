@@ -21,6 +21,7 @@ from decision_engine.heads.review_contract import (  # noqa: E402
     FEATURE_SCHEMA_VERSION,
 )
 from decision_engine.training.review_ensemble import (  # noqa: E402
+    _account_metrics,
     _fit_member,
     _resolve_feature_schema,
     train_review_ensemble,
@@ -28,6 +29,25 @@ from decision_engine.training.review_ensemble import (  # noqa: E402
 
 
 class DecisionReviewTrainingTest(unittest.TestCase):
+    def test_account_metrics_use_actual_daily_selection_count(self):
+        dates = [f"2025-{index:03d}" for index in range(300)]
+        ranking = {
+            "daily_net_r": {date: 0.1 for date in dates},
+            "daily_selected": {date: 2 for date in dates},
+        }
+        stress = {
+            "daily_net_r": {date: 0.05 for date in dates},
+            "daily_selected": {date: 2 for date in dates},
+        }
+
+        metrics = _account_metrics(ranking, stress)
+
+        self.assertEqual(metrics["trades"], 600)
+        self.assertGreater(metrics["returnPct"], 0)
+        self.assertEqual(metrics["rolling12MonthProfitProbability"], 1.0)
+        self.assertGreater(metrics["stress10ReturnPct"], 0)
+        self.assertEqual(metrics["maximumDrawdownPct"], 0)
+
     def dataset(self, feature_names=FEATURE_NAMES):
         samples_per_date = 10
         date_count = 50

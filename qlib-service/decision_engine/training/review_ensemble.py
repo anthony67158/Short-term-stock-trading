@@ -505,6 +505,7 @@ def _policy_metrics(dataset, holdout, predictions, policy):
         if stress_coverage >= 1.0
         else None
     )
+    account = _account_metrics(ranking, stress_ranking)
     return {
         "samples": int(len(holdout)),
         "selected": ranking["selected"],
@@ -534,6 +535,84 @@ def _policy_metrics(dataset, holdout, predictions, policy):
         "accountDrawdownPctAtRisk07Top5": round(
             float(ranking["max_drawdown_r_at_5"]) * 3.5,
             6,
+        ),
+        "account": account,
+    }
+
+
+def _account_metrics(ranking, stress_ranking, *, risk_per_trade=0.007):
+    dates = sorted(ranking["daily_net_r"])
+    equity = 1.0
+    peak = 1.0
+    maximum_drawdown = 0.0
+    equity_by_date = {}
+    annual_start = {}
+    annual_end = {}
+    for date in dates:
+        year = str(date)[:4]
+        annual_start.setdefault(year, equity)
+        count = int(ranking["daily_selected"].get(date, 0))
+        daily_return = (
+            float(ranking["daily_net_r"][date])
+            * count
+            * risk_per_trade
+        )
+        equity *= max(0.0, 1.0 + daily_return)
+        peak = max(peak, equity)
+        if peak > 0:
+            maximum_drawdown = max(
+                maximum_drawdown,
+                (peak - equity) / peak,
+            )
+        equity_by_date[date] = equity
+        annual_end[year] = equity
+    annual_returns = [
+        annual_end[year] / annual_start[year] - 1.0
+        for year in sorted(annual_start)
+        if annual_start[year] > 0
+    ]
+    rolling = []
+    window = 252
+    if len(dates) >= window:
+        for end in range(window - 1, len(dates)):
+            start_equity = (
+                1.0
+                if end == window - 1
+                else equity_by_date[dates[end - window]]
+            )
+            if start_equity > 0:
+                rolling.append(
+                    equity_by_date[dates[end]] / start_equity - 1.0
+                )
+    stress_equity = 1.0
+    if stress_ranking is not None:
+        for date in dates:
+            count = int(stress_ranking["daily_selected"].get(date, 0))
+            stress_equity *= max(
+                0.0,
+                1.0
+                + float(stress_ranking["daily_net_r"][date])
+                * count
+                * risk_per_trade,
+            )
+    return {
+        "schemaVersion": "review-account-replay.v1",
+        "riskPerTradePct": round(risk_per_trade * 100, 4),
+        "tradingDays": len(dates),
+        "trades": int(sum(ranking["daily_selected"].values())),
+        "returnPct": round((equity - 1.0) * 100, 6),
+        "annualMedianReturnPct": (
+            round(float(np.median(annual_returns)) * 100, 6)
+            if annual_returns else None
+        ),
+        "rolling12MonthProfitProbability": (
+            round(float(np.mean(np.asarray(rolling) > 0)), 6)
+            if rolling else None
+        ),
+        "maximumDrawdownPct": round(maximum_drawdown * 100, 6),
+        "stress10ReturnPct": (
+            round((stress_equity - 1.0) * 100, 6)
+            if stress_ranking is not None else None
         ),
     }
 

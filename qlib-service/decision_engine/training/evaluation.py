@@ -213,6 +213,7 @@ def ranking_metrics(
     ndcgs = []
     net_returns = []
     daily_net_r = {}
+    daily_selected = {}
     selected_total = 0
     active_days = 0
     k = max(1, int(top_k))
@@ -222,6 +223,7 @@ def ranking_metrics(
             precisions.append(0.0)
             ndcgs.append(0.0)
             daily_net_r[date] = 0.0
+            daily_selected[date] = 0
             net_returns.append(0.0)
             continue
         active_days += 1
@@ -240,6 +242,7 @@ def ranking_metrics(
                 break
         order = np.asarray(order, dtype=np.int64)
         selected_total += len(order)
+        daily_selected[date] = int(len(order))
         ideal_by_group = {}
         for index in selected:
             group = groups[index]
@@ -278,6 +281,7 @@ def ranking_metrics(
             if net_returns else None
         ),
         "daily_net_r": daily_net_r,
+        "daily_selected": daily_selected,
         "selected": int(selected_total),
         "active_days": int(active_days),
     }
