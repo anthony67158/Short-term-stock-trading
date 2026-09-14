@@ -17,6 +17,7 @@ from .evaluation import (
 )
 from .review_dataset import (
     build_opportunity_review_dataset,
+    load_opportunity_review_dataset,
     normalize_review_history_outcomes,
 )
 from .bakeoff import (
@@ -63,11 +64,18 @@ def select_review_candidate(families):
 
 
 def load_dataset(path, *, feature_schema="v3"):
+    if str(path).endswith(".npz"):
+        dataset = load_opportunity_review_dataset(path)
+        if dataset.get("feature_schema") != feature_schema:
+            raise ValueError("复核训练数组归档与请求特征合同不一致")
+        return dataset
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as handle:
         payload = json.load(handle)
+    outcomes = normalize_review_history_outcomes(payload)
+    del payload
     return build_opportunity_review_dataset(
-        normalize_review_history_outcomes(payload),
+        outcomes,
         feature_schema=feature_schema,
     )
 

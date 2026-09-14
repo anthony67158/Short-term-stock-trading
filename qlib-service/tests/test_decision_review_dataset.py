@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import unittest
 
 import numpy as np
@@ -19,9 +20,13 @@ from decision_engine.training.review_dataset import (  # noqa: E402
     _stress_net_r,
     _training_feature_vector,
     build_opportunity_review_dataset,
+    load_opportunity_review_dataset,
+    merge_opportunity_review_datasets,
     normalize_review_history_outcomes,
+    save_opportunity_review_dataset,
 )
 from decision_engine.training.review_bakeoff import (  # noqa: E402
+    load_dataset,
     select_review_candidate,
 )
 from decision_engine.training.review_ensemble import _evaluate  # noqa: E402
@@ -182,6 +187,50 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
             _training_feature_vector(value, FEATURE_NAMES, feature_vector),
             [float(index) for index in range(len(FEATURE_NAMES))],
         )
+
+    def test_dataset_archive_merges_offsets_and_round_trips_without_pickle(self):
+        def outcome(code, decision_id, trade_date):
+            input_value = review_input()
+            input_value["code"] = code
+            return {
+                "maturity": "MATURED",
+                "fillStatus": "FILLED",
+                "tradeDate": trade_date,
+                "code": code,
+                "decisionId": decision_id,
+                "metrics": {"netR": 0.4},
+                "reviewScoreInput": input_value,
+                "entry": {"at": 1_788_320_120_000},
+                "exit": {"at": 1_788_406_400_000},
+                "labelSource": "HISTORICAL_SIMULATION",
+                "exitContractVersion": "trailing-exit.v1",
+            }
+
+        first = build_opportunity_review_dataset([
+            outcome("600001", "formula:one", "2026-09-01"),
+        ])
+        second = build_opportunity_review_dataset([
+            outcome("600002", "formula:two", "2026-09-02"),
+        ])
+        merged = merge_opportunity_review_datasets([first, second])
+
+        self.assertEqual(merged["conditional_indices"].tolist(), [0, 1])
+        self.assertEqual(merged["summary"]["events"], 2)
+        self.assertEqual(merged["summary"]["samples"], 2)
+        self.assertEqual(merged["summary"]["dates"], 2)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "review-dataset.npz")
+            save_opportunity_review_dataset(path, merged)
+            restored = load_opportunity_review_dataset(path)
+            loaded = load_dataset(path, feature_schema="v3")
+            with self.assertRaisesRegex(ValueError, "特征合同"):
+                load_dataset(path, feature_schema="v4")
+
+        for key, value in merged.items():
+            if isinstance(value, np.ndarray):
+                self.assertTrue(np.array_equal(restored[key], value), key)
+                self.assertTrue(np.array_equal(loaded[key], value), key)
+        self.assertEqual(restored["summary"], merged["summary"])
 
     def test_dataset_separates_fill_events_from_conditional_returns(self):
         valid = {

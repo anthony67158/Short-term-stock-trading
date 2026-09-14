@@ -21,6 +21,7 @@ from ..heads.review_contract_v4 import (
 from .review_dataset import (
     build_opportunity_review_dataset,
     is_main_board_code,
+    load_opportunity_review_dataset,
     normalize_review_history_outcomes,
 )
 from .review_release import (
@@ -85,16 +86,43 @@ def project_v4_outcomes_to_v3(outcomes):
     return projected
 
 
+def project_v4_dataset_to_v3(dataset):
+    if dataset.get("feature_schema") != "v4":
+        raise ValueError("迁移数组必须使用V4复核特征合同")
+    projected = dict(dataset)
+    projected.update({
+        "feature_schema": "v3",
+        "feature_names": np.asarray(FEATURE_NAMES),
+        "X_all": np.asarray(
+            dataset["X_all"][:, :len(FEATURE_NAMES)],
+            dtype=np.float32,
+        ),
+        "X": np.asarray(
+            dataset["X"][:, :len(FEATURE_NAMES)],
+            dtype=np.float32,
+        ),
+        "X_opportunity": np.asarray(
+            dataset["X_opportunity"][:, :len(FEATURE_NAMES)],
+            dtype=np.float32,
+        ),
+    })
+    return projected
+
+
 def build_migration_datasets(path):
-    outcomes = normalize_review_history_outcomes(_read_payload(path))
-    v4 = build_opportunity_review_dataset(
-        outcomes,
-        feature_schema="v4",
-    )
-    v3 = build_opportunity_review_dataset(
-        project_v4_outcomes_to_v3(outcomes),
-        feature_schema="v3",
-    )
+    if str(path).endswith(".npz"):
+        v4 = load_opportunity_review_dataset(path)
+        v3 = project_v4_dataset_to_v3(v4)
+    else:
+        outcomes = normalize_review_history_outcomes(_read_payload(path))
+        v4 = build_opportunity_review_dataset(
+            outcomes,
+            feature_schema="v4",
+        )
+        v3 = build_opportunity_review_dataset(
+            project_v4_outcomes_to_v3(outcomes),
+            feature_schema="v3",
+        )
     for field in (
         "dates",
         "codes",

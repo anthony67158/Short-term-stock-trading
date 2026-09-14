@@ -21,6 +21,7 @@ from decision_engine.heads.review_contract_v4 import (  # noqa: E402
     FEATURE_SCHEMA_VERSION_V4,
 )
 from decision_engine.training.review_schema_migration import (  # noqa: E402
+    project_v4_dataset_to_v3,
     project_v4_outcomes_to_v3,
     select_review_schema_migration,
 )
@@ -106,6 +107,26 @@ class ReviewSchemaMigrationTest(unittest.TestCase):
             values[:len(FEATURE_NAMES)],
         )
         self.assertNotIn("factors", review)
+
+    def test_projects_v4_dataset_arrays_to_v3_prefix(self):
+        v4 = dataset()
+        v4.update({
+            "feature_schema": "v4",
+            "feature_names": np.asarray(FEATURE_NAMES_V4),
+            "X": np.ones((2, len(FEATURE_NAMES_V4))),
+            "X_opportunity": np.ones((3, len(FEATURE_NAMES_V4))),
+        })
+
+        v3 = project_v4_dataset_to_v3(v4)
+
+        self.assertEqual(v3["feature_schema"], "v3")
+        self.assertEqual(v3["X_all"].shape[1], len(FEATURE_NAMES))
+        self.assertEqual(v3["X"].shape[1], len(FEATURE_NAMES))
+        self.assertEqual(
+            v3["X_opportunity"].shape[1],
+            len(FEATURE_NAMES),
+        )
+        self.assertEqual(tuple(v3["feature_names"]), FEATURE_NAMES)
 
     def test_same_event_v3_to_v4_migration_can_publish(self):
         v3 = dataset()
