@@ -104,7 +104,6 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
 
     def test_merge_uses_v4_chunk_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
-            decisions = []
             for index in (1, 2):
                 chunk = os.path.join(directory, f"chunk-{index:02d}")
                 os.makedirs(chunk)
@@ -112,6 +111,25 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
                     "outcomes": [{
                         "decisionId": f"formula:{index}",
                         "code": "600001",
+                        "tradeDate": f"20260{index}01",
+                        "maturity": "MATURED",
+                        "fillStatus": "TRIGGERED_UNFILLED",
+                        "reviewScoreInput": {
+                            "schemaVersion": runner.V4_FEATURE_SCHEMA,
+                            "asOf": index,
+                            "factors": {
+                                name: float(index)
+                                for name in runner.V4_FEATURE_NAMES
+                            },
+                            "priceContract": {"hash": f"hash-{index}"},
+                        },
+                        "context": {
+                            "source": "HISTORICAL",
+                            "sectorPhase": "STARTUP",
+                            "unused": "must-not-enter-training-merge",
+                        },
+                        "scoreInput": {"unused": True},
+                        "observations": [{"unused": True}],
                     }],
                 }
                 with gzip.open(
@@ -120,7 +138,6 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
                     encoding="utf-8",
                 ) as handle:
                     json.dump(value, handle)
-                decisions.extend(value["outcomes"])
             plan = {
                 "chunks": [
                     {
@@ -136,13 +153,34 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
                 ],
             }
             runner._merge_chunks(Namespace(output=directory), plan)
-            with open(
-                os.path.join(directory, "opportunity-outcomes-v4-5y.json"),
+            with gzip.open(
+                os.path.join(directory, "opportunity-outcomes-v4-5y.json.gz"),
+                "rt",
                 encoding="utf-8",
             ) as handle:
                 merged = json.load(handle)
 
-            self.assertEqual(merged["outcomes"], decisions)
+            self.assertEqual(
+                [item["decisionId"] for item in merged["outcomes"]],
+                ["formula:1", "formula:2"],
+            )
+            self.assertEqual(
+                merged["outcomes"][0]["reviewScoreInput"]["factorValues"],
+                [1.0] * len(runner.V4_FEATURE_NAMES),
+            )
+            self.assertNotIn(
+                "factors",
+                merged["outcomes"][0]["reviewScoreInput"],
+            )
+            self.assertEqual(
+                merged["outcomes"][0]["context"],
+                {
+                    "source": "HISTORICAL",
+                    "sectorPhase": "STARTUP",
+                },
+            )
+            self.assertNotIn("scoreInput", merged["outcomes"][0])
+            self.assertNotIn("observations", merged["outcomes"][0])
 
 
 if __name__ == "__main__":

@@ -25,6 +25,30 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = Path.home() / ".tushare-v4-5y"
+CONTRACT_ROOT = ROOT / "qlib-service" / "contracts"
+
+
+def _contract(name):
+    with open(CONTRACT_ROOT / name, encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+_V4_CONTRACT = _contract("opportunity-review-features-v4.json")
+_BASE_CONTRACT = _contract(_V4_CONTRACT["baseFeatureContract"])
+_INITIAL_CONTRACT = _contract(_V4_CONTRACT["initialFeatureContract"])
+_ALPHA_CONTRACT = _contract(_V4_CONTRACT["alphaFeatureContract"])
+V4_FEATURE_SCHEMA = _V4_CONTRACT["featureSchemaVersion"]
+V4_FEATURE_NAMES = tuple([
+    *_BASE_CONTRACT["featureNames"],
+    *[
+        f"{_V4_CONTRACT['initialFeaturePrefix']}{name}"
+        for name in _INITIAL_CONTRACT["featureNames"]
+    ],
+    *[
+        f"{_V4_CONTRACT['alphaFeaturePrefix']}{name}"
+        for name in _ALPHA_CONTRACT["featureNames"]
+    ],
+])
 
 
 def _read_gzip(path):
@@ -317,19 +341,70 @@ def _build_v4_chunk(args, directory):
     ], directory / "v4-build.log")
 
 
+def _training_outcome(outcome):
+    context = outcome.get("context") or {}
+    review = outcome.get("reviewScoreInput") or {}
+    factors = review.get("factors")
+    if (
+        review.get("schemaVersion") != V4_FEATURE_SCHEMA
+        or not isinstance(factors, dict)
+        or tuple(factors) != V4_FEATURE_NAMES
+    ):
+        raise ValueError("最终训练合并发现无效V4特征合同")
+    compact_review = {
+        key: value
+        for key, value in review.items()
+        if key != "factors"
+    }
+    compact_review["factorValues"] = [
+        factors[name]
+        for name in V4_FEATURE_NAMES
+    ]
+    return {
+        key: outcome[key]
+        for key in (
+            "decisionId",
+            "parentDecisionId",
+            "code",
+            "tradeDate",
+            "maturity",
+            "fillStatus",
+            "outcome",
+            "evaluatedAt",
+            "labelSource",
+            "exitContractVersion",
+            "playbookId",
+            "route",
+            "entry",
+            "exit",
+            "metrics",
+        )
+        if key in outcome
+    } | {
+        "reviewScoreInput": compact_review,
+        "context": {
+            key: context[key]
+            for key in ("source", "sectorPhase")
+            if key in context
+        },
+    }
+
+
 def _merge_chunks(args, plan):
     output_root = Path(args.output).expanduser().resolve()
-    destination = output_root / "opportunity-outcomes-v4-5y.json"
-    temporary = destination.with_suffix(".json.part")
+    destination = output_root / "opportunity-outcomes-v4-5y.json.gz"
+    temporary = destination.with_suffix(".gz.part")
     seen = set()
     total = 0
-    with open(temporary, "w", encoding="utf-8") as handle:
+    with gzip.open(temporary, "wt", encoding="utf-8") as handle:
         header = {
             "schemaVersion": "opportunity-outcome-export.v1",
             "source": {
                 "type": "TUSHARE_CAUSAL_REPLAY",
                 "version": "five-year-chunked-v1",
                 "chunks": len(plan["chunks"]),
+                "featureSchemaVersion": V4_FEATURE_SCHEMA,
+                "featureEncoding": "ORDERED_VALUES",
             },
             "range": {
                 "from": plan["chunks"][0]["signalFrom"],
@@ -353,7 +428,7 @@ def _merge_chunks(args, plan):
                     handle.write(",")
                 first = False
                 json.dump(
-                    outcome,
+                    _training_outcome(outcome),
                     handle,
                     ensure_ascii=False,
                     allow_nan=False,

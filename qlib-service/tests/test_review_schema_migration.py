@@ -84,6 +84,29 @@ class ReviewSchemaMigrationTest(unittest.TestCase):
         self.assertEqual(review["schemaVersion"], FEATURE_SCHEMA_VERSION)
         self.assertEqual(tuple(review["factors"]), FEATURE_NAMES)
 
+    def test_projects_compact_v4_values_without_expanding_json(self):
+        values = [
+            float(index)
+            for index in range(len(FEATURE_NAMES_V4))
+        ]
+        value = {
+            "reviewScoreInput": {
+                "schemaVersion": FEATURE_SCHEMA_VERSION_V4,
+                "factorValues": values,
+            },
+        }
+
+        projected = project_v4_outcomes_to_v3([value])
+
+        self.assertEqual(len(projected), 1)
+        review = projected[0]["reviewScoreInput"]
+        self.assertEqual(review["schemaVersion"], FEATURE_SCHEMA_VERSION)
+        self.assertEqual(
+            review["factorValues"],
+            values[:len(FEATURE_NAMES)],
+        )
+        self.assertNotIn("factors", review)
+
     def test_same_event_v3_to_v4_migration_can_publish(self):
         v3 = dataset()
         v3["X_all"] = np.zeros((500, len(FEATURE_NAMES)))

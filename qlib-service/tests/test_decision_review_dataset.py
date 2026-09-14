@@ -17,6 +17,7 @@ from decision_engine.heads.review_contract import (  # noqa: E402
 )
 from decision_engine.training.review_dataset import (  # noqa: E402
     _stress_net_r,
+    _training_feature_vector,
     build_opportunity_review_dataset,
     normalize_review_history_outcomes,
 )
@@ -169,6 +170,16 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
     def test_review_contract_preserves_order(self):
         self.assertEqual(
             feature_vector(review_input()),
+            [float(index) for index in range(len(FEATURE_NAMES))],
+        )
+
+    def test_offline_dataset_accepts_compact_factor_values(self):
+        value = review_input()
+        factors = value.pop("factors")
+        value["factorValues"] = list(factors.values())
+
+        self.assertEqual(
+            _training_feature_vector(value, FEATURE_NAMES, feature_vector),
             [float(index) for index in range(len(FEATURE_NAMES))],
         )
 

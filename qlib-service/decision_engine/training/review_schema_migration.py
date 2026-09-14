@@ -48,22 +48,39 @@ def project_v4_outcomes_to_v3(outcomes):
     for value in outcomes:
         review = (value or {}).get("reviewScoreInput")
         factors = (review or {}).get("factors")
+        factor_values = (review or {}).get("factorValues")
         if (
             not isinstance(review, dict)
             or review.get("schemaVersion") != FEATURE_SCHEMA_VERSION_V4
-            or not isinstance(factors, dict)
-            or tuple(factors) != FEATURE_NAMES_V4
         ):
             continue
+        if isinstance(factors, dict) and tuple(factors) == FEATURE_NAMES_V4:
+            projected_review = {
+                **review,
+                "schemaVersion": FEATURE_SCHEMA_VERSION,
+                "factors": {
+                    name: factors[name]
+                    for name in FEATURE_NAMES
+                },
+            }
+        elif (
+            "factors" not in review
+            and isinstance(factor_values, list)
+            and len(factor_values) == len(FEATURE_NAMES_V4)
+        ):
+            projected_review = {
+                key: item
+                for key, item in review.items()
+                if key != "factorValues"
+            }
+            projected_review.update({
+                "schemaVersion": FEATURE_SCHEMA_VERSION,
+                "factorValues": factor_values[:len(FEATURE_NAMES)],
+            })
+        else:
+            continue
         item = copy.deepcopy(value)
-        item["reviewScoreInput"] = {
-            **review,
-            "schemaVersion": FEATURE_SCHEMA_VERSION,
-            "factors": {
-                name: factors[name]
-                for name in FEATURE_NAMES
-            },
-        }
+        item["reviewScoreInput"] = projected_review
         projected.append(item)
     return projected
 

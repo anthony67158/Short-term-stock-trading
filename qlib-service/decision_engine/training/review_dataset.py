@@ -98,6 +98,26 @@ def _review_risk_outcome(value):
     return repaired
 
 
+def _training_feature_vector(value, feature_names, vectorizer):
+    """Expand the compact offline factor encoding before strict validation."""
+    if not isinstance(value, dict) or "factorValues" not in value:
+        return vectorizer(value)
+    factor_values = value.get("factorValues")
+    if (
+        "factors" in value
+        or not isinstance(factor_values, list)
+        or len(factor_values) != len(feature_names)
+    ):
+        raise ValueError("复核训练特征压缩格式无效")
+    expanded = {
+        key: item
+        for key, item in value.items()
+        if key != "factorValues"
+    }
+    expanded["factors"] = dict(zip(feature_names, factor_values))
+    return vectorizer(expanded)
+
+
 def normalize_review_history_outcomes(payload):
     unique = {}
     for value in _outcomes(payload):
@@ -212,8 +232,10 @@ def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
             excluded += 1
             continue
         try:
-            vector = active_feature_vector(
-                outcome.get("reviewScoreInput")
+            vector = _training_feature_vector(
+                outcome.get("reviewScoreInput"),
+                active_feature_names,
+                active_feature_vector,
             )
             label_start = int(
                 (outcome.get("reviewScoreInput") or {}).get("asOf")
