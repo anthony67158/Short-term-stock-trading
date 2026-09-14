@@ -1,7 +1,6 @@
 """Build trigger-review training rows without leaking them into entry scores."""
 
 from collections import Counter
-import copy
 
 import numpy as np
 
@@ -62,7 +61,7 @@ def _outcomes(payload):
 
 
 def _review_risk_outcome(value):
-    repaired = copy.deepcopy(value)
+    repaired = dict(value)
     if repaired.get("fillStatus") != "FILLED":
         return repaired
     metrics = repaired.get("metrics")
@@ -90,7 +89,7 @@ def _review_risk_outcome(value):
     ):
         return repaired
     repaired["metrics"] = {
-        **metrics,
+        **(metrics or {}),
         "netR": round(net_pnl / risk_cash, 6),
         "initialRiskCash": round(risk_cash, 2),
         "riskBasis": "REVIEW_PRICE_CONTRACT_V2",
