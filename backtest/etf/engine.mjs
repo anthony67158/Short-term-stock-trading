@@ -196,7 +196,7 @@ export function runPortfolio({ calendar, assets, spec, model, slippageBps }) {
     if (cash < -0.005 || !Number.isFinite(mark.equity)) throw new Error('LEDGER_INVARIANT_FAILED')
     curve.push({ date, cash, holdings: money(mark.holdings), receivable: money(mark.receivable),
       equity: mark.equity, positions: positions.size })
-    const next = dates[index + 1]
+    const next = calendar[calendar.indexOf(date) + 1]
     // The first evaluation close creates the initial orders for the next session.
     const first = index === 0
     const rebalance = model !== 'buy_hold_reference' && next && (model === 'weekly_rotation'
@@ -213,7 +213,7 @@ export function runPortfolio({ calendar, assets, spec, model, slippageBps }) {
               feature.price * spec.gapStress)) / 100) * 100,
         })),
       }
-      signals.push(pending)
+      signals.push(structuredClone(pending))
     }
   }
   let peak = spec.initialCash, maxDrawdown = 0
