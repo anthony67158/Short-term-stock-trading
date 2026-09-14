@@ -115,13 +115,10 @@ class DecisionReviewTrainingTest(unittest.TestCase):
         self.assertEqual(metrics["trades"], 126)
         self.assertEqual(metrics["annualizedTrades"], 126)
 
-    def dataset(self, feature_names=FEATURE_NAMES):
+    def dataset(self, feature_names=FEATURE_NAMES, date_count=50):
         samples_per_date = 10
-        date_count = 50
         dates = np.repeat(np.asarray([
-            f"2026-01-{day:02d}"
-            if day <= 31
-            else f"2026-02-{day - 31:02d}"
+            f"day-{day:04d}"
             for day in range(1, date_count + 1)
         ]), samples_per_date)
         starts = np.arange(1, len(dates) + 1, dtype=np.int64) * 1_000
@@ -339,7 +336,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
 
     def test_v4_feature_schema_propagates_to_artifact_and_metadata(self):
         # 显式 feature_schema="v4" 时，artifact/metadata 全部写 v4 176 维口径。
-        dataset = self.dataset(FEATURE_NAMES_V4)
+        dataset = self.dataset(FEATURE_NAMES_V4, date_count=800)
         metadata, _ = self._run_training(dataset, feature_schema="v4")
         self.assertEqual(
             metadata["featureSchemaVersion"],
@@ -354,6 +351,16 @@ class DecisionReviewTrainingTest(unittest.TestCase):
         self.assertEqual(
             len(metadata["featureSupport"]["lower"]),
             len(FEATURE_NAMES_V4),
+        )
+        self.assertEqual(
+            metadata["validation"]["split"]["minimum_confirmation_dates"],
+            252,
+        )
+        self.assertEqual(
+            metadata["validation"]["confirmationMetrics"][
+                "opportunityPolicy"
+            ]["metrics"]["account"]["tradingDays"],
+            252,
         )
 
     def test_resolve_feature_schema_rejects_unknown(self):

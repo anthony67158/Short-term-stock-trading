@@ -63,6 +63,7 @@ POLICY_MINIMUM_EXPECTED_R = (0.0, 0.05, 0.1)
 POLICY_MINIMUM_LOWER_R = (-1.0, -0.5, 0.0)
 POLICY_MINIMUM_P_FILL = (0.0, 0.2, 0.5)
 MINIMUM_ANNUALIZED_TRADES = 80
+MINIMUM_CONFIRMATION_TRADING_DAYS = 252
 POLICY_SECTOR_PHASES = (
     (),
     ("ACCUMULATION",),
@@ -821,6 +822,11 @@ def train_review_ensemble(
     schema_version, feature_names, missing_indices = _resolve_feature_schema(
         feature_schema,
     )
+    minimum_confirmation_dates = (
+        MINIMUM_CONFIRMATION_TRADING_DAYS
+        if feature_schema == "v4"
+        else 0
+    )
     dataset = load_dataset(input_path, feature_schema=feature_schema)
     if (
         len(dataset["X"]) < 500
@@ -844,6 +850,7 @@ def train_review_ensemble(
         selection_fraction=0.15,
         confirmation_fraction=0.15,
         embargo_dates=5,
+        minimum_confirmation_dates=minimum_confirmation_dates,
     )
     (
         fill_development,
@@ -860,6 +867,7 @@ def train_review_ensemble(
         selection_fraction=0.15,
         confirmation_fraction=0.15,
         embargo_dates=5,
+        minimum_confirmation_dates=minimum_confirmation_dates,
     )
     (
         opportunity_development,
@@ -876,6 +884,7 @@ def train_review_ensemble(
         selection_fraction=0.15,
         confirmation_fraction=0.15,
         embargo_dates=5,
+        minimum_confirmation_dates=minimum_confirmation_dates,
     )
     selection_members = [
         _fit_member(

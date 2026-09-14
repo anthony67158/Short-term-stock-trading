@@ -19,6 +19,7 @@ from ..heads.review_contract_v4 import FEATURE_SCHEMA_VERSION_V4
 from .review_bakeoff import load_dataset
 from .review_dataset import is_main_board_code
 from .review_ensemble import (
+    MINIMUM_CONFIRMATION_TRADING_DAYS,
     _evaluate,
     _evaluate_fill,
     _member_predictions,
@@ -158,6 +159,11 @@ def _load_bundle(directory):
 
 
 def _confirmation_partitions(dataset):
+    minimum_confirmation_dates = (
+        MINIMUM_CONFIRMATION_TRADING_DAYS
+        if dataset.get("feature_schema") == "v4"
+        else 0
+    )
     development, _, _, confirmation, _ = four_way_interval_split(
         dataset["dates"],
         dataset["label_start_ms"],
@@ -167,6 +173,7 @@ def _confirmation_partitions(dataset):
         selection_fraction=0.15,
         confirmation_fraction=0.15,
         embargo_dates=5,
+        minimum_confirmation_dates=minimum_confirmation_dates,
     )
     fill_development, _, _, fill_confirmation, _ = (
         four_way_interval_split(
@@ -178,6 +185,7 @@ def _confirmation_partitions(dataset):
             selection_fraction=0.15,
             confirmation_fraction=0.15,
             embargo_dates=5,
+            minimum_confirmation_dates=minimum_confirmation_dates,
         )
     )
     _, _, _, opportunity_confirmation, _ = four_way_interval_split(
@@ -189,6 +197,7 @@ def _confirmation_partitions(dataset):
         selection_fraction=0.15,
         confirmation_fraction=0.15,
         embargo_dates=5,
+        minimum_confirmation_dates=minimum_confirmation_dates,
     )
     return {
         "development": development,
