@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-11 已完成）。
+状态：IN PROGRESS（Tasks 1-12 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -209,14 +209,14 @@
 
 **Estimated scope:** M
 
-### Task 12：分离选择集与一次性最终确认
+### Task 12：分离选择集与一次性最终确认（已完成）
 
 **Description:** 候选成员、阈值和消融模型只在选择段确定；确认段仅评估冻结包。
 
 **Acceptance criteria:**
-- [ ] 发布审计记录选择数据哈希、候选哈希和确认数据哈希。
-- [ ] 同一确认数据哈希第二次择优被拒绝。
-- [ ] 失败保持当前生产Manifest。
+- [x] 发布审计记录选择数据哈希、候选哈希和确认数据哈希。
+- [x] 同一确认数据哈希第二次择优被拒绝。
+- [x] 失败保持当前生产Manifest。
 
 **Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_release qlib-service.tests.test_decision_release_upload`
 

@@ -92,6 +92,23 @@ def _valid_feature_support(value):
     )
 
 
+def _valid_confirmation_audit(value):
+    return (
+        isinstance(value, dict)
+        and value.get("schemaVersion")
+        == "review-confirmation-audit.v1"
+        and value.get("reusePolicy") == "SINGLE_SELECTION"
+        and all(
+            re.fullmatch(r"[0-9a-f]{64}", str(value.get(field) or ""))
+            for field in (
+                "selectionDataHash",
+                "candidateHash",
+                "confirmationDataHash",
+            )
+        )
+    )
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -129,6 +146,9 @@ def validate_review_metadata(metadata, model_version=None):
         )
         or metadata["fillCalibrationSampleCount"] <= 0
         or not _valid_feature_support(metadata.get("featureSupport"))
+        or not _valid_confirmation_audit(
+            metadata.get("confirmationAudit")
+        )
         or not isinstance(observation, dict)
         or observation.get("schemaVersion")
         != REVIEW_OBSERVATION_POLICY_VERSION
@@ -203,6 +223,9 @@ def validate_review_manifest(manifest):
         != REVIEW_EXIT_POLICY_VERSION
         or manifest.get("riskProfileVersion")
         != REVIEW_RISK_PROFILE_VERSION
+        or not _valid_confirmation_audit(
+            manifest.get("confirmationAudit")
+        )
     ):
         raise ValueError("触价复核模型清单版本无效")
     run_id = str(manifest.get("runId") or "")
@@ -330,6 +353,17 @@ def _download_release():
         ):
             if manifest.get(field) != loaded[1].get(field):
                 raise ValueError("触价复核模型清单与元数据不一致")
+        manifest_audit = manifest["confirmationAudit"]
+        metadata_audit = loaded[1]["confirmationAudit"]
+        if any(
+            manifest_audit.get(field) != metadata_audit.get(field)
+            for field in (
+                "selectionDataHash",
+                "candidateHash",
+                "confirmationDataHash",
+            )
+        ):
+            raise ValueError("触价复核确认审计不一致")
         metadata = {
             **loaded[1],
             "usagePolicy": manifest.get("usagePolicy", "QUALIFIED"),

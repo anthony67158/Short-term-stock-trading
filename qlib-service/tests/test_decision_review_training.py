@@ -43,6 +43,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             "X": matrix,
             "X_all": matrix.copy(),
             "dates_all": dates.copy(),
+            "codes_all": np.asarray(["600001"] * len(dates)),
             "dates": dates,
             "codes": np.asarray(["600001"] * len(dates)),
             "event_group_ids": groups,
@@ -161,6 +162,10 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             evaluate.call_args_list[2].args[3][0]["expectedNetR"],
             0.1,
         ))
+        audit = metadata["confirmationAudit"]
+        self.assertRegex(audit["selectionDataHash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(audit["candidateHash"], r"^[0-9a-f]{64}$")
+        self.assertRegex(audit["confirmationDataHash"], r"^[0-9a-f]{64}$")
 
     def test_training_rejects_fill_labels_without_both_classes(self):
         dataset = self.dataset()

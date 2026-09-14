@@ -109,6 +109,13 @@ def metadata(**overrides):
             "missingPatterns": ["1" * len(missing_indices)],
             "maximumOutlierFraction": 0.2,
         },
+        "confirmationAudit": {
+            "schemaVersion": "review-confirmation-audit.v1",
+            "selectionDataHash": "1" * 64,
+            "candidateHash": "2" * 64,
+            "confirmationDataHash": "3" * 64,
+            "reusePolicy": "SINGLE_SELECTION",
+        },
         "risk": {"expectedShortfall10": -1.2},
         "productionEligible": True,
         "baselineSelected": True,

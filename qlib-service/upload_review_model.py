@@ -30,6 +30,57 @@ def _sha256(path):
     return digest.hexdigest()
 
 
+def record_confirmation_attempt(
+    target_bucket,
+    metadata,
+    *,
+    prefix="opportunitymodel/review/",
+    recorded_at=None,
+):
+    audit = metadata["confirmationAudit"]
+    normalized_prefix = str(
+        prefix or "opportunitymodel/review/"
+    ).strip("/")
+    key = (
+        f"{normalized_prefix}/confirmation-audits/"
+        f"{audit['confirmationDataHash']}.json"
+    )
+    payload = {
+        **audit,
+        "runId": metadata["modelVersion"],
+        "productionEligible":
+            metadata.get("productionEligible") is True,
+        "recordedAt": int(recorded_at or time.time()),
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    try:
+        target_bucket.put_object(
+            key,
+            encoded,
+            headers={"x-oss-forbid-overwrite": "true"},
+        )
+    except Exception as error:
+        try:
+            existing = json.loads(
+                target_bucket.get_object(key).read().decode("utf-8")
+            )
+        except Exception:
+            raise error
+        if (
+            existing.get("runId") == payload["runId"]
+            and existing.get("candidateHash") == payload["candidateHash"]
+        ):
+            return existing
+        raise ValueError("最终确认数据已用于另一候选选择") from error
+    return payload
+
+
 def publish_review_release(
     target_bucket,
     directory,
@@ -50,12 +101,18 @@ def publish_review_release(
         or ".." in run_id
     ):
         raise ValueError("触价复核模型版本无效")
-    if metadata.get("productionEligible") is not True:
-        raise ValueError("触价复核模型未通过生产门禁")
-
     normalized_prefix = str(
         prefix or "opportunitymodel/review/"
     ).strip("/")
+    confirmation_audit = record_confirmation_attempt(
+        target_bucket,
+        metadata,
+        prefix=normalized_prefix,
+        recorded_at=activated_at,
+    )
+    if metadata.get("productionEligible") is not True:
+        raise ValueError("触价复核模型未通过生产门禁")
+
     release_prefix = f"{normalized_prefix}/runs/{run_id}/"
     files = {}
     for slot, filename in REVIEW_ARTIFACT_FILENAMES.items():
@@ -87,6 +144,7 @@ def publish_review_release(
         "riskProfileVersion": metadata["riskProfileVersion"],
         "productionEligible": True,
         "baselineSelected": True,
+        "confirmationAudit": confirmation_audit,
         "files": files,
     }
     target_bucket.put_object(
@@ -113,7 +171,28 @@ def main():
             "opportunitymodel/review/",
         ),
     )
+    parser.add_argument("--record-only", action="store_true")
     args = parser.parse_args()
+    if args.record_only:
+        source = os.path.abspath(args.directory)
+        metadata_path = os.path.join(
+            source,
+            REVIEW_ARTIFACT_FILENAMES["meta"],
+        )
+        with open(metadata_path, encoding="utf-8") as handle:
+            metadata = validate_review_metadata(json.load(handle))
+        audit = record_confirmation_attempt(
+            _bucket(),
+            metadata,
+            prefix=args.prefix,
+        )
+        print(json.dumps({
+            "ok": True,
+            "runId": audit["runId"],
+            "productionEligible": audit["productionEligible"],
+            "confirmationDataHash": audit["confirmationDataHash"],
+        }, ensure_ascii=False))
+        return
     manifest = publish_review_release(
         _bucket(),
         args.directory,

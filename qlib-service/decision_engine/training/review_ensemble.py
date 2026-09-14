@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import tempfile
@@ -86,6 +87,66 @@ def _feature_support(matrix):
         "missingPatterns": patterns,
         "maximumOutlierFraction": 0.2,
     }
+
+
+def _partition_data_hash(
+    dataset,
+    conditional_indices,
+    fill_indices,
+):
+    digest = hashlib.sha256()
+    for prefix, indices, suffix in (
+        ("conditional", conditional_indices, ""),
+        ("fill", fill_indices, "_all"),
+    ):
+        digest.update(prefix.encode("ascii"))
+        selected = np.asarray(indices, dtype=np.int64)
+        for field in (
+            f"dates{suffix}",
+            f"codes{suffix}",
+            f"event_group_ids{suffix}",
+        ):
+            for value in np.asarray(dataset[field])[selected].astype(str):
+                encoded = value.encode("utf-8")
+                digest.update(len(encoded).to_bytes(4, "big"))
+                digest.update(encoded)
+        for field in (
+            f"label_start_ms{suffix}",
+            f"label_end_ms{suffix}",
+        ):
+            values = np.asarray(
+                dataset[field],
+                dtype="<i8",
+            )[selected]
+            digest.update(values.tobytes())
+        matrix_field = "X_all" if suffix else "X"
+        digest.update(np.asarray(
+            dataset[matrix_field][selected],
+            dtype="<f4",
+        ).tobytes())
+        labels = (
+            ("y_fill",)
+            if suffix
+            else ("y_win", "y_net_r")
+        )
+        for field in labels:
+            values = np.asarray(dataset[field])[selected]
+            digest.update(values.tobytes())
+    return digest.hexdigest()
+
+
+def _candidate_hash(artifact, value_head):
+    payload = json.dumps(
+        {
+            "artifact": artifact,
+            "valueHead": value_head,
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _fit_member(
@@ -498,6 +559,17 @@ def train_review_ensemble(
     expected_shortfall = float(np.mean(
         actual[actual <= np.quantile(actual, 0.1)]
     ))
+    artifact = {
+        "schemaVersion": REVIEW_ARTIFACT_SCHEMA_VERSION,
+        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+        "members": [{
+            "seed": member["config"]["seed"],
+            "models": {
+                name: _catboost_payload(model)
+                for name, model in member["models"].items()
+            },
+        } for member in members],
+    }
     metadata = {
         "schemaVersion": REVIEW_MODEL_SCHEMA_VERSION,
         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
@@ -510,6 +582,24 @@ def train_review_ensemble(
         "riskProfileVersion": REVIEW_RISK_PROFILE_VERSION,
         "modelVersion": model_version,
         "valueHead": selected_value_head,
+        "confirmationAudit": {
+            "schemaVersion": "review-confirmation-audit.v1",
+            "selectionDataHash": _partition_data_hash(
+                dataset,
+                selection,
+                fill_selection,
+            ),
+            "candidateHash": _candidate_hash(
+                artifact,
+                selected_value_head,
+            ),
+            "confirmationDataHash": _partition_data_hash(
+                dataset,
+                confirmation,
+                fill_confirmation,
+            ),
+            "reusePolicy": "SINGLE_SELECTION",
+        },
         "observationPolicy": {
             "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
             "durationMs": REVIEW_OBSERVATION_DURATION_MS,
@@ -550,17 +640,6 @@ def train_review_ensemble(
         },
     }
     validate_review_metadata(metadata)
-    artifact = {
-        "schemaVersion": REVIEW_ARTIFACT_SCHEMA_VERSION,
-        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
-        "members": [{
-            "seed": member["config"]["seed"],
-            "models": {
-                name: _catboost_payload(model)
-                for name, model in member["models"].items()
-            },
-        } for member in members],
-    }
     os.makedirs(output_directory, exist_ok=True)
     for slot, payload in (
         ("ensemble", artifact),

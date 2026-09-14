@@ -411,6 +411,13 @@ jobs:
           )
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
 
+      - name: Record trigger-review final confirmation once
+        run: |
+          python upload_review_model.py \
+            --directory opportunity-model/review-release \
+            --prefix opportunitymodel/review/ \
+            --record-only
+
       - name: Publish trigger-review ensemble atomically
         id: review-production
         if: steps.review-training.outputs.publish == 'true'
