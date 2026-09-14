@@ -68,6 +68,7 @@ def metadata(*, eligible=True):
         "seed": 42,
         "activeFeatures": list(range(len(FEATURE_NAMES))),
         "activeFillFeatures": list(range(len(FEATURE_NAMES))),
+        "activeRankFeatures": list(range(len(FEATURE_NAMES))),
         "pFillCalibration": {
             "method": "isotonic",
             "x": [0.0, 1.0],
@@ -99,6 +100,17 @@ def metadata(*, eligible=True):
         },
         "ensembleSize": 2,
         "ensembleMembers": [member, {**member, "seed": 7}],
+        "ensembleQ10CalibrationOffset": 0.0,
+        "selectionPolicy": {
+            "schemaVersion": "review-selection-policy.v1",
+            "valueHead": "DECOMPOSED",
+            "rankingMode": "VALUE",
+            "minimumPFill": 0.0,
+            "minimumPWinGivenFill": 0.0,
+            "minimumExpectedNetR": -10.0,
+            "minimumNetRLowerBound": -10.0,
+            "allowedSectorPhases": [],
+        },
         "fillCalibrationSampleCount": 120,
         "featureSupport": {
             "schemaVersion": "review-feature-support.v1",

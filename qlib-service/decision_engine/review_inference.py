@@ -9,6 +9,7 @@ import numpy as np
 from .contracts import SCORE_SCHEMA_VERSION, not_ready_prediction
 from .heads.position import position_values
 from .heads.review_contract import (
+    FEATURE_NAMES,
     REVIEW_PATH_FEATURE_COUNT,
     feature_vector,
 )
@@ -60,12 +61,17 @@ def _prediction_arrays(models, metadata, matrix):
     decomposed_values = []
     direct_values = []
     lower_values = []
+    ranking_values = []
     for model_set, config in zip(members, configs):
         active_fill = np.asarray(
             config["activeFillFeatures"],
             dtype=np.int64,
         )
         active = np.asarray(config["activeFeatures"], dtype=np.int64)
+        active_rank = np.asarray(
+            config["activeRankFeatures"],
+            dtype=np.int64,
+        )
         fill_probability = apply_probability_calibrator(
             _sigmoid(
                 model_set["pFill"].predict(matrix[:, active_fill])
@@ -94,11 +100,15 @@ def _prediction_arrays(models, metadata, matrix):
             model_set["netRLower10"].predict(selected)
             + float(config.get("q10CalibrationOffset") or 0)
         )
+        ranking = model_set["opportunityRanker"].predict(
+            matrix[:, active_rank]
+        )
         fill_probabilities.append(fill_probability)
         probabilities.append(probability)
         decomposed_values.append(expected)
         direct_values.append(direct)
         lower_values.append(lower)
+        ranking_values.append(ranking)
     decomposed = np.mean(decomposed_values, axis=0)
     direct = np.mean(direct_values, axis=0)
     expected = (
@@ -106,13 +116,20 @@ def _prediction_arrays(models, metadata, matrix):
         if metadata.get("valueHead") == "DIRECT"
         else decomposed
     )
+    lower = (
+        np.mean(lower_values, axis=0)
+        + float(metadata["ensembleQ10CalibrationOffset"])
+    )
     return {
         "pFill": np.mean(fill_probabilities, axis=0),
         "pWinGivenFill": np.mean(probabilities, axis=0),
         "expectedNetR": expected,
         "netRLowerBound": np.minimum(
-            np.mean(lower_values, axis=0),
+            lower,
             expected,
+        ),
+        "rankingScore": _sigmoid(
+            np.mean(ranking_values, axis=0)
         ),
     }
 
@@ -188,6 +205,14 @@ def predict_review_items(payload, *, models=None, metadata=None):
         (metadata.get("risk") or {}).get("expectedShortfall10", 0)
     )
     predictions = []
+    selection_policy = metadata["selectionPolicy"]
+    allowed_sector_phases = set(
+        selection_policy["allowedSectorPhases"]
+    )
+    phase_indices = {
+        phase: FEATURE_NAMES.index(f"initial_sector_{phase}")
+        for phase in allowed_sector_phases
+    }
     for index, item in enumerate(items):
         if out_of_distribution[index]:
             predictions.append({
@@ -203,16 +228,42 @@ def predict_review_items(payload, *, models=None, metadata=None):
         lower = float(arrays["netRLowerBound"][index])
         p_fill = float(arrays["pFill"][index])
         p_win = float(arrays["pWinGivenFill"][index])
+        ranking_score = float(arrays["rankingScore"][index])
         if not all(math.isfinite(value) for value in (
             expected,
             lower,
             p_fill,
             p_win,
+            ranking_score,
             expected_shortfall,
         )):
             predictions.append(
                 not_ready_prediction(item, "REVIEW_MODEL_INVALID")
             )
+            continue
+        if (
+            p_fill < selection_policy["minimumPFill"]
+            or p_win
+            < selection_policy["minimumPWinGivenFill"]
+            or expected
+            < selection_policy["minimumExpectedNetR"]
+            or lower
+            < selection_policy["minimumNetRLowerBound"]
+            or (
+                allowed_sector_phases
+                and not any(
+                    matrix[index, phase_indices[phase]] >= 0.5
+                    for phase in allowed_sector_phases
+                )
+            )
+        ):
+            predictions.append({
+                **not_ready_prediction(
+                    item,
+                    "REVIEW_MODEL_BELOW_SELECTION_POLICY",
+                ),
+                "modelVersion": metadata["modelVersion"],
+            })
             continue
         expected_opportunity = p_fill * expected
         position = position_values(expected, lower, p_fill)
@@ -232,7 +283,7 @@ def predict_review_items(payload, *, models=None, metadata=None):
             "expectedOpportunityR": round(expected_opportunity, 6),
             "netRLowerBound": round(lower, 6),
             "expectedShortfall10": round(expected_shortfall, 6),
-            "rankingScore": None,
+            "rankingScore": round(ranking_score, 6),
             "calibration": {
                 "method": "trigger-review-seed-ensemble",
                 "sampleCount": int(

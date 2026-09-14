@@ -58,6 +58,7 @@ def request_item():
 
 
 def metadata(**overrides):
+    value_head = overrides.get("valueHead", "DECOMPOSED")
     missing_indices = [
         index
         for index, name in enumerate(FEATURE_NAMES)
@@ -67,6 +68,7 @@ def metadata(**overrides):
         "seed": 42,
         "activeFeatures": list(range(len(FEATURE_NAMES))),
         "activeFillFeatures": list(range(len(FEATURE_NAMES))),
+        "activeRankFeatures": list(range(len(FEATURE_NAMES))),
         "pFillCalibration": {
             "method": "isotonic",
             "x": [0.0, 0.5, 1.0],
@@ -91,7 +93,7 @@ def metadata(**overrides):
         "exitPolicyVersion": REVIEW_EXIT_POLICY_VERSION,
         "riskProfileVersion": REVIEW_RISK_PROFILE_VERSION,
         "modelVersion": "review-test-v1",
-        "valueHead": "DECOMPOSED",
+        "valueHead": value_head,
         "observationPolicy": {
             "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
             "durationMs": REVIEW_OBSERVATION_DURATION_MS,
@@ -99,6 +101,17 @@ def metadata(**overrides):
         },
         "ensembleSize": 2,
         "ensembleMembers": [member, {**member, "seed": 7}],
+        "ensembleQ10CalibrationOffset": 0.0,
+        "selectionPolicy": {
+            "schemaVersion": "review-selection-policy.v1",
+            "valueHead": value_head,
+            "rankingMode": "VALUE",
+            "minimumPFill": 0.0,
+            "minimumPWinGivenFill": 0.0,
+            "minimumExpectedNetR": -10.0,
+            "minimumNetRLowerBound": -10.0,
+            "allowedSectorPhases": [],
+        },
         "calibrationSampleCount": 200,
         "fillCalibrationSampleCount": 240,
         "featureSupport": {
@@ -131,6 +144,7 @@ def models():
         "lossPayoffR": FakeModel(-0.5),
         "directNetR": FakeModel(0.9),
         "netRLower10": FakeModel(0.1),
+        "opportunityRanker": FakeModel(0.0),
     }
     return {"ensemble": [member, member]}
 

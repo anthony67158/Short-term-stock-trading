@@ -134,6 +134,23 @@ def build_opportunity_review_dataset(outcomes):
             label_source,
             exit_contract,
         ))
+    conditional_by_event = {
+        item[0]: item
+        for item in conditional
+    }
+    opportunity = []
+    for event_index, event in enumerate(events):
+        filled = event[2] == 1
+        conditional_row = conditional_by_event.get(event_index)
+        if filled and conditional_row is None:
+            continue
+        opportunity.append((
+            event[0],
+            event[1],
+            float(conditional_row[3]) if filled else 0.0,
+            event[3],
+            conditional_row[5] if filled else event[4],
+        ))
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
         "event_ledger": event_ledger,
@@ -201,6 +218,50 @@ def build_opportunity_review_dataset(outcomes):
             [item[3] for item in conditional],
             dtype=np.float32,
         ),
+        "X_opportunity": np.asarray(
+            [item[1] for item in opportunity],
+            dtype=np.float32,
+        ).reshape((-1, len(FEATURE_NAMES))),
+        "dates_opportunity": np.asarray(
+            [str(item[0].get("tradeDate") or "") for item in opportunity],
+            dtype="<U10",
+        ),
+        "codes_opportunity": np.asarray(
+            [str(item[0].get("code") or "") for item in opportunity],
+            dtype="<U6",
+        ),
+        "event_group_ids_opportunity": np.asarray(
+            [_event_group_id(item[0]) for item in opportunity],
+            dtype="<U200",
+        ),
+        "decision_ids_opportunity": np.asarray(
+            [str(item[0].get("decisionId") or "") for item in opportunity],
+            dtype="<U220",
+        ),
+        "label_start_ms_opportunity": np.asarray(
+            [item[3] for item in opportunity],
+            dtype=np.int64,
+        ),
+        "label_end_ms_opportunity": np.asarray(
+            [item[4] for item in opportunity],
+            dtype=np.int64,
+        ),
+        "y_opportunity_r": np.asarray(
+            [item[2] for item in opportunity],
+            dtype=np.float32,
+        ),
+        "sector_phases_opportunity": np.asarray(
+            [
+                str(
+                    (item[0].get("context") or {}).get(
+                        "sectorPhase"
+                    )
+                    or "UNKNOWN"
+                ).upper()
+                for item in opportunity
+            ],
+            dtype="<U20",
+        ),
         "label_sources": np.asarray(
             [item[6] for item in conditional],
             dtype="<U40",
@@ -228,6 +289,7 @@ def build_opportunity_review_dataset(outcomes):
             },
             "events": len(events),
             "samples": len(conditional),
+            "opportunity_samples": len(opportunity),
             "dates": len({
                 str(item[1].get("tradeDate") or "")
                 for item in conditional

@@ -109,6 +109,46 @@ def _valid_confirmation_audit(value):
     )
 
 
+def _valid_selection_policy(value, value_head):
+    allowed_phases = value.get("allowedSectorPhases")
+    if (
+        not isinstance(value, dict)
+        or value.get("schemaVersion")
+        != "review-selection-policy.v1"
+        or value.get("valueHead") != value_head
+        or value.get("rankingMode") not in {"VALUE", "RANKER"}
+        or not isinstance(allowed_phases, list)
+        or len(allowed_phases) != len(set(allowed_phases))
+        or any(
+            phase not in {
+                "ACCUMULATION",
+                "STARTUP",
+                "ACCELERATION",
+                "DIVERGENCE",
+                "RETREAT",
+            }
+            for phase in allowed_phases
+        )
+    ):
+        return False
+    for name in (
+        "minimumPFill",
+        "minimumPWinGivenFill",
+        "minimumExpectedNetR",
+        "minimumNetRLowerBound",
+    ):
+        number = value.get(name)
+        if (
+            not isinstance(number, (int, float))
+            or not math.isfinite(number)
+        ):
+            return False
+    return (
+        0 <= value["minimumPFill"] <= 1
+        and 0 <= value["minimumPWinGivenFill"] <= 1
+    )
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -145,6 +185,17 @@ def validate_review_metadata(metadata, model_version=None):
             int,
         )
         or metadata["fillCalibrationSampleCount"] <= 0
+        or not isinstance(
+            metadata.get("ensembleQ10CalibrationOffset"),
+            (int, float),
+        )
+        or not math.isfinite(
+            metadata["ensembleQ10CalibrationOffset"]
+        )
+        or not _valid_selection_policy(
+            metadata.get("selectionPolicy"),
+            metadata.get("valueHead"),
+        )
         or not _valid_feature_support(metadata.get("featureSupport"))
         or not _valid_confirmation_audit(
             metadata.get("confirmationAudit")
@@ -167,6 +218,7 @@ def validate_review_metadata(metadata, model_version=None):
             not isinstance(member, dict)
             or not isinstance(member.get("activeFeatures"), list)
             or not isinstance(member.get("activeFillFeatures"), list)
+            or not isinstance(member.get("activeRankFeatures"), list)
             or not isinstance(member.get("pFillCalibration"), dict)
             or not isinstance(member.get("pWinCalibration"), dict)
             or not isinstance(member.get("q10CalibrationOffset"), (int, float))
@@ -177,6 +229,7 @@ def validate_review_metadata(metadata, model_version=None):
     for member in members:
         active = member["activeFeatures"]
         active_fill = member["activeFillFeatures"]
+        active_rank = member["activeRankFeatures"]
         fill_calibration = member["pFillCalibration"]
         calibration = member["pWinCalibration"]
         if (
@@ -195,6 +248,14 @@ def validate_review_metadata(metadata, model_version=None):
                 or index < 0
                 or index >= len(FEATURE_NAMES)
                 for index in active_fill
+            )
+            or not active_rank
+            or len(active_rank) != len(set(active_rank))
+            or any(
+                not isinstance(index, int)
+                or index < 0
+                or index >= len(FEATURE_NAMES)
+                for index in active_rank
             )
             or fill_calibration.get("method")
             not in {"sigmoid", "isotonic"}
@@ -278,6 +339,7 @@ def load_review_release(artifact_path, metadata_path):
         "lossPayoffR",
         "directNetR",
         "netRLower10",
+        "opportunityRanker",
     }
     loaded = []
     for index, member in enumerate(members):

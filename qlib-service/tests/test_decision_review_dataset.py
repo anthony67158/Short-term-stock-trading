@@ -204,6 +204,14 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
         self.assertEqual(dataset["y_fill"].tolist(), [1, 0])
         self.assertEqual(dataset["conditional_indices"].tolist(), [0])
         self.assertEqual(
+            dataset["X_opportunity"].shape,
+            (2, len(FEATURE_NAMES)),
+        )
+        self.assertTrue(np.allclose(
+            dataset["y_opportunity_r"],
+            [1.2, 0.0],
+        ))
+        self.assertEqual(
             dataset["event_group_ids_all"].tolist(),
             ["600001:decision-1", "600002:decision-1"],
         )

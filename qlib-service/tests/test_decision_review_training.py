@@ -42,14 +42,22 @@ class DecisionReviewTrainingTest(unittest.TestCase):
         return {
             "X": matrix,
             "X_all": matrix.copy(),
+            "X_opportunity": matrix.copy(),
             "dates_all": dates.copy(),
+            "dates_opportunity": dates.copy(),
             "codes_all": np.asarray(["600001"] * len(dates)),
+            "codes_opportunity": np.asarray(
+                ["600001"] * len(dates)
+            ),
             "dates": dates,
             "codes": np.asarray(["600001"] * len(dates)),
             "event_group_ids": groups,
             "event_group_ids_all": groups.copy(),
+            "event_group_ids_opportunity": groups.copy(),
             "label_start_ms_all": starts.copy(),
             "label_end_ms_all": starts + 50,
+            "label_start_ms_opportunity": starts.copy(),
+            "label_end_ms_opportunity": starts + 100,
             "label_start_ms": starts,
             "label_end_ms": starts + 100,
             "y_fill": np.arange(len(dates)) % 2,
@@ -58,6 +66,14 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                 np.arange(len(dates)) % 2,
                 1.0,
                 -1.0,
+            ),
+            "y_opportunity_r": np.where(
+                np.arange(len(dates)) % 2,
+                1.0,
+                0.0,
+            ),
+            "sector_phases_opportunity": np.asarray(
+                ["ACCUMULATION"] * len(dates)
             ),
         }
 
@@ -70,6 +86,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             _calibration,
             _fill_train,
             _fill_calibration,
+            _opportunity_train,
             seed,
             _estimators,
             _threads,
@@ -79,6 +96,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                     "seed": seed,
                     "activeFeatures": [0],
                     "activeFillFeatures": [0],
+                    "activeRankFeatures": [0],
                     "pFillCalibration": {"method": "sigmoid"},
                     "pWinCalibration": {"method": "sigmoid"},
                     "q10CalibrationOffset": 0.0,
@@ -95,6 +113,10 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                 "directExpectedNetR": np.full(len(matrix), 0.1),
                 "netRLower10": np.full(len(matrix), -1.0),
                 "netRLowerBound": np.full(len(matrix), -1.0),
+                "rankingScoreRaw": np.arange(
+                    len(matrix),
+                    dtype=np.float64,
+                ),
             }
 
         def evaluation(_dataset, _development, indices, predictions):
@@ -124,6 +146,26 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                 evaluate = stack.enter_context(patch(
                     "decision_engine.training.review_ensemble._evaluate",
                     side_effect=evaluation,
+                ))
+                stack.enter_context(patch(
+                    "decision_engine.training.review_ensemble."
+                    "_select_opportunity_policy",
+                    return_value=({
+                        "policy": {
+                            "schemaVersion":
+                                "review-selection-policy.v1",
+                            "valueHead": "DIRECT",
+                            "rankingMode": "VALUE",
+                            "minimumPFill": 0.0,
+                            "minimumPWinGivenFill": 0.0,
+                            "minimumExpectedNetR": -1.0,
+                            "minimumNetRLowerBound": -2.0,
+                            "allowedSectorPhases": [],
+                        },
+                        "metrics": {
+                            "netRLowerBound95": 0.1,
+                        },
+                    }, []),
                 ))
                 stack.enter_context(patch(
                     "decision_engine.training.review_ensemble."
@@ -180,6 +222,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                 calibration,
                 development,
                 calibration,
+                development,
                 42,
                 10,
                 1,

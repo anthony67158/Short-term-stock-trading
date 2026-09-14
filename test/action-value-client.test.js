@@ -7,8 +7,8 @@ import {
   fetchDecisionScores,
 } from '../api/_action_value_client.js'
 import {
-  OPPORTUNITY_REVIEW_V2_FEATURE_NAMES,
-  OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
+  OPPORTUNITY_REVIEW_V3_FEATURE_NAMES,
+  OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION,
 } from '../shared/opportunityReviewFeatures.js'
 import {
   OPPORTUNITY_SCORE_FEATURE_NAMES,
@@ -159,14 +159,14 @@ test('超时或非法响应只降级影子评分而不抛出', async () => {
 test('触价后动作价值使用独立复核端点和标准评分合同', async () => {
   let request = null
   const reviewInput = {
-    schemaVersion: OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
+    schemaVersion: OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION,
     asOf: 1_788_320_000_000,
     code: '600001',
     formulaId: 'TRIGGER_REVIEW',
     priceContractHash:
       'f9ad80382299d84f729524a924796ee3ac7a18081f1f0e1618db7affe670fab9',
     factors: Object.fromEntries(
-      OPPORTUNITY_REVIEW_V2_FEATURE_NAMES.map((name) => [name, 0]),
+      OPPORTUNITY_REVIEW_V3_FEATURE_NAMES.map((name) => [name, 0]),
     ),
   }
   const scores = await fetchDecisionReviewScores([reviewInput], {
@@ -228,13 +228,13 @@ test('触价后动作价值使用独立复核端点和标准评分合同', async
 
 test('触价复核响应价格合同哈希不一致时失败关闭', async () => {
   const reviewInput = {
-    schemaVersion: OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
+    schemaVersion: OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION,
     asOf: 1_788_320_000_000,
     code: '600001',
     formulaId: 'TRIGGER_REVIEW',
     priceContractHash: 'a'.repeat(64),
     factors: Object.fromEntries(
-      OPPORTUNITY_REVIEW_V2_FEATURE_NAMES.map((name) => [name, 0]),
+      OPPORTUNITY_REVIEW_V3_FEATURE_NAMES.map((name) => [name, 0]),
     ),
   }
   const scores = await fetchDecisionReviewScores([reviewInput], {
