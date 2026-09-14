@@ -102,8 +102,11 @@ def _load_daily(path):
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as handle:
         source = json.load(handle)
+    if not isinstance(source, list):
+        raise ValueError("Alpha158 daily rows must be a list")
     rows = []
-    for value in source:
+    for index, value in enumerate(source):
+        source[index] = None
         code = str(value.get("code") or "")
         date = str(value.get("date") or "").replace("-", "")
         if not _main_board(code) or len(date) != 8:
@@ -129,6 +132,7 @@ def _load_daily(path):
             ),
             "isSt": bool(value.get("isSt") or value.get("is_st")),
         })
+    del source
     by_code = defaultdict(list)
     for row in rows:
         by_code[row["code"]].append(row)
