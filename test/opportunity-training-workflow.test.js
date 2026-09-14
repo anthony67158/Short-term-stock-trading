@@ -52,6 +52,38 @@ test('没有通过选择与整体兼容性验证时不得覆盖现役决策模�
   assert.match(exporter, /opportunity-score-feature\.v5/)
 })
 
+test('复核模型每日训练只允许主板挑战者胜出现役版本后发布', () => {
+  const downloadAt = workflow.indexOf('download_review_release.py')
+  const trainAt = workflow.indexOf(
+    'decision_engine.training.review_ensemble',
+  )
+  const selectAt = workflow.indexOf(
+    'decision_engine.training.review_release',
+  )
+  const publishAt = workflow.indexOf('upload_review_model.py')
+  const publishStep = workflow.match(
+    /- name: Publish trigger-review ensemble atomically([\s\S]*?)(?=\n      - name:)/,
+  )?.[1] || ''
+
+  assert.ok(downloadAt >= 0)
+  assert.ok(trainAt > downloadAt)
+  assert.ok(selectAt > trainAt)
+  assert.ok(publishAt > selectAt)
+  assert.match(
+    workflow,
+    /decision\.get\("action"\) == "PUBLISH"/,
+  )
+  assert.match(
+    publishStep,
+    /if: steps\.review-selection\.outputs\.publish == 'true'/,
+  )
+  assert.match(
+    publishStep,
+    /--release-decision opportunity-model\/review-release-decision\.json/,
+  )
+  assert.match(workflow, /tests\/test_review_release\.py/)
+})
+
 test('每日重训把新成熟结果压实进版本化历史基线', () => {
   const collectAt = workflow.indexOf('python collect_opportunity_outcomes.py')
   const compactAt = workflow.indexOf('python publish_opportunity_history.py')

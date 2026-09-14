@@ -133,6 +133,28 @@ def metadata(*, eligible=True):
     }
 
 
+def release_decision(model_version):
+    return {
+        "schemaVersion": "review-champion-challenger.v1",
+        "action": "PUBLISH",
+        "eligible": True,
+        "championVersion": "decision-review.champion",
+        "challengerVersion": model_version,
+        "selectedVersion": model_version,
+        "freshHoldout": {
+            "dates": 10,
+            "conditionalSamples": 200,
+            "fillSamples": 500,
+            "opportunitySamples": 500,
+        },
+        "compatibility": {
+            "passed": True,
+            "blockers": [],
+            "improvements": ["净R下界改善"],
+        },
+    }
+
+
 class ReviewModelUploadTests(unittest.TestCase):
     def _write_release(self, directory, *, eligible=True):
         for slot, filename in REVIEW_ARTIFACT_FILENAMES.items():
@@ -155,6 +177,9 @@ class ReviewModelUploadTests(unittest.TestCase):
             manifest = publish_review_release(
                 bucket,
                 directory,
+                release_decision=release_decision(
+                    metadata()["modelVersion"]
+                ),
                 activated_at=123,
             )
 
@@ -164,6 +189,11 @@ class ReviewModelUploadTests(unittest.TestCase):
         )
         self.assertTrue(manifest["productionEligible"])
         self.assertTrue(manifest["baselineSelected"])
+        self.assertIn("promotionDecision", manifest)
+        self.assertIn(
+            manifest["promotionDecision"]["key"],
+            bucket.objects,
+        )
         self.assertEqual(
             manifest["priceContractSchemaVersion"],
             REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
@@ -191,6 +221,9 @@ class ReviewModelUploadTests(unittest.TestCase):
             manifest = publish_review_release(
                 bucket,
                 directory,
+                release_decision=release_decision(
+                    frozen["modelVersion"]
+                ),
                 activated_at=123,
             )
 
@@ -211,7 +244,13 @@ class ReviewModelUploadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self._write_release(directory, eligible=False)
             with self.assertRaisesRegex(ValueError, "未通过生产门禁"):
-                publish_review_release(bucket, directory)
+                publish_review_release(
+                    bucket,
+                    directory,
+                    release_decision=release_decision(
+                        metadata()["modelVersion"]
+                    ),
+                )
 
         self.assertEqual(len(bucket.order), 1)
         self.assertIn("confirmation-audits", bucket.order[0])
@@ -235,7 +274,13 @@ class ReviewModelUploadTests(unittest.TestCase):
             with open(metadata_path, "w", encoding="utf-8") as handle:
                 json.dump(value, handle)
             with self.assertRaisesRegex(ValueError, "元数据无效"):
-                publish_review_release(bucket, directory)
+                publish_review_release(
+                    bucket,
+                    directory,
+                    release_decision=release_decision(
+                        value["modelVersion"]
+                    ),
+                )
 
         self.assertEqual(bucket.order, [])
 
@@ -244,7 +289,13 @@ class ReviewModelUploadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self._write_release(directory, eligible=False)
             with self.assertRaisesRegex(ValueError, "未通过生产门禁"):
-                publish_review_release(bucket, directory)
+                publish_review_release(
+                    bucket,
+                    directory,
+                    release_decision=release_decision(
+                        metadata()["modelVersion"]
+                    ),
+                )
 
             metadata_path = os.path.join(
                 directory,
@@ -259,7 +310,13 @@ class ReviewModelUploadTests(unittest.TestCase):
                 json.dump(value, handle)
 
             with self.assertRaisesRegex(ValueError, "已用于另一候选"):
-                publish_review_release(bucket, directory)
+                publish_review_release(
+                    bucket,
+                    directory,
+                    release_decision=release_decision(
+                        value["modelVersion"]
+                    ),
+                )
 
         self.assertNotIn(
             "opportunitymodel/review/manifest.json",
@@ -273,6 +330,9 @@ class ReviewModelUploadTests(unittest.TestCase):
             manifest = publish_review_release(
                 bucket,
                 source,
+                release_decision=release_decision(
+                    metadata()["modelVersion"]
+                ),
                 prefix="custom/review/",
                 activated_at=123,
             )
@@ -297,6 +357,9 @@ class ReviewModelUploadTests(unittest.TestCase):
             manifest = publish_review_release(
                 bucket,
                 source,
+                release_decision=release_decision(
+                    metadata()["modelVersion"]
+                ),
                 activated_at=123,
             )
             artifact_key = manifest["files"]["ensemble"]["key"]
@@ -311,6 +374,23 @@ class ReviewModelUploadTests(unittest.TestCase):
                     destination,
                     REVIEW_ARTIFACT_FILENAMES["ensemble"],
                 )))
+
+    def test_rejects_publish_without_matching_champion_decision(self):
+        bucket = FakeBucket()
+        with tempfile.TemporaryDirectory() as directory:
+            self._write_release(directory)
+            invalid = release_decision("decision-review.other")
+            with self.assertRaisesRegex(
+                ValueError,
+                "缺少有效冠军挑战者发布裁决",
+            ):
+                publish_review_release(
+                    bucket,
+                    directory,
+                    release_decision=invalid,
+                )
+
+        self.assertEqual(bucket.order, [])
 
 
 if __name__ == "__main__":

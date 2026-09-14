@@ -66,6 +66,7 @@ jobs:
             tests/test_decision_contract.py \
             tests/test_decision_review_dataset.py \
             tests/test_decision_review_inference.py \
+            tests/test_review_release.py \
             tests/test_review_model_upload.py \
             tests/test_decision_dataset.py \
             tests/test_decision_evaluation.py \
@@ -338,6 +339,12 @@ jobs:
             --output opportunity-model/champion \
             --prefix opportunitymodel/
 
+      - name: Download current production review model as champion
+        run: |
+          python download_review_release.py \
+            --output opportunity-model/review-champion \
+            --prefix opportunitymodel/review/
+
       - name: Collect mature opportunity outcomes
         run: |
           python collect_opportunity_outcomes.py \
@@ -387,7 +394,6 @@ jobs:
           done
 
       - name: Train trigger-review action-value ensemble
-        id: review-training
         run: |
           python -m decision_engine.training.review_ensemble \
             --input opportunity-outcomes.json \
@@ -395,16 +401,26 @@ jobs:
             --seeds 42,7,2026 \
             --estimators 180 \
             --threads 4
+
+      - name: Compare trigger-review challenger with production
+        id: review-selection
+        run: |
+          python -m decision_engine.training.review_release \
+            --dataset opportunity-outcomes.json \
+            --champion opportunity-model/review-champion \
+            --challenger opportunity-model/review-release \
+            --decision-output opportunity-model/review-release-decision.json
           publish=$(python - <<'PY'
           import json
           with open(
-              "opportunity-model/review-release/review_meta.json",
+              "opportunity-model/review-release-decision.json",
               encoding="utf-8",
           ) as handle:
-              metadata = json.load(handle)
+              decision = json.load(handle)
           print(
               "true"
-              if metadata.get("productionEligible") is True
+              if decision.get("action") == "PUBLISH"
+              and decision.get("eligible") is True
               else "false"
           )
           PY
@@ -420,11 +436,12 @@ jobs:
 
       - name: Publish trigger-review ensemble atomically
         id: review-production
-        if: steps.review-training.outputs.publish == 'true'
+        if: steps.review-selection.outputs.publish == 'true'
         run: |
           python upload_review_model.py \
             --directory opportunity-model/review-release \
-            --prefix opportunitymodel/review/
+            --prefix opportunitymodel/review/ \
+            --release-decision opportunity-model/review-release-decision.json
           echo "published=true" >> "$GITHUB_OUTPUT"
 
       - name: Train and evaluate opportunity challenger
@@ -519,6 +536,7 @@ jobs:
             qlib-service/opportunity-model/review-seed-7/report.json
             qlib-service/opportunity-model/review-seed-2026/report.json
             qlib-service/opportunity-model/review-release/
+            qlib-service/opportunity-model/review-release-decision.json
             qlib-service/opportunity-outcomes.json
           if-no-files-found: warn
 

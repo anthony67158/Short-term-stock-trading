@@ -30,6 +30,41 @@ def _sha256(path):
     return digest.hexdigest()
 
 
+def validate_release_decision(value, run_id):
+    compatibility = (
+        value.get("compatibility")
+        if isinstance(value, dict)
+        else None
+    )
+    evidence = (
+        value.get("freshHoldout")
+        if isinstance(value, dict)
+        else None
+    )
+    if (
+        not isinstance(value, dict)
+        or value.get("schemaVersion")
+        != "review-champion-challenger.v1"
+        or value.get("action") != "PUBLISH"
+        or value.get("eligible") is not True
+        or not str(value.get("championVersion") or "")
+        or value.get("championVersion") == run_id
+        or value.get("challengerVersion") != run_id
+        or value.get("selectedVersion") != run_id
+        or not isinstance(compatibility, dict)
+        or compatibility.get("passed") is not True
+        or compatibility.get("blockers") != []
+        or not compatibility.get("improvements")
+        or not isinstance(evidence, dict)
+        or int(evidence.get("dates") or 0) < 10
+        or int(evidence.get("conditionalSamples") or 0) < 200
+        or int(evidence.get("fillSamples") or 0) < 500
+        or int(evidence.get("opportunitySamples") or 0) < 500
+    ):
+        raise ValueError("触价复核模型缺少有效冠军挑战者发布裁决")
+    return value
+
+
 def record_confirmation_attempt(
     target_bucket,
     metadata,
@@ -85,6 +120,7 @@ def publish_review_release(
     target_bucket,
     directory,
     *,
+    release_decision,
     prefix="opportunitymodel/review/",
     activated_at=None,
 ):
@@ -101,6 +137,7 @@ def publish_review_release(
         or ".." in run_id
     ):
         raise ValueError("触价复核模型版本无效")
+    decision = validate_release_decision(release_decision, run_id)
     normalized_prefix = str(
         prefix or "opportunitymodel/review/"
     ).strip("/")
@@ -130,6 +167,19 @@ def publish_review_release(
             "sha256": _sha256(path),
             "size": os.path.getsize(path),
         }
+    decision_payload = json.dumps(
+        decision,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    decision_key = release_prefix + "release_decision.json"
+    target_bucket.put_object(
+        decision_key,
+        decision_payload,
+        headers={"x-oss-forbid-overwrite": "true"},
+    )
     manifest = {
         "schemaVersion": REVIEW_MANIFEST_SCHEMA_VERSION,
         "runId": run_id,
@@ -145,6 +195,10 @@ def publish_review_release(
         "productionEligible": True,
         "baselineSelected": True,
         "confirmationAudit": confirmation_audit,
+        "promotionDecision": {
+            "key": decision_key,
+            "sha256": hashlib.sha256(decision_payload).hexdigest(),
+        },
         "files": files,
     }
     target_bucket.put_object(
@@ -172,6 +226,7 @@ def main():
         ),
     )
     parser.add_argument("--record-only", action="store_true")
+    parser.add_argument("--release-decision")
     args = parser.parse_args()
     if args.record_only:
         source = os.path.abspath(args.directory)
@@ -193,9 +248,14 @@ def main():
             "confirmationDataHash": audit["confirmationDataHash"],
         }, ensure_ascii=False))
         return
+    if not args.release_decision:
+        raise ValueError("发布触价复核模型必须提供冠军挑战者裁决")
+    with open(args.release_decision, encoding="utf-8") as handle:
+        release_decision = json.load(handle)
     manifest = publish_review_release(
         _bucket(),
         args.directory,
+        release_decision=release_decision,
         prefix=args.prefix,
     )
     print(json.dumps({
