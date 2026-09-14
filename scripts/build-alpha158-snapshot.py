@@ -32,6 +32,7 @@ if str(SERVICE_ROOT) not in sys.path:
 from decision_engine.training.alpha158_mainboard import (  # noqa: E402
     _fit_model,
     _folds,
+    _spearman,
     build_panel,
     load_panel,
     save_panel,
@@ -70,6 +71,35 @@ def _momentum_by_code(percentiles, codes, dates, *, lag=5):
     return out
 
 
+def _rolling_rank_ic(scores, labels, dates, *, window):
+    """每个交易日的滚动 RankIC：过去 window 个交易日的日度 RankIC 均值。
+
+    先算每个交易日截面的日度 RankIC(预测 vs 真实标签)，再对交易日序列做
+    尾部 window 均值，映射回每个样本所在日。纯函数、确定性；早期不足 window
+    时用已有日均值，全缺时为 0。
+    """
+    unique_dates = sorted(set(dates.tolist()))
+    daily_ic = {}
+    for d in unique_dates:
+        idx = np.flatnonzero(dates == d)
+        if len(idx) < 5:
+            daily_ic[d] = np.nan
+            continue
+        left, right = scores[idx], labels[idx]
+        if left.std() > 1e-12 and right.std() > 1e-12:
+            daily_ic[d] = _spearman(left, right)
+        else:
+            daily_ic[d] = np.nan
+    # 滚动均值（按交易日序）。
+    rolled = {}
+    seq = [daily_ic[d] for d in unique_dates]
+    for pos, d in enumerate(unique_dates):
+        lo = max(0, pos - window + 1)
+        vals = [v for v in seq[lo: pos + 1] if v == v]  # 过滤 nan
+        rolled[d] = float(np.mean(vals)) if vals else 0.0
+    return np.array([rolled[d] for d in dates], dtype=np.float64)
+
+
 def build_snapshot(panel, *, threads=4):
     fold_reports = []
     rows = []
@@ -85,19 +115,21 @@ def build_snapshot(panel, *, threads=4):
         )
         v_dates = panel["dates"][validation].astype(str)
         v_codes = panel["codes"][validation].astype(str)
+        v_labels = np.asarray(panel["y_raw"][validation], dtype=np.float64)
         pct = _percentile_by_date(scores, v_dates)
         centered = np.clip((pct - 0.5) * 2, -1, 1)
         momentum = _momentum_by_code(pct, v_codes, v_dates, lag=5)
+        ic20 = _rolling_rank_ic(scores, v_labels, v_dates, window=20)
+        ic60 = _rolling_rank_ic(scores, v_labels, v_dates, window=60)
         meta = fold["metadata"]
-        rank_ic = float(meta.get("RankIC") or 0.0)
         for i in range(len(validation)):
             rows.append({
                 "date": v_dates[i],
                 "code": v_codes[i],
                 "percentile": round(float(pct[i]), 6),
                 "centeredZ": round(float(centered[i]), 6),
-                "rankIc20": round(rank_ic, 6),
-                "rankIc60": round(rank_ic, 6),
+                "rankIc20": round(float(np.clip(ic20[i], -1, 1)), 6),
+                "rankIc60": round(float(np.clip(ic60[i], -1, 1)), 6),
                 "scoreMomentum5": round(float(momentum[i]), 6),
                 "fold": index,
             })

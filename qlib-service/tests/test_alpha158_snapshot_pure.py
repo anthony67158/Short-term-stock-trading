@@ -59,6 +59,29 @@ class AlphaSnapshotPureFnTest(unittest.TestCase):
         self.assertAlmostEqual(mom[2], 0.1)
         self.assertAlmostEqual(mom[3], -0.1)
 
+    def test_rolling_rank_ic_perfect_alignment_is_one(self):
+        # 每日预测与标签完全同序 → 日度RankIC=1，滚动均值=1
+        dates = np.array(sum([[f"d{d}"] * 6 for d in range(5)], []))
+        scores = np.tile(np.arange(6, dtype=float), 5)
+        labels = np.tile(np.arange(6, dtype=float), 5)  # 同序
+        ic = snap._rolling_rank_ic(scores, labels, dates, window=3)
+        self.assertTrue(np.allclose(ic, 1.0))
+
+    def test_rolling_rank_ic_reverse_is_minus_one(self):
+        dates = np.array(sum([[f"d{d}"] * 6 for d in range(3)], []))
+        scores = np.tile(np.arange(6, dtype=float), 3)
+        labels = np.tile(np.arange(6, dtype=float)[::-1], 3)  # 反序
+        ic = snap._rolling_rank_ic(scores, labels, dates, window=2)
+        self.assertTrue(np.allclose(ic, -1.0))
+
+    def test_rolling_rank_ic_small_cross_section_is_zero(self):
+        # 每日样本<5 → 日度IC为nan → 全缺回退0
+        dates = np.array(["d0", "d0", "d1", "d1"])
+        scores = np.array([1.0, 2.0, 3.0, 4.0])
+        labels = np.array([1.0, 2.0, 3.0, 4.0])
+        ic = snap._rolling_rank_ic(scores, labels, dates, window=5)
+        self.assertTrue(np.allclose(ic, 0.0))
+
 
 if __name__ == "__main__":
     unittest.main()
