@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-7 已完成）。
+状态：IN PROGRESS（Tasks 1-8 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -133,14 +133,14 @@
 
 **Estimated scope:** M
 
-### Task 8：增加点时不可变回归
+### Task 8：增加点时不可变回归（已完成）
 
 **Description:** 验证增加未来行情、财报修正或后续成交不会改变历史特征、标签和分区。
 
 **Acceptance criteria:**
-- [ ] 前缀回放与完整回放的历史段逐字一致。
-- [ ] 后续财报修正不回填至历史特征。
-- [ ] 标签成熟前不进入任何监督目标。
+- [x] 前缀回放与完整回放的历史段逐字一致。
+- [x] 后续财报修正不回填至历史特征。
+- [x] 标签成熟前不进入任何监督目标。
 
 **Verification:** `node --test test/opportunity-history-backfill.test.js test/point-in-time-invariance.test.js`
 

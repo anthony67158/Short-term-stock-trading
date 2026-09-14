@@ -55,7 +55,16 @@ function barTimestamp(bar, date) {
   return null
 }
 
-function normalizeBars(values, event) {
+function beijingDateKey(timestamp) {
+  const value = finite(timestamp)
+  if (!(value > 0)) return null
+  return new Date(value + 8 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10)
+}
+
+function normalizeBars(values, event, evaluatedAt) {
+  const evaluationDate = beijingDateKey(evaluatedAt)
   const rows = (Array.isArray(values) ? values : [])
     .map((bar, index) => {
       const date = dateKey(
@@ -81,6 +90,13 @@ function normalizeBars(values, event) {
       && bar.close > 0
       && bar.high >= bar.low
     ))
+    .filter((bar) => {
+      if (bar.at != null) return bar.at <= evaluatedAt
+      if (!evaluationDate || bar.date < evaluationDate) return true
+      if (bar.date > evaluationDate) return false
+      const closeAt = sessionBoundaryAt(bar.date, 15, 0)
+      return closeAt != null && evaluatedAt >= closeAt
+    })
     .sort((left, right) => (
       left.date.localeCompare(right.date)
       || (
@@ -368,7 +384,7 @@ export function resolveOpportunityOutcome({
     })
   }
 
-  const rows = normalizeBars(bars, event)
+  const rows = normalizeBars(bars, event, timestamp)
   const sessions = [...new Set(rows.map((bar) => bar.date))]
   base.observations.bars = rows.length
   base.observations.sessions = sessions.length

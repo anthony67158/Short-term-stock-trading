@@ -233,6 +233,30 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
         self.assertEqual(dataset["conditional_indices"].tolist(), [])
         self.assertEqual(dataset["y_net_r"].tolist(), [])
 
+    def test_pending_event_never_enters_a_supervised_target(self):
+        pending = {
+            "decisionId": "decision-pending:immediate",
+            "parentDecisionId": "decision-pending",
+            "maturity": "PENDING",
+            "fillStatus": "TRIGGERED_PENDING",
+            "tradeDate": "2026-09-01",
+            "code": "600002",
+            "reviewScoreInput": {
+                **review_input(),
+                "code": "600002",
+            },
+            "entry": None,
+            "exit": None,
+        }
+
+        dataset = build_opportunity_review_dataset([pending])
+
+        self.assertEqual(len(dataset["event_ledger"]), 1)
+        self.assertEqual(dataset["X_all"].shape[0], 0)
+        self.assertEqual(dataset["y_fill"].tolist(), [])
+        self.assertEqual(dataset["X"].shape[0], 0)
+        self.assertEqual(dataset["y_net_r"].tolist(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
