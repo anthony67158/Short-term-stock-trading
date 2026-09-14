@@ -53,6 +53,7 @@ test('无效价格、费用、手数或版本失败关闭', () => {
     { stopPrice: Number.NaN },
     { feeRateBps: -1 },
     { slippageBps: Infinity },
+    { stopPrice: 10.19 },
     { lotSize: 0 },
     { tPlusOne: 'true' },
     { exitPolicyVersion: '../bad' },

@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE_ROOT = ROOT / "qlib-service"
+CHINA_TIMEZONE = timezone(timedelta(hours=8))
 if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
@@ -41,6 +43,73 @@ def _sha256(path):
     return digest.hexdigest()
 
 
+def _compact_date(value):
+    digits = "".join(
+        character
+        for character in str(value or "")
+        if character.isdigit()
+    )
+    return digits[:8] if len(digits) >= 8 else ""
+
+
+def _event_end_date(outcome):
+    for value in (
+        (outcome.get("exit") or {}).get("tradeDate"),
+        (outcome.get("entry") or {}).get("tradeDate"),
+    ):
+        date = _compact_date(value)
+        if date:
+            return date
+    try:
+        timestamp = int(outcome.get("evaluatedAt") or 0) / 1000
+    except (TypeError, ValueError):
+        return ""
+    return (
+        datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        .astimezone(CHINA_TIMEZONE)
+        .strftime("%Y%m%d")
+        if timestamp > 0 else ""
+    )
+
+
+def _corporate_action_keys(daily_rows):
+    by_code = {}
+    for row in daily_rows:
+        code = str((row or {}).get("code") or "")
+        date = _compact_date((row or {}).get("date"))
+        try:
+            close = float((row or {}).get("close"))
+            pre_close = float((row or {}).get("preClose"))
+        except (TypeError, ValueError):
+            continue
+        if code and date and close > 0 and pre_close > 0:
+            by_code.setdefault(code, []).append((date, close, pre_close))
+    actions = {}
+    for code, rows in by_code.items():
+        ordered = sorted(rows)
+        for previous, current in zip(ordered, ordered[1:]):
+            if abs(current[2] - previous[1]) > 0.005:
+                actions.setdefault(code, set()).add(current[0])
+    return actions
+
+
+def _crosses_corporate_action(outcome, actions):
+    code = str(outcome.get("code") or "")
+    start = _compact_date(
+        outcome.get("signalTradeDate") or outcome.get("tradeDate"),
+    )
+    end = _event_end_date(outcome)
+    return bool(
+        code
+        and start
+        and end
+        and any(
+            start < date <= end
+            for date in actions.get(code, ())
+        )
+    )
+
+
 def build_dataset(input_root, output):
     root = Path(input_root).expanduser().resolve()
     plan_path = root / "plan.json"
@@ -48,14 +117,30 @@ def build_dataset(input_root, output):
         plan = json.load(handle)
     datasets = []
     seen_decisions = set()
+    corporate_action_excluded = 0
     for chunk in plan.get("chunks") or []:
         index = int(chunk["index"])
-        source = root / f"chunk-{index:02d}" / (
+        directory = root / f"chunk-{index:02d}"
+        source = directory / (
             "opportunity-outcomes-v4.json.gz"
         )
         if not source.is_file():
             raise FileNotFoundError(source)
         payload = _read_gzip(source)
+        daily_path = directory / "daily.json.gz"
+        if not daily_path.is_file():
+            raise FileNotFoundError(daily_path)
+        actions = _corporate_action_keys(_read_gzip(daily_path))
+        source_outcomes = payload.get("outcomes") or []
+        eligible_outcomes = [
+            outcome
+            for outcome in source_outcomes
+            if not _crosses_corporate_action(outcome, actions)
+        ]
+        corporate_action_excluded += (
+            len(source_outcomes) - len(eligible_outcomes)
+        )
+        payload = {"outcomes": eligible_outcomes}
         outcomes = normalize_review_history_outcomes(payload)
         del payload
         dataset = build_opportunity_review_dataset(
@@ -110,6 +195,7 @@ def build_dataset(input_root, output):
         "tradeDates": int(len(set(
             merged["dates_opportunity"].astype(str).tolist()
         ))),
+        "corporateActionExcluded": corporate_action_excluded,
         "alphaCoverage": round(float(np.mean(alpha_available)), 6),
         "stress10Coverage": round(float(np.mean(
             merged["stress10_available_opportunity"],

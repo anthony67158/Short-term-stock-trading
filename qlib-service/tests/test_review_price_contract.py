@@ -44,6 +44,7 @@ class ReviewPriceContractTest(unittest.TestCase):
             {"stopPrice": float("nan")},
             {"feeRateBps": -1},
             {"slippageBps": float("inf")},
+            {"stopPrice": 10.19},
             {"lotSize": 0},
             {"tPlusOne": "true"},
             {"exitPolicyVersion": "../bad"},
