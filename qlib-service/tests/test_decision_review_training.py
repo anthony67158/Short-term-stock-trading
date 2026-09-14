@@ -26,6 +26,7 @@ from decision_engine.training.review_ensemble import (  # noqa: E402
     _account_metrics,
     _fit_member,
     _resolve_feature_schema,
+    _select_opportunity_policy,
     train_review_ensemble,
 )
 
@@ -35,6 +36,47 @@ class DecisionReviewTrainingTest(unittest.TestCase):
         self.assertTrue(POLICY_MINIMUM_EXPECTED_R)
         self.assertGreaterEqual(min(POLICY_MINIMUM_EXPECTED_R), 0.0)
         self.assertGreaterEqual(MINIMUM_ANNUALIZED_TRADES, 80)
+
+    def test_policy_search_prefers_qualified_coverage_over_sparse_profit(self):
+        def metrics(_dataset, _holdout, _predictions, policy):
+            qualified = (
+                policy["rankingMode"] == "VALUE"
+                and policy["minimumExpectedNetR"] == 0.0
+                and policy["minimumNetRLowerBound"] == -1.0
+                and policy["minimumPFill"] == 0.0
+                and not policy["allowedSectorPhases"]
+            )
+            sparse = policy["minimumNetRLowerBound"] == 0.0
+            return {
+                "selected": 40 if qualified else (5 if sparse else 0),
+                "activeDays": 30 if qualified else (5 if sparse else 0),
+                "netRLowerBound95": -0.01 if qualified else 0.5,
+                "stress10NetRLowerBound95": -0.02 if qualified else 0.4,
+                "meanNetRAt5": 0.01 if qualified else 0.6,
+                "precisionAt5": 0.5,
+                "account": {
+                    "annualizedTrades": 100 if qualified else 20,
+                },
+            }
+
+        with patch(
+            "decision_engine.training.review_ensemble._policy_metrics",
+            side_effect=metrics,
+        ):
+            selected, _leaders = _select_opportunity_policy(
+                {},
+                np.asarray([], dtype=np.int64),
+                {"DECOMPOSED": []},
+            )
+
+        self.assertEqual(
+            selected["metrics"]["account"]["annualizedTrades"],
+            100,
+        )
+        self.assertEqual(
+            selected["policy"]["minimumNetRLowerBound"],
+            -1.0,
+        )
 
     def test_account_metrics_use_actual_daily_selection_count(self):
         dates = [f"2025-{index:03d}" for index in range(300)]

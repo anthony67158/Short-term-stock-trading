@@ -665,25 +665,30 @@ def _select_opportunity_policy(
                                     "policy": policy,
                                     "metrics": metrics,
                                 })
-    eligible = [
+    active = [
         value for value in candidates
         if (
             value["metrics"]["selected"] >= 5
             and value["metrics"]["activeDays"] >= 5
-            and (
-                value["metrics"]["account"]["annualizedTrades"]
-                >= MINIMUM_ANNUALIZED_TRADES
-            )
         )
     ]
-    pool = eligible or candidates
+    eligible = [
+        value for value in active
+        if (
+            value["metrics"]["account"]["annualizedTrades"]
+            >= MINIMUM_ANNUALIZED_TRADES
+        )
+    ]
+    pool = eligible or active or candidates
     def policy_score(value):
         policy = value["policy"]
         metrics = value["metrics"]
         return (
-            policy["minimumNetRLowerBound"],
             metrics["netRLowerBound95"],
+            metrics["stress10NetRLowerBound95"],
             metrics["meanNetRAt5"],
+            metrics["account"]["annualizedTrades"],
+            policy["minimumNetRLowerBound"],
             policy["rankingMode"] == "RANKER",
             metrics["precisionAt5"],
             metrics["selected"],
