@@ -64,6 +64,7 @@ def download_active_review_release(
             metadata = validate_review_metadata(
                 json.load(handle),
                 run_id,
+                feature_schema=manifest["featureSchemaVersion"],
             )
         for field in (
             "predictionContract",

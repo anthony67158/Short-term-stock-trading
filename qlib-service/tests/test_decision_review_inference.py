@@ -8,6 +8,10 @@ from decision_engine.heads.review_contract import (
     FEATURE_SCHEMA_VERSION,
     review_price_contract,
 )
+from decision_engine.heads.review_contract_v4 import (
+    FEATURE_NAMES_V4,
+    FEATURE_SCHEMA_VERSION_V4,
+)
 from decision_engine.review_inference import predict_review_items
 from decision_engine import review_registry
 from decision_engine.review_registry import REVIEW_MODEL_SCHEMA_VERSION
@@ -136,6 +140,48 @@ def metadata(**overrides):
     }
 
 
+def v4_request_item():
+    value = request_item()
+    value["schemaVersion"] = FEATURE_SCHEMA_VERSION_V4
+    value["factors"] = {
+        **value["factors"],
+        **{
+            name: 1.0 if name.endswith("Missing") else 0.0
+            for name in FEATURE_NAMES_V4[len(FEATURE_NAMES):]
+        },
+    }
+    return value
+
+
+def v4_metadata(**overrides):
+    value = metadata()
+    value["featureSchemaVersion"] = FEATURE_SCHEMA_VERSION_V4
+    value["featureNames"] = list(FEATURE_NAMES_V4)
+    missing_indices = [
+        index
+        for index, name in enumerate(FEATURE_NAMES_V4)
+        if name.endswith("Missing")
+    ]
+    value["featureSupport"] = {
+        **value["featureSupport"],
+        "lower": [0.0] * len(FEATURE_NAMES_V4),
+        "upper": [2.0] * len(FEATURE_NAMES_V4),
+        "missingFeatureIndices": missing_indices,
+        "missingPatterns": ["1" * len(missing_indices)],
+    }
+    value["ensembleMembers"] = [
+        {
+            **member,
+            "activeFeatures": list(range(len(FEATURE_NAMES_V4))),
+            "activeFillFeatures": list(range(len(FEATURE_NAMES_V4))),
+            "activeRankFeatures": list(range(len(FEATURE_NAMES_V4))),
+        }
+        for member in value["ensembleMembers"]
+    ]
+    value.update(overrides)
+    return value
+
+
 def models():
     member = {
         "pFill": FakeModel(0.0),
@@ -184,6 +230,36 @@ class ReviewInferenceTests(unittest.TestCase):
 
         self.assertEqual(result["state"], "NOT_READY")
         self.assertEqual(result["reason"], "REVIEW_MODEL_NOT_PROMOTED")
+
+    def test_v4_model_accepts_full_176_feature_request(self):
+        result = predict_review_items(
+            {"items": [v4_request_item()]},
+            models=models(),
+            metadata=v4_metadata(),
+        )[0]
+
+        self.assertEqual(result["state"], "READY")
+        self.assertEqual(result["usagePolicy"], "DIRECT")
+
+    def test_v4_model_accepts_v3_request_with_neutral_alpha_during_rollout(self):
+        result = predict_review_items(
+            {"items": [request_item()]},
+            models=models(),
+            metadata=v4_metadata(),
+        )[0]
+
+        self.assertEqual(result["state"], "READY")
+        self.assertEqual(result["usagePolicy"], "DIRECT")
+
+    def test_v3_model_accepts_v4_request_during_rollout(self):
+        result = predict_review_items(
+            {"items": [v4_request_item()]},
+            models=models(),
+            metadata=metadata(),
+        )[0]
+
+        self.assertEqual(result["state"], "READY")
+        self.assertEqual(result["usagePolicy"], "DIRECT")
 
     def test_frozen_direct_value_head_controls_confirmation_inference(self):
         result = predict_review_items(

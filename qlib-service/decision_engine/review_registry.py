@@ -34,8 +34,8 @@ REVIEW_RISK_PROFILE_VERSION = "account-risk-profiles.v1"
 REVIEW_OBSERVATION_POLICY_VERSION = "trigger-review-observation.v1"
 REVIEW_OBSERVATION_DURATION_MS = 10 * 60 * 1000
 REVIEW_ENTRY_TIMING = "NEXT_BAR_AFTER_OBSERVATION"
-# 生产线上只认 v3 特征合同；v4 仅在挑战者训练/发布裁决中显式选用，
-# 由 upload/download 的冠军挑战者门禁把关，绝不改动线上默认。
+# v3/v4 都必须按清单声明的合同严格加载；发布端仍由冠军挑战者门禁控制，
+# 不能因为本地文件合法就自动切换生产模型。
 REVIEW_FEATURE_SCHEMAS = {
     FEATURE_SCHEMA_VERSION: FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION_V4: FEATURE_NAMES_V4,
@@ -292,14 +292,18 @@ def validate_review_manifest(
     manifest,
     prefix=REVIEW_MODEL_PREFIX,
 ):
+    feature_schema = (
+        manifest.get("featureSchemaVersion")
+        if isinstance(manifest, dict)
+        else None
+    )
     if (
         not isinstance(manifest, dict)
         or manifest.get("schemaVersion")
         != REVIEW_MANIFEST_SCHEMA_VERSION
         or manifest.get("predictionContract")
         != REVIEW_PREDICTION_CONTRACT
-        or manifest.get("featureSchemaVersion")
-        != FEATURE_SCHEMA_VERSION
+        or feature_schema not in REVIEW_FEATURE_SCHEMAS
         or manifest.get("priceContractSchemaVersion")
         != REVIEW_PRICE_CONTRACT_SCHEMA_VERSION
         or manifest.get("labelContractVersion")
@@ -436,8 +440,13 @@ def _download_release():
         loaded = load_review_release(
             final_paths["ensemble"] + ".part",
             final_paths["meta"] + ".part",
+            feature_schema=manifest["featureSchemaVersion"],
         )
-        validate_review_metadata(loaded[1], run_id)
+        validate_review_metadata(
+            loaded[1],
+            run_id,
+            feature_schema=manifest["featureSchemaVersion"],
+        )
         for field in (
             "predictionContract",
             "featureSchemaVersion",

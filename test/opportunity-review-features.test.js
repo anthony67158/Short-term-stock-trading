@@ -6,12 +6,15 @@ import {
   buildOpportunityReviewFeatureInput,
   buildOpportunityReviewFeatureInputV2,
   buildOpportunityReviewFeatureInputV3,
+  buildOpportunityReviewFeatureInputV4,
   OPPORTUNITY_REVIEW_FEATURE_NAMES,
   OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION,
   OPPORTUNITY_REVIEW_V2_FEATURE_NAMES,
   OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
   OPPORTUNITY_REVIEW_V3_FEATURE_NAMES,
   OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION,
+  OPPORTUNITY_REVIEW_V4_FEATURE_NAMES,
+  OPPORTUNITY_REVIEW_V4_FEATURE_SCHEMA_VERSION,
 } from '../shared/opportunityReviewFeatures.js'
 import {
   OPPORTUNITY_SCORE_FEATURE_NAMES,
@@ -276,4 +279,65 @@ test('复核V3组合合同与JS清单一致', () => {
     ],
     OPPORTUNITY_REVIEW_V3_FEATURE_NAMES,
   )
+})
+
+test('复核V4追加Alpha连续特征且缺失时保持176维', () => {
+  const asOf = 1_788_320_060_000
+  const initialScoreInput = {
+    schemaVersion: OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
+    asOf: asOf - 60_000,
+    code: '600001',
+    formulaId: 'UNKNOWN',
+    factors: Object.fromEntries(
+      OPPORTUNITY_SCORE_FEATURE_NAMES.map((name) => [name, 0]),
+    ),
+  }
+  const base = {
+    code: '600001',
+    asOf,
+    triggerPrice: 10,
+    direction: 'BREAKOUT',
+    initialScoreInput,
+    priceContract: {
+      entryPrice: 10.2,
+      stopPrice: 9.8,
+      feeRateBps: 6.1,
+      slippageBps: 5,
+      lotSize: 100,
+      tPlusOne: true,
+    },
+    rows: [
+      { price: 10.1, high: 10.15, low: 10.02, volume: 100, vwap: 10.08 },
+      { price: 10.2, high: 10.25, low: 10.08, volume: 200, vwap: 10.12 },
+    ],
+  }
+  const available = buildOpportunityReviewFeatureInputV4({
+    ...base,
+    alphaExpectedDate: '2026-09-10',
+    alpha158Signal: {
+      state: 'ACTIVE',
+      asOfDate: '2026-09-10',
+      percentile: 0.8,
+      recentRankIc: 0.12,
+      overallRankIc: 0.08,
+      scoreMomentum5: 0.05,
+    },
+  })
+  const missing = buildOpportunityReviewFeatureInputV4(base)
+
+  assert.equal(
+    available.schemaVersion,
+    OPPORTUNITY_REVIEW_V4_FEATURE_SCHEMA_VERSION,
+  )
+  assert.equal(OPPORTUNITY_REVIEW_V4_FEATURE_NAMES.length, 176)
+  assert.deepEqual(
+    Object.keys(available.factors),
+    OPPORTUNITY_REVIEW_V4_FEATURE_NAMES,
+  )
+  assert.equal(available.factors.alpha_alphaScorePctRank, 0.8)
+  assert.equal(available.factors.alpha_alphaRankIc20, 0.12)
+  assert.equal(available.factors.alpha_alphaScoreZMissing, 0)
+  assert.equal(missing.factors.alpha_alphaScoreZ, 0)
+  assert.equal(missing.factors.alpha_alphaScoreZMissing, 1)
+  assert.equal(missing.factors.alpha_alphaRankIcMissing, 1)
 })
