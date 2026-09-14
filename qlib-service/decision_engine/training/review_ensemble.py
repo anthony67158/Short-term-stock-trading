@@ -16,6 +16,10 @@ from ..heads.review_contract import (
     FEATURE_SCHEMA_VERSION,
     REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
 )
+from ..heads.review_contract_v4 import (
+    FEATURE_NAMES_V4,
+    FEATURE_SCHEMA_VERSION_V4,
+)
 from ..review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
     REVIEW_ARTIFACT_SCHEMA_VERSION,
@@ -68,6 +72,24 @@ MISSING_FEATURE_INDICES = tuple(
     for index, name in enumerate(FEATURE_NAMES)
     if name.endswith("Missing")
 )
+# v3 生产默认；v4 仅在显式启用 Alpha158 连续特征的挑战者训练中选用。
+# 训练/发布默认保持 v3，绝不改动线上口径。
+REVIEW_FEATURE_SCHEMAS = {
+    "v3": (FEATURE_SCHEMA_VERSION, FEATURE_NAMES),
+    "v4": (FEATURE_SCHEMA_VERSION_V4, FEATURE_NAMES_V4),
+}
+
+
+def _resolve_feature_schema(feature_schema):
+    if feature_schema not in REVIEW_FEATURE_SCHEMAS:
+        raise ValueError("触价复核训练特征合同仅支持 v3 或 v4")
+    schema_version, feature_names = REVIEW_FEATURE_SCHEMAS[feature_schema]
+    missing_indices = tuple(
+        index
+        for index, name in enumerate(feature_names)
+        if name.endswith("Missing")
+    )
+    return schema_version, feature_names, missing_indices
 
 
 def _opportunity_rank_training_data(
@@ -102,16 +124,20 @@ def _catboost_payload(model):
             return json.load(handle)
 
 
-def _feature_support(matrix):
+def _feature_support(
+    matrix,
+    feature_names=FEATURE_NAMES,
+    missing_indices=MISSING_FEATURE_INDICES,
+):
     values = np.asarray(matrix, dtype=np.float64)
     if (
         values.ndim != 2
-        or values.shape[1] != len(FEATURE_NAMES)
+        or values.shape[1] != len(feature_names)
         or not len(values)
         or not np.isfinite(values).all()
     ):
         raise ValueError("触价复核特征支持样本无效")
-    missing = values[:, MISSING_FEATURE_INDICES]
+    missing = values[:, missing_indices]
     patterns = sorted({
         "".join("1" if value >= 0.5 else "0" for value in row)
         for row in missing
@@ -120,7 +146,7 @@ def _feature_support(matrix):
         "schemaVersion": "review-feature-support.v1",
         "lower": np.quantile(values, 0.005, axis=0).tolist(),
         "upper": np.quantile(values, 0.995, axis=0).tolist(),
-        "missingFeatureIndices": list(MISSING_FEATURE_INDICES),
+        "missingFeatureIndices": list(missing_indices),
         "missingPatterns": patterns,
         "maximumOutlierFraction": 0.2,
     }
@@ -638,8 +664,12 @@ def train_review_ensemble(
     seeds=DEFAULT_SEEDS,
     estimators=180,
     threads=4,
+    feature_schema="v3",
 ):
-    dataset = load_dataset(input_path)
+    schema_version, feature_names, missing_indices = _resolve_feature_schema(
+        feature_schema,
+    )
+    dataset = load_dataset(input_path, feature_schema=feature_schema)
     if (
         len(dataset["X"]) < 500
         or len(dataset["X_all"]) < 500
@@ -905,7 +935,7 @@ def train_review_ensemble(
     ))
     artifact = {
         "schemaVersion": REVIEW_ARTIFACT_SCHEMA_VERSION,
-        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+        "featureSchemaVersion": schema_version,
         "members": [{
             "seed": member["config"]["seed"],
             "models": {
@@ -916,8 +946,8 @@ def train_review_ensemble(
     }
     metadata = {
         "schemaVersion": REVIEW_MODEL_SCHEMA_VERSION,
-        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
-        "featureNames": list(FEATURE_NAMES),
+        "featureSchemaVersion": schema_version,
+        "featureNames": list(feature_names),
         "predictionContract": REVIEW_PREDICTION_CONTRACT,
         "priceContractSchemaVersion":
             REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
@@ -960,7 +990,9 @@ def train_review_ensemble(
         "calibrationSampleCount": int(len(calibration)),
         "fillCalibrationSampleCount": int(len(fill_calibration)),
         "featureSupport": _feature_support(
-            dataset["X_all"][final_fill_development]
+            dataset["X_all"][final_fill_development],
+            feature_names,
+            missing_indices,
         ),
         "productionEligible": not blockers,
         "baselineSelected": False,
@@ -998,7 +1030,10 @@ def train_review_ensemble(
                 str(dataset["dates"][confirmation][-1]),
         },
     }
-    validate_review_metadata(metadata)
+    validate_review_metadata(
+        metadata,
+        feature_schema=schema_version,
+    )
     os.makedirs(output_directory, exist_ok=True)
     for slot, payload in (
         ("ensemble", artifact),
@@ -1029,6 +1064,12 @@ def main():
     parser.add_argument("--seeds", default="42,7,2026")
     parser.add_argument("--estimators", type=int, default=180)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument(
+        "--feature-schema",
+        default="v3",
+        choices=("v3", "v4"),
+        help="特征合同：v3(生产默认) 或 v4(Alpha158 连续特征挑战者)",
+    )
     args = parser.parse_args()
     metadata = train_review_ensemble(
         args.input,
@@ -1040,9 +1081,11 @@ def main():
         ),
         estimators=args.estimators,
         threads=args.threads,
+        feature_schema=args.feature_schema,
     )
     print(json.dumps({
         "modelVersion": metadata["modelVersion"],
+        "featureSchemaVersion": metadata["featureSchemaVersion"],
         "productionEligible": metadata["productionEligible"],
         "blockers": metadata["validation"]["blockers"],
     }, ensure_ascii=False))

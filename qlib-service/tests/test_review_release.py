@@ -11,6 +11,12 @@ from decision_engine.training.review_release import (
     review_promotion_gate,
     select_review_release,
 )
+from decision_engine.heads.review_contract import (
+    FEATURE_SCHEMA_VERSION,
+)
+from decision_engine.heads.review_contract_v4 import (
+    FEATURE_SCHEMA_VERSION_V4,
+)
 
 
 def evaluation(
@@ -287,6 +293,130 @@ class ReviewReleaseTest(unittest.TestCase):
             decision["selectedVersion"],
             "review.challenger",
         )
+
+    def test_v4_challenger_publishes_against_v4_champion(self):
+        # v4 冠军 vs v4 挑战者：合同一致，允许同窗评估并按改善晋级。
+        champion_metadata = {
+            "modelVersion": "review.champion.v4",
+            "featureSchemaVersion": FEATURE_SCHEMA_VERSION_V4,
+            "featureNames": ["a"],
+            "validation": {"confirmationEndDate": "2026-09-02"},
+        }
+        challenger_metadata = {
+            **champion_metadata,
+            "modelVersion": "review.challenger.v4",
+            "productionEligible": True,
+        }
+        dataset = {
+            "summary": {
+                "universe": {"schema_version": "cn-main-board.v1"},
+            },
+            "codes": np.asarray(["600001"]),
+            "codes_all": np.asarray(["000001"]),
+            "codes_opportunity": np.asarray(["605001"]),
+        }
+        partitions = {"evidence": fresh_evidence()}
+        with tempfile.TemporaryDirectory() as directory:
+            decision_path = os.path.join(directory, "decision.json")
+            with patch(
+                "decision_engine.training.review_release.load_dataset",
+                return_value=dataset,
+            ) as load_dataset_mock, patch(
+                "decision_engine.training.review_release._load_bundle",
+                side_effect=[
+                    (["champion"], champion_metadata),
+                    (["challenger"], challenger_metadata),
+                ],
+            ), patch(
+                "decision_engine.training.review_release."
+                "fresh_confirmation_partitions",
+                return_value=partitions,
+            ), patch(
+                "decision_engine.training.review_release."
+                "evaluate_review_release",
+                side_effect=[
+                    evaluation(),
+                    evaluation(mean_net_r=0.07, lower_bound=0.018),
+                ],
+            ):
+                decision = select_review_release(
+                    "dataset.json",
+                    "champion",
+                    "challenger",
+                    decision_output=decision_path,
+                )
+
+        # 数据集必须按 v4 合同装配（关键：否则特征维度与 v4 模型不匹配）。
+        self.assertEqual(
+            load_dataset_mock.call_args.kwargs["feature_schema"],
+            "v4",
+        )
+        self.assertEqual(decision["action"], "PUBLISH")
+        self.assertTrue(decision["eligible"])
+        self.assertEqual(
+            decision["challengerFeatureSchemaVersion"],
+            FEATURE_SCHEMA_VERSION_V4,
+        )
+
+    def test_v4_challenger_blocked_against_v3_champion(self):
+        # v3 冠军 vs v4 挑战者：合同不一致，硬拦截 → KEEP_CURRENT，绝不覆盖生产 v3。
+        champion_metadata = {
+            "modelVersion": "review.champion.v3",
+            "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+            "featureNames": ["a"],
+            "validation": {"confirmationEndDate": "2026-09-02"},
+        }
+        challenger_metadata = {
+            "modelVersion": "review.challenger.v4",
+            "featureSchemaVersion": FEATURE_SCHEMA_VERSION_V4,
+            "featureNames": ["a", "alpha_x"],
+            "validation": {"confirmationEndDate": "2026-09-02"},
+            "productionEligible": True,
+        }
+        dataset = {
+            "summary": {
+                "universe": {"schema_version": "cn-main-board.v1"},
+            },
+            "codes": np.asarray(["600001"]),
+            "codes_all": np.asarray(["000001"]),
+            "codes_opportunity": np.asarray(["605001"]),
+        }
+        partitions = {"evidence": fresh_evidence()}
+        with tempfile.TemporaryDirectory() as directory:
+            decision_path = os.path.join(directory, "decision.json")
+            with patch(
+                "decision_engine.training.review_release.load_dataset",
+                return_value=dataset,
+            ), patch(
+                "decision_engine.training.review_release._load_bundle",
+                side_effect=[
+                    (["champion"], champion_metadata),
+                    (["challenger"], challenger_metadata),
+                ],
+            ), patch(
+                "decision_engine.training.review_release."
+                "fresh_confirmation_partitions",
+                return_value=partitions,
+            ), patch(
+                "decision_engine.training.review_release."
+                "evaluate_review_release",
+            ) as evaluate:
+                decision = select_review_release(
+                    "dataset.json",
+                    "champion",
+                    "challenger",
+                    decision_output=decision_path,
+                )
+
+        self.assertEqual(decision["action"], "KEEP_CURRENT")
+        self.assertFalse(decision["eligible"])
+        self.assertIn(
+            "现役模型与挑战者特征合同不一致",
+            decision["compatibility"]["blockers"],
+        )
+        self.assertEqual(decision["selectedVersion"], "review.champion.v3")
+        # 合同不一致时绝不进入同窗评估。
+        evaluate.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -14,6 +14,8 @@ from ..review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
     load_review_release,
 )
+from ..heads.review_contract import FEATURE_SCHEMA_VERSION
+from ..heads.review_contract_v4 import FEATURE_SCHEMA_VERSION_V4
 from .review_bakeoff import load_dataset
 from .review_dataset import is_main_board_code
 from .review_ensemble import (
@@ -27,6 +29,19 @@ from time_splits import four_way_interval_split
 
 
 REVIEW_RELEASE_SCHEMA_VERSION = "review-champion-challenger.v1"
+# 冠亚门禁允许的特征合同：v3 生产 + v4 Alpha158 连续特征挑战者。
+# 只有冠亚特征合同一致时才真正同窗评估；不一致直接门禁拦截并 KEEP_CURRENT，
+# 生产 v3 清单绝不被异构挑战者覆盖。
+_SCHEMA_VERSION_TO_KEY = {
+    FEATURE_SCHEMA_VERSION: "v3",
+    FEATURE_SCHEMA_VERSION_V4: "v4",
+}
+
+
+def _schema_key(version):
+    return _SCHEMA_VERSION_TO_KEY.get(str(version or ""), "v3")
+
+
 REVIEW_RELEASE_THRESHOLDS = {
     "freshEvidence": {
         "minimumDates": 10,
@@ -101,6 +116,18 @@ def _write_json(path, value):
     os.replace(temporary, destination)
 
 
+def _detect_bundle_schema(metadata_path):
+    # 只窥探 featureSchemaVersion 以决定用哪套合同做严格校验加载；
+    # 未知版本按 v3 处理，交由 load_review_release 的严格校验兜底报错。
+    try:
+        with open(metadata_path, encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except (OSError, ValueError):
+        return FEATURE_SCHEMA_VERSION
+    version = str((raw or {}).get("featureSchemaVersion") or "")
+    return version if version in _SCHEMA_VERSION_TO_KEY else FEATURE_SCHEMA_VERSION
+
+
 def _load_bundle(directory):
     artifact_path = os.path.join(
         directory,
@@ -113,6 +140,7 @@ def _load_bundle(directory):
     models, metadata = load_review_release(
         artifact_path,
         metadata_path,
+        feature_schema=_detect_bundle_schema(metadata_path),
     )
     members = [
         {
@@ -465,12 +493,24 @@ def select_review_release(
     *,
     decision_output,
 ):
-    dataset = load_dataset(dataset_path)
     champion_members, champion_metadata = _load_bundle(
         champion_directory
     )
     challenger_members, challenger_metadata = _load_bundle(
         challenger_directory
+    )
+    champion_schema = champion_metadata.get("featureSchemaVersion")
+    challenger_schema = challenger_metadata.get("featureSchemaVersion")
+    schemas_match = (
+        champion_schema == challenger_schema
+        and tuple(champion_metadata.get("featureNames") or ())
+        == tuple(challenger_metadata.get("featureNames") or ())
+    )
+    # 同窗评估要求特征矩阵维度与模型一致：仅当冠亚合同一致时按该合同装配数据集；
+    # 不一致时会被下方门禁拦截、跳过评估，此处用挑战者合同装配不影响结论。
+    dataset = load_dataset(
+        dataset_path,
+        feature_schema=_schema_key(challenger_schema),
     )
     partitions = fresh_confirmation_partitions(
         dataset,
@@ -494,12 +534,7 @@ def select_review_release(
         blockers.append("挑战者训练数据未通过沪深主板边界校验")
     if challenger_metadata.get("productionEligible") is not True:
         blockers.append("挑战者未通过自身生产门禁")
-    if (
-        champion_metadata.get("featureSchemaVersion")
-        != challenger_metadata.get("featureSchemaVersion")
-        or tuple(champion_metadata.get("featureNames") or ())
-        != tuple(challenger_metadata.get("featureNames") or ())
-    ):
+    if not schemas_match:
         blockers.append("现役模型与挑战者特征合同不一致")
     if (
         challenger_metadata.get("modelVersion")
@@ -549,6 +584,8 @@ def select_review_release(
         ),
         "championVersion": champion_metadata["modelVersion"],
         "challengerVersion": challenger_metadata["modelVersion"],
+        "championFeatureSchemaVersion": champion_schema,
+        "challengerFeatureSchemaVersion": challenger_schema,
         "selectedVersion": (
             challenger_metadata["modelVersion"]
             if action == "PUBLISH"

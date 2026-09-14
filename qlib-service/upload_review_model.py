@@ -9,9 +9,11 @@ import time
 
 from decision_engine.review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
+    REVIEW_FEATURE_SCHEMAS,
     REVIEW_MANIFEST_SCHEMA_VERSION,
     validate_review_metadata,
 )
+from decision_engine.heads.review_contract import FEATURE_SCHEMA_VERSION
 from model_lib import _oss_bucket
 
 
@@ -20,6 +22,18 @@ def _bucket():
     if target is None:
         raise RuntimeError("触价复核模型OSS未配置")
     return target
+
+
+def _load_validated_metadata(metadata_path):
+    # 按元数据自身声明的特征合同做严格校验：v3 生产默认，v4 挑战者显式选用。
+    # 未知版本回退 v3，让校验按生产口径 fail-closed 报错。
+    with open(metadata_path, encoding="utf-8") as handle:
+        raw = json.load(handle)
+    version = str((raw or {}).get("featureSchemaVersion") or "")
+    schema = version if version in REVIEW_FEATURE_SCHEMAS else (
+        FEATURE_SCHEMA_VERSION
+    )
+    return validate_review_metadata(raw, feature_schema=schema)
 
 
 def _sha256(path):
@@ -129,8 +143,7 @@ def publish_review_release(
         source,
         REVIEW_ARTIFACT_FILENAMES["meta"],
     )
-    with open(metadata_path, encoding="utf-8") as handle:
-        metadata = validate_review_metadata(json.load(handle))
+    metadata = _load_validated_metadata(metadata_path)
     run_id = str(metadata["modelVersion"])
     if (
         not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{2,95}", run_id)
@@ -234,8 +247,7 @@ def main():
             source,
             REVIEW_ARTIFACT_FILENAMES["meta"],
         )
-        with open(metadata_path, encoding="utf-8") as handle:
-            metadata = validate_review_metadata(json.load(handle))
+        metadata = _load_validated_metadata(metadata_path)
         audit = record_confirmation_attempt(
             _bucket(),
             metadata,

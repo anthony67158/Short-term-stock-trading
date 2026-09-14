@@ -13,14 +13,22 @@ if SERVICE_ROOT not in sys.path:
     sys.path.insert(0, SERVICE_ROOT)
 
 from decision_engine.heads.review_contract import FEATURE_NAMES  # noqa: E402
+from decision_engine.heads.review_contract_v4 import (  # noqa: E402
+    FEATURE_NAMES_V4,
+    FEATURE_SCHEMA_VERSION_V4,
+)
+from decision_engine.heads.review_contract import (  # noqa: E402
+    FEATURE_SCHEMA_VERSION,
+)
 from decision_engine.training.review_ensemble import (  # noqa: E402
     _fit_member,
+    _resolve_feature_schema,
     train_review_ensemble,
 )
 
 
 class DecisionReviewTrainingTest(unittest.TestCase):
-    def dataset(self):
+    def dataset(self, feature_names=FEATURE_NAMES):
         samples_per_date = 10
         date_count = 50
         dates = np.repeat(np.asarray([
@@ -31,7 +39,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
         ]), samples_per_date)
         starts = np.arange(1, len(dates) + 1, dtype=np.int64) * 1_000
         matrix = np.zeros(
-            (len(dates), len(FEATURE_NAMES)),
+            (len(dates), len(feature_names)),
             dtype=np.float32,
         )
         matrix[:, 0] = np.arange(len(dates), dtype=np.float32)
@@ -77,9 +85,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             ),
         }
 
-    def test_training_reserves_selection_and_confirmation_partitions(self):
-        dataset = self.dataset()
-
+    def _run_training(self, dataset, **train_kwargs):
         def member(
             _dataset,
             _train,
@@ -180,7 +186,13 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                     "unused.json",
                     output,
                     seeds=(42, 7),
+                    **train_kwargs,
                 )
+        return metadata, evaluate
+
+    def test_training_reserves_selection_and_confirmation_partitions(self):
+        dataset = self.dataset()
+        metadata, evaluate = self._run_training(dataset)
 
         selection = evaluate.call_args_list[0].args[2]
         confirmation = evaluate.call_args_list[2].args[2]
@@ -227,6 +239,46 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                 10,
                 1,
             )
+
+    def test_default_feature_schema_is_v3(self):
+        # 生产默认必须仍是 v3：168 维、v3 schema 名，不受 v4 接入影响。
+        metadata, _ = self._run_training(self.dataset())
+        self.assertEqual(
+            metadata["featureSchemaVersion"],
+            FEATURE_SCHEMA_VERSION,
+        )
+        self.assertEqual(len(metadata["featureNames"]), len(FEATURE_NAMES))
+        self.assertEqual(tuple(metadata["featureNames"]), tuple(FEATURE_NAMES))
+
+    def test_v4_feature_schema_propagates_to_artifact_and_metadata(self):
+        # 显式 feature_schema="v4" 时，artifact/metadata 全部写 v4 176 维口径。
+        dataset = self.dataset(FEATURE_NAMES_V4)
+        metadata, _ = self._run_training(dataset, feature_schema="v4")
+        self.assertEqual(
+            metadata["featureSchemaVersion"],
+            FEATURE_SCHEMA_VERSION_V4,
+        )
+        self.assertEqual(len(metadata["featureNames"]), len(FEATURE_NAMES_V4))
+        self.assertEqual(
+            tuple(metadata["featureNames"]),
+            tuple(FEATURE_NAMES_V4),
+        )
+        # featureSupport 的分位向量长度也必须跟随 176 维。
+        self.assertEqual(
+            len(metadata["featureSupport"]["lower"]),
+            len(FEATURE_NAMES_V4),
+        )
+
+    def test_resolve_feature_schema_rejects_unknown(self):
+        with self.assertRaisesRegex(ValueError, "仅支持 v3 或 v4"):
+            _resolve_feature_schema("v5")
+        # v3/v4 分别解析出正确维度与缺失掩码列数。
+        _, v3_names, v3_missing = _resolve_feature_schema("v3")
+        _, v4_names, v4_missing = _resolve_feature_schema("v4")
+        self.assertEqual(len(v3_names), len(FEATURE_NAMES))
+        self.assertEqual(len(v4_names), len(FEATURE_NAMES_V4))
+        # v4 比 v3 多 3 个 alpha Missing 掩码列（共 8 维 alpha 中的 3 个）。
+        self.assertEqual(len(v4_missing) - len(v3_missing), 3)
 
 
 if __name__ == "__main__":

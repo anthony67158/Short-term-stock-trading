@@ -5,6 +5,10 @@ from collections import Counter
 import numpy as np
 
 from ..heads.review_contract import FEATURE_NAMES, feature_vector
+from ..heads.review_contract_v4 import (
+    FEATURE_NAMES_V4,
+    feature_vector_v4,
+)
 from .opportunity_reward import cost_aware_opportunity_reward
 
 
@@ -48,7 +52,15 @@ def _count_by(values, field):
     return dict(sorted(counts.items()))
 
 
-def build_opportunity_review_dataset(outcomes):
+def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
+    if feature_schema == "v4":
+        active_feature_names = FEATURE_NAMES_V4
+        active_feature_vector = feature_vector_v4
+    elif feature_schema == "v3":
+        active_feature_names = FEATURE_NAMES
+        active_feature_vector = feature_vector
+    else:
+        raise ValueError("feature_schema 仅支持 v3 或 v4")
     source = outcomes if isinstance(outcomes, list) else []
     event_ledger = []
     for outcome in source:
@@ -102,7 +114,9 @@ def build_opportunity_review_dataset(outcomes):
             excluded += 1
             continue
         try:
-            vector = feature_vector(outcome.get("reviewScoreInput"))
+            vector = active_feature_vector(
+                outcome.get("reviewScoreInput")
+            )
             label_start = int(
                 (outcome.get("reviewScoreInput") or {}).get("asOf")
                 or 0
@@ -194,11 +208,12 @@ def build_opportunity_review_dataset(outcomes):
         ))
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
+        "feature_schema": feature_schema,
         "event_ledger": event_ledger,
         "X_all": np.asarray(
             [item[1] for item in events],
             dtype=np.float32,
-        ).reshape((-1, len(FEATURE_NAMES))),
+        ).reshape((-1, len(active_feature_names))),
         "dates_all": np.asarray(
             [str(item[0].get("tradeDate") or "") for item in events],
             dtype="<U10",
@@ -230,7 +245,7 @@ def build_opportunity_review_dataset(outcomes):
         "X": np.asarray(
             [item[2] for item in conditional],
             dtype=np.float32,
-        ).reshape((-1, len(FEATURE_NAMES))),
+        ).reshape((-1, len(active_feature_names))),
         "dates": np.asarray(
             [str(item[1].get("tradeDate") or "") for item in conditional],
             dtype="<U10",
@@ -262,7 +277,7 @@ def build_opportunity_review_dataset(outcomes):
         "X_opportunity": np.asarray(
             [item[1] for item in opportunity],
             dtype=np.float32,
-        ).reshape((-1, len(FEATURE_NAMES))),
+        ).reshape((-1, len(active_feature_names))),
         "dates_opportunity": np.asarray(
             [str(item[0].get("tradeDate") or "") for item in opportunity],
             dtype="<U10",
@@ -311,7 +326,7 @@ def build_opportunity_review_dataset(outcomes):
             [item[7] for item in conditional],
             dtype="<U60",
         ),
-        "feature_names": np.asarray(FEATURE_NAMES, dtype="<U80"),
+        "feature_names": np.asarray(active_feature_names, dtype="<U80"),
         "summary": {
             "input_outcomes": len(event_ledger),
             "status_counts": {

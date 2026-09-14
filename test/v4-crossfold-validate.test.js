@@ -26,6 +26,9 @@ test('跨折验证脚本在强信号小样本上产出高IC与单调分档', () 
           alphaScorePctRank: pct,
           alphaScoreZ: (pct - 0.5) * 2,
           alphaScoreMomentum5: (rand() - 0.5) * 0.2,
+          // Task9 起脚本纳入两维 rankIc；给出与 pct 弱相关的可用值。
+          alphaRankIc20: (pct - 0.5) * 0.4 + (rand() - 0.5) * 0.1,
+          alphaRankIc60: (pct - 0.5) * 0.3 + (rand() - 0.5) * 0.1,
         },
         netR: { HOLD_TO_HORIZON: y },
       }))

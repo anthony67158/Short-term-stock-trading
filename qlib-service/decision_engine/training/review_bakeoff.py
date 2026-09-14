@@ -59,11 +59,12 @@ def select_review_candidate(families):
     )[0]
 
 
-def load_dataset(path):
+def load_dataset(path, *, feature_schema="v3"):
     with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)
     return build_opportunity_review_dataset(
-        normalize_history_outcomes(payload)
+        normalize_history_outcomes(payload),
+        feature_schema=feature_schema,
     )
 
 
