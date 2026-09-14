@@ -488,7 +488,12 @@ async function main() {
     const appendedToday = new Set(
       pending.map((item) => item.event.code),
     )
-    appendBarsForCodes(barsByCode, minutesByCode, appendedToday)
+    appendBarsForCodes(
+      barsByCode,
+      minutesByCode,
+      appendedToday,
+      { dailyByCode, tradeDate },
+    )
     if (signalSet.has(tradeDate)) {
       const universeCodes = universesByDate.get(tradeDate) || []
       for (const config of SLOT_CONFIG) {
@@ -508,6 +513,7 @@ async function main() {
           barsByCode,
           minutesByCode,
           [...newCodes].filter((code) => !appendedToday.has(code)),
+          { dailyByCode, tradeDate },
         )
         newCodes.forEach((code) => appendedToday.add(code))
         pending.push(...next)

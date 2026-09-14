@@ -469,3 +469,32 @@ test('盘中候选没有带时点的分钟线时保持数据待补而不误判�
   assert.equal(result.outcome, 'DATA_INCOMPLETE')
   assert.equal(result.fillStatus, 'UNKNOWN')
 })
+
+test('日线兜底只能补持有路径，不能跨缺口触发进场', () => {
+  const result = resolveOpportunityOutcome({
+    event: event(),
+    bars: [
+      bar('2026-09-01', { close: 10 }),
+      {
+        ...bar('2026-09-02', {
+          tradeTime: '15:00:00',
+          low: 9.9,
+          close: 10,
+        }),
+        granularity: 'DAILY_FALLBACK',
+        entryEligible: false,
+      },
+      bar('2026-09-03', {
+        tradeTime: '09:35:00',
+        low: 9.9,
+        close: 10,
+      }),
+    ],
+    evaluatedAt: Date.parse('2026-09-03T08:00:00.000Z'),
+  })
+
+  assert.equal(result.maturity, 'MATURED')
+  assert.equal(result.outcome, 'DATA_INCOMPLETE')
+  assert.equal(result.fillStatus, 'UNKNOWN')
+  assert.equal(result.observations.dailyFallbackSessions, 1)
+})

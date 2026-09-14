@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  appendBarsForCodes,
   buildHistoricalFund,
   buildHistoricalPatternSnapshot,
   groupMinuteRows,
@@ -104,6 +105,43 @@ test('历史形态快照只使用信号日前已完成日线', () => {
   assert.equal(snapshot.asOfDate, latestBeforeSignal.date)
   assert.equal(snapshot.stocks.get('600519').historyCoverage, 1)
   assert.ok(snapshot.stocks.get('600519').lowVolTrend > 0)
+})
+
+test('分钟线不完整时仅补入不可用于进场的日线持有路径', () => {
+  const barsByCode = new Map()
+  const dailyByCode = new Map([['600519', [{
+    date: '20260908',
+    code: '600519',
+    open: 100,
+    high: 103,
+    low: 97,
+    close: 101,
+    preClose: 99,
+    volume: 1_000_000,
+    amount: 100_000_000,
+  }]]])
+
+  appendBarsForCodes(
+    barsByCode,
+    new Map([['600519', [minute('0931', 100)]]]),
+    ['600519'],
+    { dailyByCode, tradeDate: '20260908' },
+  )
+
+  assert.deepEqual(barsByCode.get('600519'), [{
+    date: '2026-09-08',
+    tradeTime: '2026-09-08 15:00:00',
+    code: '600519',
+    open: 100,
+    high: 103,
+    low: 97,
+    close: 101,
+    volume: 1_000_000,
+    amount: 100_000_000,
+    preClose: 99,
+    granularity: 'DAILY_FALLBACK',
+    entryEligible: false,
+  }])
 })
 
 test('历史时点可复用生产扫描器生成三路径账本', async () => {

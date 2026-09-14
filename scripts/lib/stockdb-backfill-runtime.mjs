@@ -340,14 +340,52 @@ export function appendBarsForCodes(
   barsByCode,
   minutesByCode,
   codes,
+  {
+    dailyByCode,
+    tradeDate,
+  } = {},
 ) {
   for (const code of codes) {
     const dailyBars = aggregateFiveMinuteBars(
       minutesByCode.get(code) || [],
     )
-    if (!dailyBars.length) continue
+    const completeMinutes = (
+      dailyBars.length
+      && String(dailyBars[0]?.tradeTime || '').endsWith('09:35:00')
+      && String(dailyBars.at(-1)?.tradeTime || '').endsWith('15:00:00')
+    )
+    let rows = completeMinutes ? dailyBars : []
+    if (!completeMinutes && dailyByCode instanceof Map && tradeDate) {
+      const daily = (dailyByCode.get(code) || [])
+        .map(normalizeDailyRow)
+        .find((row) => row?.date === String(tradeDate))
+      if (
+        daily
+        && daily.open > 0
+        && daily.high > 0
+        && daily.low > 0
+        && daily.close > 0
+      ) {
+        const date = displayDate(tradeDate)
+        rows = [{
+          date,
+          tradeTime: `${date} 15:00:00`,
+          code,
+          open: daily.open,
+          high: daily.high,
+          low: daily.low,
+          close: daily.close,
+          volume: Math.max(0, daily.volume || 0),
+          amount: Math.max(0, daily.amount || 0),
+          preClose: daily.preClose,
+          granularity: 'DAILY_FALLBACK',
+          entryEligible: false,
+        }]
+      }
+    }
+    if (!rows.length) continue
     const existing = barsByCode.get(code) || []
-    barsByCode.set(code, [...existing, ...dailyBars])
+    barsByCode.set(code, [...existing, ...rows])
   }
 }
 

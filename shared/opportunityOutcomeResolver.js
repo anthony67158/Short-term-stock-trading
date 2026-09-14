@@ -80,6 +80,8 @@ function normalizeBars(values, event, evaluatedAt) {
         close: finite(bar?.close ?? bar?.price),
         volume: finite(bar?.volume),
         preClose: finite(bar?.preClose),
+        granularity: String(bar?.granularity || 'INTRADAY'),
+        entryEligible: bar?.entryEligible !== false,
       }
     })
     .filter((bar) => (
@@ -213,8 +215,10 @@ function entryWindow(event, rows, evaluatedAt) {
   const signalAt = finite(event?.asOf)
   if (mode === 'INTRADAY') {
     const windowEnd = intradayWindowEnd(event)
+    const sessionRows = rows.filter((bar) => bar.date === signalDate)
     const exact = rows.filter((bar) => (
       bar.date === signalDate
+      && bar.entryEligible
       && bar.at != null
       && (signalAt == null || bar.at > signalAt)
       && (windowEnd == null || bar.at <= windowEnd)
@@ -226,21 +230,23 @@ function entryWindow(event, rows, evaluatedAt) {
         && evaluatedAt > windowEnd
         && exact.at(-1).at >= windowEnd - 5 * 60 * 1000,
       requiresTimestamp: true,
+      dataIncomplete: sessionRows.length > 0 && !exact.length,
     }
   }
   const future = rows.filter((bar) => bar.date > signalDate)
   const firstDate = future[0]?.date
+  const firstSession = firstDate
+    ? future.filter((bar) => bar.date === firstDate)
+    : []
+  const exact = firstSession.filter((bar) => bar.entryEligible)
   return {
-    rows: firstDate
-      ? future.filter((bar) => bar.date === firstDate)
-      : [],
+    rows: exact,
     complete: !!firstDate && (
-      future[0]?.at == null
-      || isSessionCloseBar(
-        future.filter((bar) => bar.date === firstDate).at(-1),
-      )
+      firstSession[0]?.at == null
+      || isSessionCloseBar(firstSession.at(-1))
     ),
     requiresTimestamp: false,
+    dataIncomplete: firstSession.length > 0 && !exact.length,
   }
 }
 
@@ -388,8 +394,19 @@ export function resolveOpportunityOutcome({
   const sessions = [...new Set(rows.map((bar) => bar.date))]
   base.observations.bars = rows.length
   base.observations.sessions = sessions.length
+  base.observations.dailyFallbackSessions = new Set(
+    rows
+      .filter((bar) => bar.granularity === 'DAILY_FALLBACK')
+      .map((bar) => bar.date),
+  ).size
   const window = entryWindow(event, rows, timestamp)
   base.observations.entryWindowBars = window.rows.length
+  if (window.dataIncomplete) {
+    return terminalWithoutFill(base, {
+      outcome: 'DATA_INCOMPLETE',
+      fillStatus: 'UNKNOWN',
+    })
+  }
   if (window.requiresTimestamp && !window.rows.length) return base
   if (!window.rows.length) return base
 
