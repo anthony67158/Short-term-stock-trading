@@ -61,6 +61,7 @@ POLICY_MINIMUM_P_WIN = (0.4, 0.45, 0.5, 0.55)
 POLICY_MINIMUM_EXPECTED_R = (0.0, 0.05, 0.1)
 POLICY_MINIMUM_LOWER_R = (-1.0, -0.5, 0.0)
 POLICY_MINIMUM_P_FILL = (0.0, 0.2, 0.5)
+MINIMUM_ANNUALIZED_TRADES = 80
 POLICY_SECTOR_PHASES = (
     (),
     ("ACCUMULATION",),
@@ -600,6 +601,15 @@ def _account_metrics(ranking, stress_ranking, *, risk_per_trade=0.007):
         "riskPerTradePct": round(risk_per_trade * 100, 4),
         "tradingDays": len(dates),
         "trades": int(sum(ranking["daily_selected"].values())),
+        "annualizedTrades": (
+            round(
+                sum(ranking["daily_selected"].values())
+                * 252
+                / len(dates),
+                6,
+            )
+            if dates else 0.0
+        ),
         "returnPct": round((equity - 1.0) * 100, 6),
         "annualMedianReturnPct": (
             round(float(np.median(annual_returns)) * 100, 6)
@@ -660,6 +670,10 @@ def _select_opportunity_policy(
         if (
             value["metrics"]["selected"] >= 5
             and value["metrics"]["activeDays"] >= 5
+            and (
+                value["metrics"]["account"]["annualizedTrades"]
+                >= MINIMUM_ANNUALIZED_TRADES
+            )
         )
     ]
     pool = eligible or candidates
@@ -1047,6 +1061,13 @@ def train_review_ensemble(
                 or metrics["accountDrawdownPctAtRisk07Top5"] > 10
             ):
                 values.append("按单笔0.7%风险映射的账户回撤超过10%")
+            if (
+                (metrics.get("account") or {}).get("annualizedTrades", 0)
+                < MINIMUM_ANNUALIZED_TRADES
+            ):
+                values.append(
+                    f"年化有效交易数低于{MINIMUM_ANNUALIZED_TRADES}笔"
+                )
         return values
 
     selection_policy_blockers = policy_blockers(

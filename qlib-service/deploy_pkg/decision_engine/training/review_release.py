@@ -60,6 +60,7 @@ REVIEW_RELEASE_THRESHOLDS = {
         "q10CoverageMinimum": 0.85,
         "q10CoverageMaxDrop": 0.02,
         "selectedCoverageMinimumRatio": 0.5,
+        "minimumAnnualizedTrades": 80.0,
         "maximumAccountDrawdownPctAtRisk07Top5": 10.0,
     },
     "improvement": {
@@ -437,6 +438,18 @@ def review_promotion_gate(
         > regression["maximumAccountDrawdownPctAtRisk07Top5"]
     ):
         blockers.append("按单笔0.7%风险映射的账户回撤超过10%")
+    annualized_trades = _metric(
+        challenger,
+        "opportunity",
+        "account",
+        "annualizedTrades",
+    )
+    if (
+        annualized_trades is None
+        or annualized_trades
+        < regression["minimumAnnualizedTrades"]
+    ):
+        blockers.append("挑战者年化有效交易数低于80笔")
 
     for path, label in (
         (("conditional", "pWinBrier"), "盈利概率Brier"),

@@ -1,6 +1,8 @@
 """Build trigger-review training rows without leaking them into entry scores."""
 
 from collections import Counter
+import json
+import os
 
 import numpy as np
 
@@ -13,6 +15,7 @@ from .opportunity_reward import cost_aware_opportunity_reward
 
 
 DATASET_SCHEMA_VERSION = "opportunity-review-dataset.v2"
+DATASET_ARCHIVE_SCHEMA_VERSION = "opportunity-review-dataset-archive.v1"
 MAIN_BOARD_CODE_PREFIXES = (
     "000",
     "001",
@@ -22,6 +25,37 @@ MAIN_BOARD_CODE_PREFIXES = (
     "601",
     "603",
     "605",
+)
+_DATASET_ARRAY_FIELDS = (
+    "X_all",
+    "dates_all",
+    "codes_all",
+    "event_group_ids_all",
+    "label_start_ms_all",
+    "label_end_ms_all",
+    "y_fill",
+    "conditional_indices",
+    "X",
+    "dates",
+    "codes",
+    "event_group_ids",
+    "label_start_ms",
+    "label_end_ms",
+    "y_win",
+    "y_net_r",
+    "X_opportunity",
+    "dates_opportunity",
+    "codes_opportunity",
+    "event_group_ids_opportunity",
+    "decision_ids_opportunity",
+    "label_start_ms_opportunity",
+    "label_end_ms_opportunity",
+    "y_opportunity_r",
+    "y_opportunity_r_stress10",
+    "stress10_available_opportunity",
+    "sector_phases_opportunity",
+    "label_sources",
+    "exit_contract_versions",
 )
 
 
@@ -50,6 +84,144 @@ def _count_by(values, field):
         for value in values
     )
     return dict(sorted(counts.items()))
+
+
+def _sum_counts(datasets, path):
+    counts = Counter()
+    for dataset in datasets:
+        value = dataset.get("summary") or {}
+        for key in path:
+            value = value.get(key) or {}
+        counts.update(value)
+    return dict(sorted(counts.items()))
+
+
+def merge_opportunity_review_datasets(datasets):
+    values = list(datasets)
+    if not values:
+        raise ValueError("复核训练分片不能为空")
+    feature_schema = values[0].get("feature_schema")
+    feature_names = values[0].get("feature_names")
+    for dataset in values:
+        if (
+            dataset.get("schema_version") != DATASET_SCHEMA_VERSION
+            or dataset.get("feature_schema") != feature_schema
+            or not np.array_equal(
+                dataset.get("feature_names"),
+                feature_names,
+            )
+        ):
+            raise ValueError("复核训练分片合同不一致")
+    merged = {
+        "schema_version": DATASET_SCHEMA_VERSION,
+        "feature_schema": feature_schema,
+        "event_ledger": [],
+        "feature_names": np.asarray(feature_names),
+    }
+    event_offset = 0
+    conditional_parts = []
+    for dataset in values:
+        conditional_parts.append(
+            np.asarray(dataset["conditional_indices"], dtype=np.int64)
+            + event_offset
+        )
+        event_offset += len(dataset["X_all"])
+    for field in _DATASET_ARRAY_FIELDS:
+        if field == "conditional_indices":
+            merged[field] = np.concatenate(conditional_parts)
+        else:
+            merged[field] = np.concatenate([
+                np.asarray(dataset[field])
+                for dataset in values
+            ])
+    summaries = [dataset.get("summary") or {} for dataset in values]
+    merged["summary"] = {
+        "input_outcomes": sum(
+            int(value.get("input_outcomes") or 0)
+            for value in summaries
+        ),
+        "status_counts": _sum_counts(values, ("status_counts",)),
+        "audit_counts": {
+            "by_source": _sum_counts(values, ("audit_counts", "by_source")),
+            "by_date": _sum_counts(values, ("audit_counts", "by_date")),
+            "by_strategy": _sum_counts(
+                values,
+                ("audit_counts", "by_strategy"),
+            ),
+        },
+        "events": len(merged["X_all"]),
+        "samples": len(merged["X"]),
+        "opportunity_samples": len(merged["X_opportunity"]),
+        "universe": summaries[0].get("universe"),
+        "dates": len(set(merged["dates"].astype(str).tolist())),
+        "excluded": sum(
+            int(value.get("excluded") or 0)
+            for value in summaries
+        ),
+        "non_main_board_excluded": sum(
+            int(value.get("non_main_board_excluded") or 0)
+            for value in summaries
+        ),
+        "conditional_excluded": sum(
+            int(value.get("conditional_excluded") or 0)
+            for value in summaries
+        ),
+        "filled": int(np.sum(merged["y_fill"])),
+        "unfilled": int(len(merged["y_fill"]) - np.sum(merged["y_fill"])),
+    }
+    return merged
+
+
+def save_opportunity_review_dataset(path, dataset):
+    destination = os.path.abspath(path)
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    temporary = destination + ".part"
+    payload = {
+        field: np.asarray(dataset[field])
+        for field in _DATASET_ARRAY_FIELDS
+    }
+    payload.update({
+        "archive_schema_version": np.asarray(
+            DATASET_ARCHIVE_SCHEMA_VERSION,
+        ),
+        "dataset_schema_version": np.asarray(
+            dataset["schema_version"],
+        ),
+        "feature_schema": np.asarray(dataset["feature_schema"]),
+        "feature_names": np.asarray(dataset["feature_names"]),
+        "summary_json": np.asarray(json.dumps(
+            dataset["summary"],
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )),
+    })
+    with open(temporary, "wb") as handle:
+        np.savez_compressed(handle, **payload)
+    os.replace(temporary, destination)
+
+
+def load_opportunity_review_dataset(path):
+    with np.load(path, allow_pickle=False) as payload:
+        archive_schema = str(payload["archive_schema_version"].item())
+        if archive_schema != DATASET_ARCHIVE_SCHEMA_VERSION:
+            raise ValueError("复核训练数组归档版本无效")
+        dataset = {
+            field: np.asarray(payload[field])
+            for field in _DATASET_ARRAY_FIELDS
+        }
+        dataset.update({
+            "schema_version": str(
+                payload["dataset_schema_version"].item()
+            ),
+            "feature_schema": str(payload["feature_schema"].item()),
+            "feature_names": np.asarray(payload["feature_names"]),
+            "event_ledger": [],
+            "summary": json.loads(str(payload["summary_json"].item())),
+        })
+    if dataset["schema_version"] != DATASET_SCHEMA_VERSION:
+        raise ValueError("复核训练数据集版本无效")
+    return dataset
 
 
 def _outcomes(payload):

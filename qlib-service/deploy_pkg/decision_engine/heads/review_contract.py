@@ -47,6 +47,7 @@ FEATURE_NAMES = tuple([
 _CODE = re.compile(r"^\d{6}$")
 _VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 REVIEW_PRICE_CONTRACT_SCHEMA_VERSION = "review-price-contract.v1"
+MILLI_BPS_DENOMINATOR = 10_000_000
 _CANONICAL_PRICE_FIELDS = (
     "schemaVersion",
     "entryPriceMilliCny",
@@ -89,9 +90,15 @@ def review_price_contract(value):
     observation_version = str(
         value.get("observationPolicyVersion") or ""
     )
+    price_risk = entry - stop
+    friction_milli_bps = fee + slippage * 2
     if (
         entry <= stop
         or stop <= 0
+        or (
+            price_risk * MILLI_BPS_DENOMINATOR
+            <= entry * friction_milli_bps
+        )
         or isinstance(lot_size, bool)
         or not isinstance(lot_size, int)
         or lot_size <= 0
@@ -104,7 +111,7 @@ def review_price_contract(value):
         "schemaVersion": REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
         "entryPriceMilliCny": entry,
         "stopPriceMilliCny": stop,
-        "priceRiskMilliCny": entry - stop,
+        "priceRiskMilliCny": price_risk,
         "feeRateMilliBps": fee,
         "slippageMilliBps": slippage,
         "lotSize": lot_size,
@@ -159,6 +166,14 @@ def validate_bound_review_price_contract(value, checksum):
         != (
             canonical["entryPriceMilliCny"]
             - canonical["stopPriceMilliCny"]
+        )
+        or (
+            canonical["priceRiskMilliCny"] * MILLI_BPS_DENOMINATOR
+            <= canonical["entryPriceMilliCny"]
+            * (
+                canonical["feeRateMilliBps"]
+                + canonical["slippageMilliBps"] * 2
+            )
         )
         or canonical["lotSize"] <= 0
         or not isinstance(canonical["tPlusOne"], bool)
