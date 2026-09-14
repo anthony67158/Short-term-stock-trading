@@ -189,6 +189,35 @@ class TushareHistoryExportTest(unittest.TestCase):
         self.assertEqual(rows, [])
         self.assertEqual(exclusions, ["20260618", "20260619"])
 
+    def test_retry_budget_is_explicitly_bounded(self):
+        args = self.module.parse_args([
+            "--stage",
+            "minutes",
+            "--work-dir",
+            os.path.expanduser("~/.test-tushare-history"),
+            "--manifest",
+            "manifest.json",
+            "--output-dir",
+            os.path.expanduser("~/.test-tushare-minutes"),
+            "--retries",
+            "24",
+            "--dry-run",
+        ])
+
+        self.assertEqual(args.retries, 24)
+        with self.assertRaises(SystemExit):
+            self.module.parse_args([
+                "--stage",
+                "minutes",
+                "--work-dir",
+                os.path.expanduser("~/.test-tushare-history"),
+                "--manifest",
+                "manifest.json",
+                "--retries",
+                "49",
+                "--dry-run",
+            ])
+
 
 if __name__ == "__main__":
     unittest.main()

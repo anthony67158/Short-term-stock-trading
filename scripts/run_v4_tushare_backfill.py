@@ -266,6 +266,8 @@ def _download_command(args, directory):
         str(directory / "minutes"),
         "--max-per-min",
         str(args.max_per_min),
+        "--retries",
+        str(args.retries),
         "--minimum-coverage",
         str(args.minimum_coverage),
     ]
@@ -463,6 +465,7 @@ def parse_args():
     parser.add_argument("--settlement-days", type=int, default=7)
     parser.add_argument("--universe-size", type=int, default=1000)
     parser.add_argument("--max-per-min", type=int, default=120)
+    parser.add_argument("--retries", type=int, default=4)
     parser.add_argument("--minimum-coverage", type=float, default=0.85)
     parser.add_argument(
         "--alpha-snapshot",

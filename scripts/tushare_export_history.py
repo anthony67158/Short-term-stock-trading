@@ -243,7 +243,10 @@ def export_metadata(args):
     source.mkdir(parents=True, exist_ok=True, mode=0o700)
     days = source / "days"
     days.mkdir(parents=True, exist_ok=True, mode=0o700)
-    client = TushareClient(max_per_min=args.max_per_min)
+    client = TushareClient(
+        max_per_min=args.max_per_min,
+        retries=args.retries,
+    )
     names = _security_names(client, source / "securities.json.gz")
     calendar, _cached = _cached_rows(
         source / f"calendar-{args.start}-{args.end}.json.gz",
@@ -474,7 +477,10 @@ def export_minutes(args):
     codes = sorted(requested_by_code)
     dates = [row["date"] for row in manifest]
     connection = _minute_database(work / "tushare-minute.sqlite3")
-    client = TushareClient(max_per_min=args.max_per_min)
+    client = TushareClient(
+        max_per_min=args.max_per_min,
+        retries=args.retries,
+    )
     downloaded = 0
     cached = 0
     try:
@@ -652,11 +658,14 @@ def parse_args(argv=None):
     parser.add_argument("--manifest")
     parser.add_argument("--output-dir")
     parser.add_argument("--max-per-min", type=int, default=90)
+    parser.add_argument("--retries", type=int, default=4)
     parser.add_argument("--minimum-coverage", type=float, default=0.85)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     if not 1 <= args.max_per_min <= 120:
         parser.error("--max-per-min 必须在1到120之间")
+    if not 1 <= args.retries <= 48:
+        parser.error("--retries 必须在1到48之间")
     if not 0.85 <= args.minimum_coverage <= 1:
         parser.error("--minimum-coverage 必须在0.85到1之间")
     if args.stage == "metadata":

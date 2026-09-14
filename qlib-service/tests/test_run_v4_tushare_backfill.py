@@ -19,6 +19,18 @@ _SPEC.loader.exec_module(runner)
 
 
 class V4TushareBackfillPlanTest(unittest.TestCase):
+    def test_download_command_forwards_retry_budget(self):
+        command = runner._download_command(
+            Namespace(
+                max_per_min=90,
+                retries=24,
+                minimum_coverage=0.85,
+            ),
+            runner.Path("/tmp/v4-retry-test"),
+        )
+
+        self.assertEqual(command[command.index("--retries") + 1], "24")
+
     def test_plan_covers_every_eligible_signal_date_once(self):
         dates = [f"2026{i:04d}" for i in range(1, 251)]
         chunks = runner.build_chunk_plan(
