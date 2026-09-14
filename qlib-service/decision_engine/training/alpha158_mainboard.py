@@ -185,16 +185,20 @@ def _date_zscore(values, dates):
 def build_panel(
     daily_path,
     *,
-    start_date,
-    end_date,
+    start_date=None,
+    end_date=None,
     universe_size=1000,
 ):
     rows = _load_daily(daily_path)
     dates = sorted({row["date"] for row in rows})
+    if not dates:
+        raise ValueError("Alpha158 daily rows are empty")
     date_index = {date: index for index, date in enumerate(dates)}
+    effective_start = start_date or dates[0]
+    effective_end = end_date or dates[-1]
     signal_dates = [
         date for date in dates
-        if start_date <= date <= end_date
+        if effective_start <= date <= effective_end
     ]
     if len(signal_dates) < 40:
         raise ValueError("Alpha158 signal dates are insufficient")
@@ -539,8 +543,8 @@ def main():
     parser.add_argument("--daily", required=True)
     parser.add_argument("--panel", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--from", dest="start_date", required=True)
-    parser.add_argument("--to", dest="end_date", required=True)
+    parser.add_argument("--from", dest="start_date")
+    parser.add_argument("--to", dest="end_date")
     parser.add_argument("--universe-size", type=int, default=1000)
     parser.add_argument("--top-n", type=int, default=100)
     parser.add_argument("--threads", type=int, default=4)

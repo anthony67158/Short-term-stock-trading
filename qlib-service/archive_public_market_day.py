@@ -19,6 +19,7 @@ from opportunity_market_archive import (
     select_causal_universe,
 )
 from opportunity_pattern_snapshot import refresh_strategy_pattern_snapshot
+from alpha158_market_history import append_alpha158_market_day
 from model_lib import _oss_bucket
 from decision_engine.data.fuyao import (
     fetch_full_snapshot as fetch_fuyao_market_snapshot,
@@ -350,6 +351,10 @@ def archive_latest_public(
     existing = load_market_day(target_bucket, target)
     if existing is not None:
         pattern_manifest = refresh_strategy_pattern_snapshot(target_bucket)
+        alpha158_history = append_alpha158_market_day(
+            target_bucket,
+            existing,
+        )
         return {
             "status": "already_archived",
             "date": target,
@@ -357,6 +362,7 @@ def archive_latest_public(
             "summary": existing["summary"],
             "universe": existing["universe"],
             "patternSnapshot": pattern_manifest["summary"],
+            "alpha158History": alpha158_history["manifest"]["summary"],
         }
     previous = latest_market_day_before(target_bucket, target)
     current_ms = int(
@@ -436,6 +442,10 @@ def archive_latest_public(
         target_bucket,
         published["manifest"],
     )
+    alpha158_history = append_alpha158_market_day(
+        target_bucket,
+        artifact,
+    )
     return {
         "status": "published",
         "date": target,
@@ -443,6 +453,7 @@ def archive_latest_public(
         "entry": published["published"][0],
         "manifestSummary": published["manifest"]["summary"],
         "patternSnapshot": pattern_manifest["summary"],
+        "alpha158History": alpha158_history["manifest"]["summary"],
     }
 
 

@@ -66,6 +66,10 @@ jobs:
             tests/test_decision_contract.py \
             tests/test_decision_review_dataset.py \
             tests/test_decision_review_inference.py \
+            tests/test_alpha158_features.py \
+            tests/test_alpha158_mainboard.py \
+            tests/test_alpha158_market_history.py \
+            tests/test_alpha158_snapshot.py \
             tests/test_review_release.py \
             tests/test_review_model_upload.py \
             tests/test_decision_dataset.py \
@@ -356,6 +360,27 @@ jobs:
           python publish_opportunity_history.py \
             --input opportunity-outcomes.json
 
+      - name: Train and publish Alpha158 continuous ranking snapshot
+        id: alpha158-training
+        continue-on-error: true
+        run: |
+          mkdir -p opportunity-model/alpha158
+          python alpha158_market_history.py \
+            --output opportunity-model/alpha158/daily.json.gz \
+            --minimum-days 120
+          python -m decision_engine.training.alpha158_mainboard \
+            --daily opportunity-model/alpha158/daily.json.gz \
+            --panel opportunity-model/alpha158/panel.npz \
+            --output opportunity-model/alpha158/walkforward.json \
+            --universe-size 1000 \
+            --top-n 1000 \
+            --threads 4 \
+            --rebuild
+          python alpha158_snapshot.py \
+            --walkforward opportunity-model/alpha158/walkforward.json \
+            --output opportunity-model/alpha158/snapshot.json \
+            --publish
+
       - name: Run three-seed LightGBM and CatBoost walk-forward
         run: |
           mkdir -p opportunity-model/stability
@@ -537,6 +562,8 @@ jobs:
             qlib-service/opportunity-model/review-seed-2026/report.json
             qlib-service/opportunity-model/review-release/
             qlib-service/opportunity-model/review-release-decision.json
+            qlib-service/opportunity-model/alpha158/walkforward.json
+            qlib-service/opportunity-model/alpha158/snapshot.json
             qlib-service/opportunity-outcomes.json
           if-no-files-found: warn
 

@@ -84,6 +84,25 @@ test('复核模型每日训练只允许主板挑战者胜出现役版本后发�
   assert.match(workflow, /tests\/test_review_release\.py/)
 })
 
+test('Alpha158每日生成连续排名快照且失败不阻断V3训练', () => {
+  const job = workflow.split('  opportunity-retrain:')[1]
+    ?.split('\n  market-data-archive:')[0] || ''
+  const alphaStep = job.match(
+    /- name: Train and publish Alpha158 continuous ranking snapshot([\s\S]*?)(?=\n      - name:)/,
+  )?.[1] || ''
+
+  assert.match(alphaStep, /continue-on-error: true/)
+  assert.match(alphaStep, /alpha158_market_history\.py/)
+  assert.match(
+    alphaStep,
+    /decision_engine\.training\.alpha158_mainboard/,
+  )
+  assert.match(alphaStep, /--top-n 1000/)
+  assert.match(alphaStep, /alpha158_snapshot\.py/)
+  assert.match(alphaStep, /--publish/)
+  assert.match(workflow, /tests\/test_alpha158_snapshot\.py/)
+})
+
 test('每日重训把新成熟结果压实进版本化历史基线', () => {
   const collectAt = workflow.indexOf('python collect_opportunity_outcomes.py')
   const compactAt = workflow.indexOf('python publish_opportunity_history.py')
