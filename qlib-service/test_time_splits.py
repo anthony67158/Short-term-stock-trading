@@ -102,6 +102,28 @@ class TimeSplitTest(unittest.TestCase):
                 minimum_partition_samples=4,
             )
 
+    def test_four_way_split_can_reserve_a_full_confirmation_year(self):
+        count = 800
+        dates = np.asarray([f"day-{index:04d}" for index in range(count)])
+        starts = np.arange(1, count + 1, dtype=np.int64) * 1_000
+        groups = np.asarray([f"event-{index}" for index in range(count)])
+
+        _, _, _, confirmation, metadata = four_way_interval_split(
+            dates,
+            starts,
+            starts + 100,
+            groups,
+            calibration_fraction=0.15,
+            selection_fraction=0.15,
+            confirmation_fraction=0.15,
+            embargo_dates=5,
+            minimum_partition_samples=1,
+            minimum_confirmation_dates=252,
+        )
+
+        self.assertEqual(len(np.unique(dates[confirmation])), 252)
+        self.assertEqual(metadata["minimum_confirmation_dates"], 252)
+
     def test_expanding_folds_keep_dates_together_and_purge_label_horizon(self):
         dates = np.repeat(
             np.asarray([f"202601{day:02d}" for day in range(1, 19)]),

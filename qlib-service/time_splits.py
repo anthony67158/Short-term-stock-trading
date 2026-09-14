@@ -49,6 +49,7 @@ def four_way_interval_split(
     confirmation_fraction=0.15,
     embargo_dates=5,
     minimum_partition_samples=30,
+    minimum_confirmation_dates=0,
 ):
     (
         dates,
@@ -77,10 +78,24 @@ def four_way_interval_split(
         or minimum_partition_samples < 1
     ):
         raise ValueError("minimum_partition_samples must be positive")
+    if (
+        not isinstance(minimum_confirmation_dates, int)
+        or minimum_confirmation_dates < 0
+    ):
+        raise ValueError("minimum_confirmation_dates must be non-negative")
 
-    calibration_count, selection_count, confirmation_count = (
-        max(1, math.ceil(len(unique_dates) * value))
-        for value in fractions
+    calibration_count = max(
+        1,
+        math.ceil(len(unique_dates) * calibration_fraction),
+    )
+    selection_count = max(
+        1,
+        math.ceil(len(unique_dates) * selection_fraction),
+    )
+    confirmation_count = max(
+        1,
+        math.ceil(len(unique_dates) * confirmation_fraction),
+        minimum_confirmation_dates,
     )
     confirmation_position = len(unique_dates) - confirmation_count
     confirmation_embargo_position = (
@@ -186,6 +201,7 @@ def four_way_interval_split(
     metadata = {
         "schema_version": "four-way-label-interval-split.v1",
         "embargo_dates": embargo_dates,
+        "minimum_confirmation_dates": minimum_confirmation_dates,
         "embargo_date_values": embargo_ranges,
         "ranges": {
             name: {
