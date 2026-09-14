@@ -50,6 +50,20 @@ def walkforward(*, recent_rank_ic=0.03, overall_rank_ic=0.02):
             "RankIC": recent_rank_ic,
             "ICIR": 0.3,
         }],
+        "latest": {
+            "date": "20260912",
+            "trainEndDate": "20260908",
+            "calibrationEndDate": "20260910",
+            "rankings": [
+                {
+                    "date": "20260912",
+                    "code": f"600{index:03d}",
+                    "rank": index + 1,
+                    "score": 1 - index / 1000,
+                }
+                for index in range(500)
+            ],
+        },
         "rankings": [
             {
                 "date": "20260910",
@@ -71,7 +85,7 @@ class Alpha158SnapshotTest(unittest.TestCase):
 
         self.assertEqual(snapshot["state"], "ACTIVE")
         self.assertTrue(snapshot["productionEligible"])
-        self.assertEqual(snapshot["asOfDate"], "20260910")
+        self.assertEqual(snapshot["asOfDate"], "20260912")
         self.assertEqual(snapshot["summary"]["stocks"], 500)
         self.assertGreater(snapshot["reliabilityWeight"], 0)
         self.assertLessEqual(snapshot["reliabilityWeight"], 0.25)

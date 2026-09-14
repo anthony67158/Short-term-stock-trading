@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -11,6 +12,7 @@ if SERVICE_ROOT not in sys.path:
 
 from decision_engine.training.alpha158_mainboard import (  # noqa: E402
     _folds,
+    _latest_ranking,
     select_causal_universe,
 )
 
@@ -81,6 +83,49 @@ class Alpha158MainboardTest(unittest.TestCase):
                 panel["label_end_dates"][fold["calibration"]]
                 < validation_start
             ))
+
+    def test_final_snapshot_refits_before_scoring_latest_unlabelled_day(self):
+        dates = np.asarray([
+            f"202601{day:02d}"
+            for day in range(1, 32)
+        ] + [
+            f"202602{day:02d}"
+            for day in range(1, 21)
+        ])
+        panel = {
+            "X": np.zeros((len(dates), 158), dtype=np.float32),
+            "y": np.zeros(len(dates), dtype=np.float32),
+            "dates": dates,
+            "label_end_dates": dates,
+            "latest_X": np.zeros((2, 158), dtype=np.float32),
+            "latest_codes": np.asarray(["600002", "600001"]),
+            "latest_date": np.asarray("20260220"),
+        }
+
+        class Model:
+            best_iteration = 7
+
+            def predict(self, _matrix, num_iteration=None):
+                self.iteration = num_iteration
+                return np.asarray([0.1, 0.3])
+
+        model = Model()
+        with patch(
+            "decision_engine.training.alpha158_mainboard._fit_model",
+            return_value=model,
+        ):
+            result = _latest_ranking(
+                panel,
+                threads=1,
+                top_n=2,
+            )
+
+        self.assertEqual(result["date"], "20260220")
+        self.assertEqual(result["bestIteration"], 7)
+        self.assertEqual(
+            [row["code"] for row in result["rankings"]],
+            ["600001", "600002"],
+        )
 
 
 if __name__ == "__main__":

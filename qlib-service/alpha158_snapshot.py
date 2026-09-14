@@ -7,7 +7,6 @@ import gzip
 import hashlib
 import json
 import math
-import os
 import re
 import time
 
@@ -98,9 +97,16 @@ def build_alpha158_snapshot(payload, *, generated_at=None):
         raise ValueError("Alpha158扩展时序结果版本无效")
     latest_fold = _latest_fold(payload)
     overall = payload.get("overall") or {}
+    latest_payload = payload.get("latest") or {}
+    ranking_source = (
+        latest_payload.get("rankings")
+        if isinstance(latest_payload, dict)
+        and latest_payload.get("rankings")
+        else payload.get("rankings")
+    )
     rankings = [
         row
-        for row in payload.get("rankings") or []
+        for row in ranking_source or []
         if isinstance(row, dict)
         and MAIN_BOARD_PATTERN.fullmatch(str(row.get("code") or ""))
         and re.fullmatch(r"\d{8}", str(row.get("date") or ""))
@@ -109,7 +115,11 @@ def build_alpha158_snapshot(payload, *, generated_at=None):
     ]
     if not latest_fold or not rankings:
         raise ValueError("Alpha158扩展时序结果缺少有效折或排名")
-    as_of_date = max(str(row["date"]) for row in rankings)
+    as_of_date = (
+        str(latest_payload.get("date") or "")
+        if latest_payload.get("rankings")
+        else max(str(row["date"]) for row in rankings)
+    )
     latest = [
         row for row in rankings
         if str(row["date"]) == as_of_date

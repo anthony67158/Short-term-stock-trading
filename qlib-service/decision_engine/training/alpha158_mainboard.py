@@ -229,6 +229,9 @@ def build_panel(
     sample_dates = []
     label_end_dates = []
     codes = []
+    latest_features = []
+    latest_codes = []
+    latest_signal_date = signal_dates[-1]
     for code_index, (code, selected_dates) in enumerate(
         sorted(selected_by_code.items()),
         start=1,
@@ -264,7 +267,12 @@ def build_panel(
             )
         for date in sorted(selected_dates):
             index = date_index[date]
-            if index < 60 or index + 2 >= len(dates):
+            if index < 60:
+                continue
+            if date == latest_signal_date:
+                latest_features.append(matrix[index])
+                latest_codes.append(code)
+            if index + 2 >= len(dates):
                 continue
             label_end = dates[index + 2]
             next_close = arrays["close"][index + 1]
@@ -306,6 +314,12 @@ def build_panel(
         "codes": np.asarray(codes, dtype="<U6")[valid],
         "feature_names": np.asarray(FEATURE_NAMES, dtype="<U16"),
         "signal_dates": np.asarray(signal_dates, dtype="<U8"),
+        "latest_X": np.asarray(
+            latest_features,
+            dtype=np.float32,
+        ).reshape((-1, len(FEATURE_NAMES))),
+        "latest_codes": np.asarray(latest_codes, dtype="<U6"),
+        "latest_date": np.asarray(latest_signal_date, dtype="<U8"),
         "summary": {
             "dailyRows": len(rows),
             "codes": len(rows_by_code),
@@ -470,6 +484,66 @@ def _fit_model(panel, fold, threads):
     )
 
 
+def _latest_ranking(panel, *, threads, top_n):
+    latest_date = str(panel["latest_date"])
+    latest_matrix = np.asarray(panel["latest_X"], dtype=np.float32)
+    latest_codes = np.asarray(panel["latest_codes"]).astype(str)
+    if not len(latest_matrix) or len(latest_matrix) != len(latest_codes):
+        raise ValueError("Alpha158 latest inference rows are missing")
+    dates = np.unique(panel["dates"])
+    mature_dates = dates[dates < latest_date]
+    if len(mature_dates) < 30:
+        raise ValueError("Alpha158 final training dates are insufficient")
+    calibration_count = max(5, math.ceil(len(mature_dates) * 0.15))
+    calibration_dates = mature_dates[-calibration_count:]
+    calibration_start = calibration_dates[0]
+    train = np.flatnonzero(
+        (panel["dates"] < calibration_start)
+        & (panel["label_end_dates"] < calibration_start)
+    )
+    calibration = np.flatnonzero(
+        np.isin(panel["dates"], calibration_dates)
+        & (panel["label_end_dates"] < latest_date)
+    )
+    if not len(train) or not len(calibration):
+        raise ValueError("Alpha158 final fit partitions are empty")
+    model = _fit_model(
+        panel,
+        {"train": train, "calibration": calibration},
+        threads,
+    )
+    scores = np.asarray(
+        model.predict(
+            latest_matrix,
+            num_iteration=model.best_iteration,
+        ),
+        dtype=np.float64,
+    )
+    order = np.lexsort((latest_codes, -scores))
+    limit = min(len(order), max(1, int(top_n)))
+    return {
+        "date": latest_date,
+        "trainEndDate": max(
+            panel["dates"][train].astype(str).tolist()
+        ),
+        "calibrationEndDate": max(
+            panel["dates"][calibration].astype(str).tolist()
+        ),
+        "trainSamples": int(len(train)),
+        "calibrationSamples": int(len(calibration)),
+        "bestIteration": int(model.best_iteration),
+        "rankings": [
+            {
+                "date": latest_date,
+                "code": str(latest_codes[index]),
+                "rank": rank,
+                "score": round(float(scores[index]), 8),
+            }
+            for rank, index in enumerate(order[:limit], start=1)
+        ],
+    }
+
+
 def run_walkforward(panel, *, threads=4, top_n=100):
     predictions = []
     reports = []
@@ -535,6 +609,11 @@ def run_walkforward(panel, *, threads=4, top_n=100):
         "folds": reports,
         "overall": overall,
         "rankings": predictions,
+        "latest": _latest_ranking(
+            panel,
+            threads=threads,
+            top_n=top_n,
+        ),
     }
 
 
