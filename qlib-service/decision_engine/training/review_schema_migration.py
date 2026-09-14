@@ -18,10 +18,10 @@ from ..heads.review_contract_v4 import (
     FEATURE_NAMES_V4,
     FEATURE_SCHEMA_VERSION_V4,
 )
-from opportunity_history import normalize_history_outcomes
 from .review_dataset import (
     build_opportunity_review_dataset,
     is_main_board_code,
+    normalize_review_history_outcomes,
 )
 from .review_release import (
     REVIEW_RELEASE_THRESHOLDS,
@@ -69,7 +69,7 @@ def project_v4_outcomes_to_v3(outcomes):
 
 
 def build_migration_datasets(path):
-    outcomes = normalize_history_outcomes(_read_payload(path))
+    outcomes = normalize_review_history_outcomes(_read_payload(path))
     v4 = build_opportunity_review_dataset(
         outcomes,
         feature_schema="v4",

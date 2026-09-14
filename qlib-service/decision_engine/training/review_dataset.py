@@ -1,6 +1,7 @@
 """Build trigger-review training rows without leaking them into entry scores."""
 
 from collections import Counter
+import copy
 
 import numpy as np
 
@@ -50,6 +51,72 @@ def _count_by(values, field):
         for value in values
     )
     return dict(sorted(counts.items()))
+
+
+def _outcomes(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("outcomes"), list):
+        return payload["outcomes"]
+    raise ValueError("复核历史样本结构无效")
+
+
+def _review_risk_outcome(value):
+    repaired = copy.deepcopy(value)
+    if repaired.get("fillStatus") != "FILLED":
+        return repaired
+    metrics = repaired.get("metrics")
+    contract = (repaired.get("reviewScoreInput") or {}).get("priceContract")
+    entry = repaired.get("entry") or {}
+    try:
+        net_pnl = float((metrics or {}).get("netPnl"))
+        quantity = float(entry.get("quantity"))
+        risk_per_share = float(
+            (contract or {}).get("priceRiskMilliCny")
+        ) / 1000
+    except (TypeError, ValueError):
+        return repaired
+    risk_cash = quantity * risk_per_share
+    if (
+        not all(np.isfinite(item) for item in (
+            net_pnl,
+            quantity,
+            risk_per_share,
+            risk_cash,
+        ))
+        or quantity <= 0
+        or risk_per_share <= 0
+        or risk_cash <= 0
+    ):
+        return repaired
+    repaired["metrics"] = {
+        **metrics,
+        "netR": round(net_pnl / risk_cash, 6),
+        "initialRiskCash": round(risk_cash, 2),
+        "riskBasis": "REVIEW_PRICE_CONTRACT_V2",
+    }
+    return repaired
+
+
+def normalize_review_history_outcomes(payload):
+    unique = {}
+    for value in _outcomes(payload):
+        if (
+            not isinstance(value, dict)
+            or value.get("maturity") != "MATURED"
+        ):
+            continue
+        decision_id = str(value.get("decisionId") or "")
+        if not decision_id.startswith("formula:"):
+            continue
+        unique[decision_id] = _review_risk_outcome(value)
+    return sorted(
+        unique.values(),
+        key=lambda value: (
+            str(value.get("tradeDate") or ""),
+            str(value.get("decisionId") or ""),
+        ),
+    )
 
 
 def _stress_net_r(outcome, base_r, *, base_bps=5.0, stress_bps=10.0):

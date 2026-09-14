@@ -15,8 +15,10 @@ from .evaluation import (
     fit_probability_calibrator,
     regression_metrics,
 )
-from opportunity_history import normalize_history_outcomes
-from .review_dataset import build_opportunity_review_dataset
+from .review_dataset import (
+    build_opportunity_review_dataset,
+    normalize_review_history_outcomes,
+)
 from .bakeoff import (
     CatBoostFamily,
     LightGbmFamily,
@@ -65,7 +67,7 @@ def load_dataset(path, *, feature_schema="v3"):
     with opener(path, "rt", encoding="utf-8") as handle:
         payload = json.load(handle)
     return build_opportunity_review_dataset(
-        normalize_history_outcomes(payload),
+        normalize_review_history_outcomes(payload),
         feature_schema=feature_schema,
     )
 

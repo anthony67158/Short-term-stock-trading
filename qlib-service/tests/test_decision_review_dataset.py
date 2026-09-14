@@ -18,6 +18,7 @@ from decision_engine.heads.review_contract import (  # noqa: E402
 from decision_engine.training.review_dataset import (  # noqa: E402
     _stress_net_r,
     build_opportunity_review_dataset,
+    normalize_review_history_outcomes,
 )
 from decision_engine.training.review_bakeoff import (  # noqa: E402
     select_review_candidate,
@@ -66,6 +67,37 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
 
         self.assertFalse(available)
         self.assertEqual(stressed, 0.2)
+
+    def test_review_normalizer_uses_review_price_risk_basis(self):
+        value = {
+            "decisionId": "formula:test:immediate",
+            "maturity": "MATURED",
+            "fillStatus": "FILLED",
+            "tradeDate": "2026-09-01",
+            "metrics": {
+                "netPnl": 20,
+                "netR": 99,
+                "initialRiskCash": 999,
+                "riskBasis": "PLANNED_PRICE_CONTRACT",
+            },
+            "entry": {"quantity": 100},
+            "reviewScoreInput": {
+                "priceContract": {"priceRiskMilliCny": 500},
+            },
+        }
+
+        normalized = normalize_review_history_outcomes({
+            "outcomes": [value],
+        })[0]
+
+        self.assertEqual(normalized["metrics"]["initialRiskCash"], 50)
+        self.assertEqual(normalized["metrics"]["netR"], 0.4)
+        self.assertEqual(
+            normalized["metrics"]["riskBasis"],
+            "REVIEW_PRICE_CONTRACT_V2",
+        )
+        # 输入对象不可被离线训练归一化就地修改。
+        self.assertEqual(value["metrics"]["netR"], 99)
 
     def test_review_release_does_not_fill_top5_with_negative_expectation(self):
         dataset = {
