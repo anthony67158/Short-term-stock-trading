@@ -242,13 +242,13 @@ test('未完成买入计划占用账户级开放风险预算', () => {
       status: 'ARMED',
       side: 'BUY',
       reservedCash: 20000,
-      riskAmount: 3000,
+      riskAmount: 5000,
     }],
     now,
   })
 
-  assert.equal(result.metrics.openRiskPct, 3)
-  assert.equal(result.activeOpenRiskAmount, 3000)
+  assert.equal(result.metrics.openRiskPct, 5)
+  assert.equal(result.activeOpenRiskAmount, 5000)
   assert.equal(result.availableOpenRiskAmount, 0)
   assert.equal(result.allowRiskIncrease, false)
   assert.ok(result.blockerCodes.includes('OPEN_RISK_BUDGET'))
@@ -277,7 +277,7 @@ test('旧执行计划根据入场止损和剩余手数估算开放风险', () =>
   })
 
   assert.equal(result.activeOpenRiskAmount, 200)
-  assert.equal(result.availableOpenRiskAmount, 2800)
+  assert.equal(result.availableOpenRiskAmount, 4800)
   assert.equal(result.allowRiskIncrease, true)
 })
 

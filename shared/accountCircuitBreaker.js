@@ -1,4 +1,5 @@
 import { beijingDayStartTs } from './portfolioAccounting.js'
+import { resolveAccountRiskProfile } from './accountRiskProfiles.js'
 
 const ACTIVE_PLAN_STATES = new Set([
   'ARMED',
@@ -71,7 +72,14 @@ export function evaluateAccountCircuitBreaker({
   executionPlans = [],
   now = Date.now(),
   limits = {},
+  riskProfile = 'BASELINE',
+  riskPurpose = 'PRODUCTION',
+  baselineQualified = false,
 } = {}) {
+  const profile = resolveAccountRiskProfile(riskProfile, {
+    purpose: riskPurpose,
+    baselineQualified,
+  })
   const totalAssets = Math.max(0, finite(account.totalAssets) || 0)
   const cash = Math.max(0, finite(account.cash) || 0)
   const startAssets = Math.max(
@@ -99,14 +107,21 @@ export function evaluateAccountCircuitBreaker({
       finite(limits.lossStreakRiskMultiplier) ?? 0.5,
     ),
   )
-  const maximumPositionPct = finite(limits.maximumPositionPct) ?? 85
-  const minimumCashReservePct = finite(limits.minimumCashReservePct) ?? 10
+  const maximumPositionPct = Math.min(
+    profile.maximumPositionPct,
+    finite(limits.maximumPositionPct) ?? profile.maximumPositionPct,
+  )
+  const minimumCashReservePct = Math.max(
+    profile.minimumCashReservePct,
+    finite(limits.minimumCashReservePct) ?? profile.minimumCashReservePct,
+  )
   const maximumIndustryWeightPct = finite(
     limits.maximumIndustryWeightPct,
   ) ?? 30
-  const maximumOpenRiskPct = finite(
-    limits.maximumOpenRiskPct,
-  ) ?? 3
+  const maximumOpenRiskPct = Math.min(
+    profile.maximumOpenRiskPct,
+    finite(limits.maximumOpenRiskPct) ?? profile.maximumOpenRiskPct,
+  )
   const dayStart = beijingDayStartTs(now)
   const realizedPnl = (closed || [])
     .filter((item) =>
@@ -253,6 +268,7 @@ export function evaluateAccountCircuitBreaker({
     : allowRiskIncrease ? 1 : 0
   return {
     schemaVersion: 'account-circuit-breaker.v1',
+    riskProfile: profile,
     allowRiskIncrease,
     blockerCodes: blockers.map((item) => item.code),
     blockers,

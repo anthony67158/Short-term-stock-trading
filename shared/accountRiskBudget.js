@@ -3,6 +3,7 @@ import { evaluateAccountCircuitBreaker } from './accountCircuitBreaker.js'
 import { buildTradeExpectancy } from './tradeExpectancy.js'
 import { executionPrice, tradeFees } from './ashareStrategyExecution.js'
 import { beijingDayKey, isContinuousTrading } from './tradingCalendar.js'
+import { resolveAccountRiskProfile } from './accountRiskProfiles.js'
 
 function finite(value) {
   if (value == null || value === '') return null
@@ -24,7 +25,20 @@ export function accountRiskCodes(data) {
   ].map((item) => item.code).filter((code) => /^\d{6}$/.test(String(code))))]
 }
 
-export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()) {
+export function buildAccountRiskContext(
+  data = {},
+  quotes = {},
+  now = Date.now(),
+  {
+    riskProfile = 'BASELINE',
+    riskPurpose = 'PRODUCTION',
+    baselineQualified = false,
+  } = {},
+) {
+  const profile = resolveAccountRiskProfile(riskProfile, {
+    purpose: riskPurpose,
+    baselineQualified,
+  })
   const holdings = Array.isArray(data.holding) ? data.holding : []
   const portfolio = computePortfolio(holdings, quotes, data.account)
   let holdingRiskAmount = 0
@@ -90,6 +104,9 @@ export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()
     closed: data.closed || [],
     executionPlans: data.executionPlans || [],
     now,
+    riskProfile: profile.id,
+    riskPurpose: profile.purpose,
+    baselineQualified,
   })
   const complete = finite(data.account?.cash) != null
     && portfolio.totalAssets > 0 && unknownRiskCodes.size === 0
@@ -102,11 +119,16 @@ export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()
     cash: portfolio.available,
     exposures,
     reservedExposures,
+    riskProfile: profile,
     breaker,
     availableCash: complete && breaker.allowRiskIncrease
       ? Math.max(0, Math.min(
-          breaker.availableCashAfterReservations - portfolio.totalAssets * 0.1,
-          portfolio.totalAssets * Math.max(0, 85 - portfolio.position) / 100
+          breaker.availableCashAfterReservations
+            - portfolio.totalAssets * profile.minimumCashReservePct / 100,
+          portfolio.totalAssets * Math.max(
+            0,
+            profile.maximumPositionPct - portfolio.position,
+          ) / 100
             - breaker.reservedBuyCash,
         ))
       : 0,
@@ -118,6 +140,8 @@ export function buildAccountRiskContext(data = {}, quotes = {}, now = Date.now()
 
 export function allocateOpportunityBudget(portfolio, context) {
   if (!context) return portfolio
+  const profile = context.riskProfile
+    || resolveAccountRiskProfile()
   let cash = context.availableCash
   let risk = context.availableRisk
   const heldByCode = new Map()
@@ -134,7 +158,8 @@ export function allocateOpportunityBudget(portfolio, context) {
     const holdingPct = heldByCode.get(row.code) || 0
     const industry = row.tags?.industry || row.sector?.name || ''
     const capPct = Math.max(0, Math.min(
-      row.positionPct || 0, 20 - holdingPct,
+      row.positionPct || 0,
+      profile.maximumSinglePositionPct - holdingPct,
       30 - (heldByIndustry.get(industry) || 0),
     ))
     const one = buildTradeExpectancy({
@@ -145,7 +170,10 @@ export function allocateOpportunityBudget(portfolio, context) {
       ? Math.max(0, Math.floor(Math.min(
           cash / (one.entryFillPrice * 100 + one.entryFees),
           context.totalAssets * capPct / 100 / (one.entryFillPrice * 100 + one.entryFees),
-          Math.min(risk, context.totalAssets * 0.006) / one.lossAmount,
+          Math.min(
+            risk,
+            context.totalAssets * profile.singleTradeRiskPct / 100,
+          ) / one.lossAmount,
         )))
       : 0
     if (!Number.isFinite(lots)) lots = 0

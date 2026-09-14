@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-12 已完成）。
+状态：IN PROGRESS（Tasks 1-13 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -235,14 +235,14 @@
 
 ## Phase 4：风险档与账户同源回放
 
-### Task 13：实现共享风险档合同
+### Task 13：实现共享风险档合同（已完成）
 
 **Description:** 将三种风险档集中定义并加入账户风险计算，消除散落常数。
 
 **Acceptance criteria:**
-- [ ] `BASELINE`复现当前风险行为。
-- [ ] `ELEVATED_RESEARCH`只能由研究运行显式选择。
-- [ ] `ABSOLUTE_CAP`无法自动进入生产配置。
+- [x] `BASELINE`复现当前风险行为。
+- [x] `ELEVATED_RESEARCH`只能由研究运行显式选择。
+- [x] `ABSOLUTE_CAP`无法自动进入生产配置。
 
 **Verification:** `node --test test/account-risk-profile.test.js test/account-risk-budget.test.js`
 

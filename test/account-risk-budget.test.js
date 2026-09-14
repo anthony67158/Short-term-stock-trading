@@ -15,9 +15,49 @@ test('现有持仓止损风险消耗新增风险预算', () => {
   const result = buildAccountRiskContext(data, quotes, now)
   assert.equal(result.complete, true)
   assert.ok(result.breaker.holdingRiskAmount > 1000)
-  assert.ok(result.availableRisk < 2000)
+  assert.ok(result.availableRisk > 3900)
+  assert.equal(result.breaker.metrics.maximumOpenRiskPct, 5)
   assert.equal(result.exposures[0].sectorCode, '测试行业')
   assert.equal(result.totalAssets, 100000)
+})
+
+test('研究档显式提高风险与仓位上限但不使用杠杆', () => {
+  const baseline = buildAccountRiskContext(
+    { account: { cash: 100000 } },
+    {},
+    now,
+  )
+  const elevated = buildAccountRiskContext(
+    { account: { cash: 100000 } },
+    {},
+    now,
+    {
+      riskProfile: 'ELEVATED_RESEARCH',
+      riskPurpose: 'RESEARCH',
+      baselineQualified: true,
+    },
+  )
+
+  assert.equal(baseline.availableCash, 85000)
+  assert.equal(baseline.availableRisk, 5000)
+  assert.equal(elevated.availableCash, 90000)
+  assert.equal(elevated.availableRisk, 6000)
+  assert.equal(elevated.riskProfile.leverage, 1)
+})
+
+test('调用方自定义限制只能收紧不能突破风险档硬上限', () => {
+  const result = evaluateAccountCircuitBreaker({
+    account: { cash: 100000, totalAssets: 100000 },
+    limits: {
+      maximumOpenRiskPct: 99,
+      maximumPositionPct: 99,
+      minimumCashReservePct: 0,
+    },
+  })
+
+  assert.equal(result.metrics.maximumOpenRiskPct, 5)
+  assert.equal(result.riskProfile.maximumPositionPct, 85)
+  assert.equal(result.riskProfile.minimumCashReservePct, 10)
 })
 
 test('持仓缺失报价、止损或报价跨日不得按零风险放行', () => {
