@@ -16,6 +16,7 @@ from decision_engine.heads.review_contract import (  # noqa: E402
     review_price_contract,
 )
 from decision_engine.training.review_dataset import (  # noqa: E402
+    _stress_net_r,
     build_opportunity_review_dataset,
 )
 from decision_engine.training.review_bakeoff import (  # noqa: E402
@@ -49,6 +50,23 @@ def review_input():
 
 
 class OpportunityReviewDatasetTest(unittest.TestCase):
+    def test_10bps_stress_deducts_extra_slippage_on_both_legs(self):
+        stressed, available = _stress_net_r({
+            "metrics": {"initialRiskCash": 100},
+            "entry": {"grossAmount": 1000},
+            "exit": {"grossAmount": 1100},
+        }, 0.2)
+
+        self.assertTrue(available)
+        # 额外5bps * (买入1000 + 卖出1100) / 风险现金100 = 0.0105R。
+        self.assertAlmostEqual(stressed, 0.1895)
+
+    def test_10bps_stress_is_marked_unavailable_without_real_cash_basis(self):
+        stressed, available = _stress_net_r({}, 0.2)
+
+        self.assertFalse(available)
+        self.assertEqual(stressed, 0.2)
+
     def test_review_release_does_not_fill_top5_with_negative_expectation(self):
         dataset = {
             "y_win": np.asarray([0, 1, 1, 0, 0]),

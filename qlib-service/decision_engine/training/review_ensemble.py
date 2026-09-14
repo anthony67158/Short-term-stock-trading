@@ -477,6 +477,34 @@ def _policy_metrics(dataset, holdout, predictions, policy):
         group_ids=dataset["codes_opportunity"][holdout],
         eligible_mask=eligible,
     )
+    stress_values = np.asarray(
+        dataset.get(
+            "y_opportunity_r_stress10",
+            dataset["y_opportunity_r"],
+        ),
+        dtype=np.float64,
+    )
+    stress_available = np.asarray(
+        dataset.get(
+            "stress10_available_opportunity",
+            np.ones(len(stress_values), dtype=np.int8),
+        ),
+        dtype=np.int8,
+    )
+    stress_coverage = float(np.mean(stress_available[holdout] == 1))
+    stress_ranking = (
+        ranking_metrics(
+            stress_values[holdout] > 0,
+            stress_values[holdout],
+            score,
+            dataset["dates_opportunity"][holdout],
+            top_k=5,
+            group_ids=dataset["codes_opportunity"][holdout],
+            eligible_mask=eligible,
+        )
+        if stress_coverage >= 1.0
+        else None
+    )
     return {
         "samples": int(len(holdout)),
         "selected": ranking["selected"],
@@ -490,6 +518,23 @@ def _policy_metrics(dataset, holdout, predictions, policy):
         ),
         "maximumDrawdownRAt5": ranking["max_drawdown_r_at_5"],
         "worstDailyNetRAt5": ranking["worst_daily_net_r_at_5"],
+        "stress10Coverage": round(stress_coverage, 6),
+        "stress10MeanNetRAt5": (
+            stress_ranking["mean_net_r_at_5"]
+            if stress_ranking else None
+        ),
+        "stress10NetRLowerBound95": (
+            block_bootstrap_lower_bound(
+                stress_ranking["daily_net_r"],
+                samples=5000,
+                random_state=42,
+            )
+            if stress_ranking else None
+        ),
+        "accountDrawdownPctAtRisk07Top5": round(
+            float(ranking["max_drawdown_r_at_5"]) * 3.5,
+            6,
+        ),
     }
 
 
@@ -906,15 +951,30 @@ def train_review_ensemble(
         "policy": selected_policy["policy"],
         "metrics": opportunity_confirmation_metrics,
     }
-    selection_policy_blockers = (
-        []
-        if selected_policy["metrics"]["netRLowerBound95"] > 0
-        else ["机会Top5净R下界未转正"]
+    def policy_blockers(metrics):
+        values = []
+        if metrics["netRLowerBound95"] <= 0:
+            values.append("机会Top5净R下界未转正")
+        if feature_schema == "v4":
+            if metrics.get("stress10Coverage") != 1.0:
+                values.append("10bps压力标签覆盖不足100%")
+            if (
+                metrics.get("stress10NetRLowerBound95") is None
+                or metrics["stress10NetRLowerBound95"] <= 0
+            ):
+                values.append("10bps压力净R下界未转正")
+            if (
+                metrics.get("accountDrawdownPctAtRisk07Top5") is None
+                or metrics["accountDrawdownPctAtRisk07Top5"] > 10
+            ):
+                values.append("按单笔0.7%风险映射的账户回撤超过10%")
+        return values
+
+    selection_policy_blockers = policy_blockers(
+        selected_policy["metrics"]
     )
-    confirmation_policy_blockers = (
-        []
-        if opportunity_confirmation_metrics["netRLowerBound95"] > 0
-        else ["机会Top5净R下界未转正"]
+    confirmation_policy_blockers = policy_blockers(
+        opportunity_confirmation_metrics
     )
     blockers = [
         *[

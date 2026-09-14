@@ -52,6 +52,37 @@ def _count_by(values, field):
     return dict(sorted(counts.items()))
 
 
+def _stress_net_r(outcome, base_r, *, base_bps=5.0, stress_bps=10.0):
+    if stress_bps <= base_bps:
+        return float(base_r), True
+    metrics = (outcome or {}).get("metrics") or {}
+    entry = (outcome or {}).get("entry") or {}
+    exit_ = (outcome or {}).get("exit") or {}
+    try:
+        initial_risk_cash = float(metrics.get("initialRiskCash"))
+        entry_gross = float(entry.get("grossAmount"))
+        exit_gross = float(exit_.get("grossAmount"))
+    except (TypeError, ValueError):
+        return float(base_r), False
+    if (
+        not all(np.isfinite(value) for value in (
+            initial_risk_cash,
+            entry_gross,
+            exit_gross,
+        ))
+        or initial_risk_cash <= 0
+        or entry_gross <= 0
+        or exit_gross <= 0
+    ):
+        return float(base_r), False
+    extra_cost = (
+        (entry_gross + exit_gross)
+        * (stress_bps - base_bps)
+        / 10_000
+    )
+    return float(base_r) - extra_cost / initial_risk_cash, True
+
+
 def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
     if feature_schema == "v4":
         active_feature_names = FEATURE_NAMES_V4
@@ -199,12 +230,22 @@ def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
             if filled
             else 0.0
         )
+        stress_r, stress_available = (
+            _stress_net_r(
+                event[0],
+                shaped_r,
+            )
+            if filled
+            else (0.0, True)
+        )
         opportunity.append((
             event[0],
             event[1],
             shaped_r,
             event[3],
             conditional_row[5] if filled else event[4],
+            stress_r,
+            stress_available,
         ))
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
@@ -305,6 +346,14 @@ def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
         "y_opportunity_r": np.asarray(
             [item[2] for item in opportunity],
             dtype=np.float32,
+        ),
+        "y_opportunity_r_stress10": np.asarray(
+            [item[5] for item in opportunity],
+            dtype=np.float32,
+        ),
+        "stress10_available_opportunity": np.asarray(
+            [item[6] for item in opportunity],
+            dtype=np.int8,
         ),
         "sector_phases_opportunity": np.asarray(
             [

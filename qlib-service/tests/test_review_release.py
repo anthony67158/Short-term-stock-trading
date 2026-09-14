@@ -31,6 +31,9 @@ def evaluation(
     p_fill_brier=0.10,
     net_r_mae=0.50,
     q10_coverage=0.90,
+    stress_coverage=1.0,
+    stress_lower_bound=0.005,
+    account_drawdown_pct=2.0,
 ):
     return {
         "conditional": {
@@ -46,6 +49,9 @@ def evaluation(
             "meanNetRAt5": mean_net_r,
             "netRLowerBound95": lower_bound,
             "maximumDrawdownRAt5": drawdown,
+            "stress10Coverage": stress_coverage,
+            "stress10NetRLowerBound95": stress_lower_bound,
+            "accountDrawdownPctAtRisk07Top5": account_drawdown_pct,
         },
     }
 

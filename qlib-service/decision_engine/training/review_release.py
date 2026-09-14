@@ -60,6 +60,7 @@ REVIEW_RELEASE_THRESHOLDS = {
         "q10CoverageMinimum": 0.85,
         "q10CoverageMaxDrop": 0.02,
         "selectedCoverageMinimumRatio": 0.5,
+        "maximumAccountDrawdownPctAtRisk07Top5": 10.0,
     },
     "improvement": {
         "meanNetRMinimumLift": 0.01,
@@ -366,6 +367,20 @@ def review_promotion_gate(
     )
     if lower is None or lower <= 0:
         blockers.append("机会Top5净R的95%下界必须大于0")
+    stress_coverage = _metric(
+        challenger,
+        "opportunity",
+        "stress10Coverage",
+    )
+    stress_lower = _metric(
+        challenger,
+        "opportunity",
+        "stress10NetRLowerBound95",
+    )
+    if stress_coverage is None or stress_coverage < 1:
+        blockers.append("10bps压力标签覆盖率必须达到100%")
+    if stress_lower is None or stress_lower <= 0:
+        blockers.append("10bps压力净R的95%下界必须大于0")
 
     selected = _metric(challenger, "opportunity", "selected")
     active_days = _metric(challenger, "opportunity", "activeDays")
@@ -411,6 +426,17 @@ def review_promotion_gate(
         )
         if drawdown > allowed:
             blockers.append("机会Top5最大回撤恶化超过允许阈值")
+    account_drawdown = _metric(
+        challenger,
+        "opportunity",
+        "accountDrawdownPctAtRisk07Top5",
+    )
+    if (
+        account_drawdown is None
+        or account_drawdown
+        > regression["maximumAccountDrawdownPctAtRisk07Top5"]
+    ):
+        blockers.append("按单笔0.7%风险映射的账户回撤超过10%")
 
     for path, label in (
         (("conditional", "pWinBrier"), "盈利概率Brier"),
