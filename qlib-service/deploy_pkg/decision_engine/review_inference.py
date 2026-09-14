@@ -10,8 +10,16 @@ from .contracts import SCORE_SCHEMA_VERSION, not_ready_prediction
 from .heads.position import position_values
 from .heads.review_contract import (
     FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION,
     REVIEW_PATH_FEATURE_COUNT,
     feature_vector,
+)
+from .heads.review_contract_v4 import (
+    ALPHA_FEATURE_NAMES,
+    ALPHA_PREFIX,
+    FEATURE_NAMES_V4,
+    FEATURE_SCHEMA_VERSION_V4,
+    feature_vector_v4,
 )
 from .review_registry import (
     get_review_models,
@@ -25,25 +33,89 @@ def _sigmoid(values):
     return 1.0 / (1.0 + np.exp(-np.clip(raw, -40, 40)))
 
 
-def _validate_item(item):
-    vector = feature_vector(item)
+def _feature_contract(feature_schema):
+    if feature_schema == FEATURE_SCHEMA_VERSION_V4:
+        return FEATURE_NAMES_V4, feature_vector_v4
+    if feature_schema == FEATURE_SCHEMA_VERSION:
+        return FEATURE_NAMES, feature_vector
+    raise ValueError("触价复核特征合同版本不受支持")
+
+
+def _neutral_alpha_factors():
+    return {
+        f"{ALPHA_PREFIX}{name}": (
+            1.0 if name.endswith("Missing") else 0.0
+        )
+        for name in ALPHA_FEATURE_NAMES
+    }
+
+
+def _adapt_item(item, feature_schema):
+    input_schema = (item or {}).get("schemaVersion")
+    if input_schema == feature_schema:
+        return item
+    factors = (item or {}).get("factors")
+    if not isinstance(factors, dict):
+        return item
+    if (
+        feature_schema == FEATURE_SCHEMA_VERSION
+        and input_schema == FEATURE_SCHEMA_VERSION_V4
+    ):
+        return {
+            **item,
+            "schemaVersion": FEATURE_SCHEMA_VERSION,
+            "factors": {
+                name: factors.get(name)
+                for name in FEATURE_NAMES
+            },
+        }
+    if (
+        feature_schema == FEATURE_SCHEMA_VERSION_V4
+        and input_schema == FEATURE_SCHEMA_VERSION
+    ):
+        return {
+            **item,
+            "schemaVersion": FEATURE_SCHEMA_VERSION_V4,
+            "factors": {
+                **{
+                    name: factors.get(name)
+                    for name in FEATURE_NAMES
+                },
+                **_neutral_alpha_factors(),
+            },
+        }
+    return item
+
+
+def _validate_item(item, feature_schema):
+    feature_names, vectorizer = _feature_contract(feature_schema)
+    adapted = _adapt_item(item, feature_schema)
+    vector = vectorizer(adapted)
     formula_id = str(item.get("formulaId") or "TRIGGER_REVIEW")
     if not formula_id or len(formula_id) > 60:
         raise ValueError("触价复核公式无效")
     return {
-        **item,
+        **adapted,
         "formulaId": formula_id,
         "vector": vector,
+        "featureNames": feature_names,
     }
 
 
-def validate_review_request(payload):
+def validate_review_request(
+    payload,
+    *,
+    feature_schema=FEATURE_SCHEMA_VERSION,
+):
     if not isinstance(payload, dict):
         raise ValueError("触价复核请求必须是对象")
     items = payload.get("items")
     if not isinstance(items, list) or not 1 <= len(items) <= 80:
         raise ValueError("触价复核items必须包含1到80项")
-    return [_validate_item(item) for item in items]
+    return [
+        _validate_item(item, feature_schema)
+        for item in items
+    ]
 
 
 def _prediction_arrays(models, metadata, matrix):
@@ -170,16 +242,27 @@ def _out_of_distribution(metadata, matrix):
 
 
 def predict_review_items(payload, *, models=None, metadata=None):
-    items = validate_review_request(payload)
     if models is None or metadata is None:
         models, metadata = get_review_models()
+    feature_schema = (
+        (metadata or {}).get("featureSchemaVersion")
+        or FEATURE_SCHEMA_VERSION
+    )
+    items = validate_review_request(
+        payload,
+        feature_schema=feature_schema,
+    )
     if not models or metadata is None:
         return [
             not_ready_prediction(item, "REVIEW_MODEL_FILES_MISSING")
             for item in items
         ]
     try:
-        metadata = validate_review_metadata(metadata)
+        feature_names, _vectorizer = _feature_contract(feature_schema)
+        metadata = validate_review_metadata(
+            metadata,
+            feature_schema=feature_schema,
+        )
         matrix = np.asarray(
             [item["vector"] for item in items],
             dtype=np.float64,
@@ -210,7 +293,7 @@ def predict_review_items(payload, *, models=None, metadata=None):
         selection_policy["allowedSectorPhases"]
     )
     phase_indices = {
-        phase: FEATURE_NAMES.index(f"initial_sector_{phase}")
+        phase: feature_names.index(f"initial_sector_{phase}")
         for phase in allowed_sector_phases
     }
     for index, item in enumerate(items):

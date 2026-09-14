@@ -5,9 +5,33 @@ from collections import Counter
 import numpy as np
 
 from ..heads.review_contract import FEATURE_NAMES, feature_vector
+from ..heads.review_contract_v4 import (
+    FEATURE_NAMES_V4,
+    feature_vector_v4,
+)
+from .opportunity_reward import cost_aware_opportunity_reward
 
 
 DATASET_SCHEMA_VERSION = "opportunity-review-dataset.v2"
+MAIN_BOARD_CODE_PREFIXES = (
+    "000",
+    "001",
+    "002",
+    "003",
+    "600",
+    "601",
+    "603",
+    "605",
+)
+
+
+def is_main_board_code(value):
+    code = str(value or "")
+    return (
+        len(code) == 6
+        and code.isdigit()
+        and code.startswith(MAIN_BOARD_CODE_PREFIXES)
+    )
 
 
 def _event_group_id(outcome):
@@ -28,7 +52,132 @@ def _count_by(values, field):
     return dict(sorted(counts.items()))
 
 
-def build_opportunity_review_dataset(outcomes):
+def _outcomes(payload):
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("outcomes"), list):
+        return payload["outcomes"]
+    raise ValueError("复核历史样本结构无效")
+
+
+def _review_risk_outcome(value):
+    repaired = dict(value)
+    if repaired.get("fillStatus") != "FILLED":
+        return repaired
+    metrics = repaired.get("metrics")
+    contract = (repaired.get("reviewScoreInput") or {}).get("priceContract")
+    entry = repaired.get("entry") or {}
+    try:
+        net_pnl = float((metrics or {}).get("netPnl"))
+        quantity = float(entry.get("quantity"))
+        risk_per_share = float(
+            (contract or {}).get("priceRiskMilliCny")
+        ) / 1000
+    except (TypeError, ValueError):
+        return repaired
+    risk_cash = quantity * risk_per_share
+    if (
+        not all(np.isfinite(item) for item in (
+            net_pnl,
+            quantity,
+            risk_per_share,
+            risk_cash,
+        ))
+        or quantity <= 0
+        or risk_per_share <= 0
+        or risk_cash <= 0
+    ):
+        return repaired
+    repaired["metrics"] = {
+        **(metrics or {}),
+        "netR": round(net_pnl / risk_cash, 6),
+        "initialRiskCash": round(risk_cash, 2),
+        "riskBasis": "REVIEW_PRICE_CONTRACT_V2",
+    }
+    return repaired
+
+
+def _training_feature_vector(value, feature_names, vectorizer):
+    """Expand the compact offline factor encoding before strict validation."""
+    if not isinstance(value, dict) or "factorValues" not in value:
+        return vectorizer(value)
+    factor_values = value.get("factorValues")
+    if (
+        "factors" in value
+        or not isinstance(factor_values, list)
+        or len(factor_values) != len(feature_names)
+    ):
+        raise ValueError("复核训练特征压缩格式无效")
+    expanded = {
+        key: item
+        for key, item in value.items()
+        if key != "factorValues"
+    }
+    expanded["factors"] = dict(zip(feature_names, factor_values))
+    return vectorizer(expanded)
+
+
+def normalize_review_history_outcomes(payload):
+    unique = {}
+    for value in _outcomes(payload):
+        if (
+            not isinstance(value, dict)
+            or value.get("maturity") != "MATURED"
+        ):
+            continue
+        decision_id = str(value.get("decisionId") or "")
+        if not decision_id.startswith("formula:"):
+            continue
+        unique[decision_id] = _review_risk_outcome(value)
+    return sorted(
+        unique.values(),
+        key=lambda value: (
+            str(value.get("tradeDate") or ""),
+            str(value.get("decisionId") or ""),
+        ),
+    )
+
+
+def _stress_net_r(outcome, base_r, *, base_bps=5.0, stress_bps=10.0):
+    if stress_bps <= base_bps:
+        return float(base_r), True
+    metrics = (outcome or {}).get("metrics") or {}
+    entry = (outcome or {}).get("entry") or {}
+    exit_ = (outcome or {}).get("exit") or {}
+    try:
+        initial_risk_cash = float(metrics.get("initialRiskCash"))
+        entry_gross = float(entry.get("grossAmount"))
+        exit_gross = float(exit_.get("grossAmount"))
+    except (TypeError, ValueError):
+        return float(base_r), False
+    if (
+        not all(np.isfinite(value) for value in (
+            initial_risk_cash,
+            entry_gross,
+            exit_gross,
+        ))
+        or initial_risk_cash <= 0
+        or entry_gross <= 0
+        or exit_gross <= 0
+    ):
+        return float(base_r), False
+    extra_cost = (
+        (entry_gross + exit_gross)
+        * (stress_bps - base_bps)
+        / 10_000
+    )
+    return float(base_r) - extra_cost / initial_risk_cash, True
+
+
+def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
+    if feature_schema == "v4":
+        active_feature_names = FEATURE_NAMES_V4
+        active_feature_vector = feature_vector_v4
+    elif feature_schema == "v3":
+        active_feature_names = FEATURE_NAMES
+        active_feature_vector = feature_vector
+    else:
+        raise ValueError("feature_schema 仅支持 v3 或 v4")
     source = outcomes if isinstance(outcomes, list) else []
     event_ledger = []
     for outcome in source:
@@ -53,6 +202,9 @@ def build_opportunity_review_dataset(outcomes):
                 f"{str(outcome.get('route') or 'UNKNOWN')}"
             ),
             "eventGroupId": _event_group_id(outcome),
+            "mainBoardEligible": is_main_board_code(
+                outcome.get("code")
+            ),
             "hasReviewInput": isinstance(
                 outcome.get("reviewScoreInput"),
                 dict,
@@ -61,18 +213,29 @@ def build_opportunity_review_dataset(outcomes):
     events = []
     conditional = []
     excluded = 0
+    non_main_board_excluded = 0
     conditional_excluded = 0
     for outcome in source:
         if (
             not isinstance(outcome, dict)
-            or outcome.get("maturity") != "MATURED"
+            or not is_main_board_code(outcome.get("code"))
+        ):
+            excluded += 1
+            non_main_board_excluded += 1
+            continue
+        if (
+            outcome.get("maturity") != "MATURED"
             or outcome.get("fillStatus")
             not in {"FILLED", "TRIGGERED_UNFILLED"}
         ):
             excluded += 1
             continue
         try:
-            vector = feature_vector(outcome.get("reviewScoreInput"))
+            vector = _training_feature_vector(
+                outcome.get("reviewScoreInput"),
+                active_feature_names,
+                active_feature_vector,
+            )
             label_start = int(
                 (outcome.get("reviewScoreInput") or {}).get("asOf")
                 or 0
@@ -144,20 +307,42 @@ def build_opportunity_review_dataset(outcomes):
         conditional_row = conditional_by_event.get(event_index)
         if filled and conditional_row is None:
             continue
+        # 费后奖励塑形：默认全 0 权重时等于原始 netR，y_opportunity_r 逐字节不变；
+        # 未成交事件仍恒为 0。惩罚系数只在离线搜索到的挑战者训练中显式开启。
+        shaped_r = (
+            cost_aware_opportunity_reward(
+                (event[0] or {}).get("metrics"),
+                filled=True,
+                base_r=float(conditional_row[3]),
+            )
+            if filled
+            else 0.0
+        )
+        stress_r, stress_available = (
+            _stress_net_r(
+                event[0],
+                shaped_r,
+            )
+            if filled
+            else (0.0, True)
+        )
         opportunity.append((
             event[0],
             event[1],
-            float(conditional_row[3]) if filled else 0.0,
+            shaped_r,
             event[3],
             conditional_row[5] if filled else event[4],
+            stress_r,
+            stress_available,
         ))
     return {
         "schema_version": DATASET_SCHEMA_VERSION,
+        "feature_schema": feature_schema,
         "event_ledger": event_ledger,
         "X_all": np.asarray(
             [item[1] for item in events],
             dtype=np.float32,
-        ).reshape((-1, len(FEATURE_NAMES))),
+        ).reshape((-1, len(active_feature_names))),
         "dates_all": np.asarray(
             [str(item[0].get("tradeDate") or "") for item in events],
             dtype="<U10",
@@ -189,7 +374,7 @@ def build_opportunity_review_dataset(outcomes):
         "X": np.asarray(
             [item[2] for item in conditional],
             dtype=np.float32,
-        ).reshape((-1, len(FEATURE_NAMES))),
+        ).reshape((-1, len(active_feature_names))),
         "dates": np.asarray(
             [str(item[1].get("tradeDate") or "") for item in conditional],
             dtype="<U10",
@@ -221,7 +406,7 @@ def build_opportunity_review_dataset(outcomes):
         "X_opportunity": np.asarray(
             [item[1] for item in opportunity],
             dtype=np.float32,
-        ).reshape((-1, len(FEATURE_NAMES))),
+        ).reshape((-1, len(active_feature_names))),
         "dates_opportunity": np.asarray(
             [str(item[0].get("tradeDate") or "") for item in opportunity],
             dtype="<U10",
@@ -250,6 +435,14 @@ def build_opportunity_review_dataset(outcomes):
             [item[2] for item in opportunity],
             dtype=np.float32,
         ),
+        "y_opportunity_r_stress10": np.asarray(
+            [item[5] for item in opportunity],
+            dtype=np.float32,
+        ),
+        "stress10_available_opportunity": np.asarray(
+            [item[6] for item in opportunity],
+            dtype=np.int8,
+        ),
         "sector_phases_opportunity": np.asarray(
             [
                 str(
@@ -270,7 +463,7 @@ def build_opportunity_review_dataset(outcomes):
             [item[7] for item in conditional],
             dtype="<U60",
         ),
-        "feature_names": np.asarray(FEATURE_NAMES, dtype="<U80"),
+        "feature_names": np.asarray(active_feature_names, dtype="<U80"),
         "summary": {
             "input_outcomes": len(event_ledger),
             "status_counts": {
@@ -290,11 +483,16 @@ def build_opportunity_review_dataset(outcomes):
             "events": len(events),
             "samples": len(conditional),
             "opportunity_samples": len(opportunity),
+            "universe": {
+                "schema_version": "cn-main-board.v1",
+                "code_prefixes": list(MAIN_BOARD_CODE_PREFIXES),
+            },
             "dates": len({
                 str(item[1].get("tradeDate") or "")
                 for item in conditional
             }),
             "excluded": excluded,
+            "non_main_board_excluded": non_main_board_excluded,
             "conditional_excluded": conditional_excluded,
             "filled": sum(item[2] for item in events),
             "unfilled": sum(1 - item[2] for item in events),

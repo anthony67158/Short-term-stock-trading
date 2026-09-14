@@ -31,6 +31,7 @@ from decision_engine.review_inference import predict_review_items
 from decision_engine.review_registry import get_review_models
 from sector_model import get_sector_models, predict_sector_items
 from archive_public_market_day import archive_latest_public
+from alpha158_snapshot import load_alpha158_snapshot
 from opportunity_pattern_snapshot import load_strategy_pattern_snapshot
 
 app = FastAPI(title="Quant Score & Forecast", version="3.0")
@@ -372,6 +373,21 @@ def strategy_pattern_snapshot(x_api_key: str = Header(default="")):
         raise HTTPException(status_code=503, detail=str(error)[:120])
     if snapshot is None:
         raise HTTPException(status_code=404, detail="形态快照尚未生成")
+    return snapshot
+
+
+@app.get("/alpha158-snapshot")
+def alpha158_snapshot(x_api_key: str = Header(default="")):
+    _check_key(x_api_key)
+    bucket = _oss_bucket()
+    if bucket is None:
+        raise HTTPException(status_code=503, detail="Alpha158排名快照OSS未配置")
+    try:
+        snapshot = load_alpha158_snapshot(bucket)
+    except ValueError as error:
+        raise HTTPException(status_code=503, detail=str(error)[:120])
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Alpha158排名快照尚未生成")
     return snapshot
 
 

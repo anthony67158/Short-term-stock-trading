@@ -1,0 +1,14 @@
+{
+  "featureSchemaVersion": "opportunity-alpha158-signal.v1",
+  "description": "Alpha158 连续信号块:作为 V3 复核模型的连续特征输入(不做 Top50 硬过滤)。每项均为决策时点可得的横截面统计,缺失时填 0(中性)并置对应 Missing 掩码为 1。",
+  "featureNames": [
+    "alphaScoreZ",
+    "alphaScorePctRank",
+    "alphaScoreZMissing",
+    "alphaRankIc20",
+    "alphaRankIc60",
+    "alphaRankIcMissing",
+    "alphaScoreMomentum5",
+    "alphaScoreMomentumMissing"
+  ]
+}

@@ -16,6 +16,10 @@ from ..heads.review_contract import (
     FEATURE_SCHEMA_VERSION,
     REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
 )
+from ..heads.review_contract_v4 import (
+    FEATURE_NAMES_V4,
+    FEATURE_SCHEMA_VERSION_V4,
+)
 from ..review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
     REVIEW_ARTIFACT_SCHEMA_VERSION,
@@ -54,8 +58,8 @@ from time_splits import four_way_interval_split
 DEFAULT_SEEDS = (42, 7, 2026)
 POLICY_RANKING_MODES = ("VALUE", "RANKER")
 POLICY_MINIMUM_P_WIN = (0.4, 0.45, 0.5, 0.55)
-POLICY_MINIMUM_EXPECTED_R = (-0.1, 0.0, 0.05)
-POLICY_MINIMUM_LOWER_R = (-2.0, -1.0, -0.5, 0.0)
+POLICY_MINIMUM_EXPECTED_R = (0.0, 0.05, 0.1)
+POLICY_MINIMUM_LOWER_R = (-1.0, -0.5, 0.0)
 POLICY_MINIMUM_P_FILL = (0.0, 0.2, 0.5)
 POLICY_SECTOR_PHASES = (
     (),
@@ -68,6 +72,24 @@ MISSING_FEATURE_INDICES = tuple(
     for index, name in enumerate(FEATURE_NAMES)
     if name.endswith("Missing")
 )
+# v3 生产默认；v4 仅在显式启用 Alpha158 连续特征的挑战者训练中选用。
+# 训练/发布默认保持 v3，绝不改动线上口径。
+REVIEW_FEATURE_SCHEMAS = {
+    "v3": (FEATURE_SCHEMA_VERSION, FEATURE_NAMES),
+    "v4": (FEATURE_SCHEMA_VERSION_V4, FEATURE_NAMES_V4),
+}
+
+
+def _resolve_feature_schema(feature_schema):
+    if feature_schema not in REVIEW_FEATURE_SCHEMAS:
+        raise ValueError("触价复核训练特征合同仅支持 v3 或 v4")
+    schema_version, feature_names = REVIEW_FEATURE_SCHEMAS[feature_schema]
+    missing_indices = tuple(
+        index
+        for index, name in enumerate(feature_names)
+        if name.endswith("Missing")
+    )
+    return schema_version, feature_names, missing_indices
 
 
 def _opportunity_rank_training_data(
@@ -102,16 +124,20 @@ def _catboost_payload(model):
             return json.load(handle)
 
 
-def _feature_support(matrix):
+def _feature_support(
+    matrix,
+    feature_names=FEATURE_NAMES,
+    missing_indices=MISSING_FEATURE_INDICES,
+):
     values = np.asarray(matrix, dtype=np.float64)
     if (
         values.ndim != 2
-        or values.shape[1] != len(FEATURE_NAMES)
+        or values.shape[1] != len(feature_names)
         or not len(values)
         or not np.isfinite(values).all()
     ):
         raise ValueError("触价复核特征支持样本无效")
-    missing = values[:, MISSING_FEATURE_INDICES]
+    missing = values[:, missing_indices]
     patterns = sorted({
         "".join("1" if value >= 0.5 else "0" for value in row)
         for row in missing
@@ -120,7 +146,7 @@ def _feature_support(matrix):
         "schemaVersion": "review-feature-support.v1",
         "lower": np.quantile(values, 0.005, axis=0).tolist(),
         "upper": np.quantile(values, 0.995, axis=0).tolist(),
-        "missingFeatureIndices": list(MISSING_FEATURE_INDICES),
+        "missingFeatureIndices": list(missing_indices),
         "missingPatterns": patterns,
         "maximumOutlierFraction": 0.2,
     }
@@ -451,6 +477,35 @@ def _policy_metrics(dataset, holdout, predictions, policy):
         group_ids=dataset["codes_opportunity"][holdout],
         eligible_mask=eligible,
     )
+    stress_values = np.asarray(
+        dataset.get(
+            "y_opportunity_r_stress10",
+            dataset["y_opportunity_r"],
+        ),
+        dtype=np.float64,
+    )
+    stress_available = np.asarray(
+        dataset.get(
+            "stress10_available_opportunity",
+            np.ones(len(stress_values), dtype=np.int8),
+        ),
+        dtype=np.int8,
+    )
+    stress_coverage = float(np.mean(stress_available[holdout] == 1))
+    stress_ranking = (
+        ranking_metrics(
+            stress_values[holdout] > 0,
+            stress_values[holdout],
+            score,
+            dataset["dates_opportunity"][holdout],
+            top_k=5,
+            group_ids=dataset["codes_opportunity"][holdout],
+            eligible_mask=eligible,
+        )
+        if stress_coverage >= 1.0
+        else None
+    )
+    account = _account_metrics(ranking, stress_ranking)
     return {
         "samples": int(len(holdout)),
         "selected": ranking["selected"],
@@ -464,6 +519,101 @@ def _policy_metrics(dataset, holdout, predictions, policy):
         ),
         "maximumDrawdownRAt5": ranking["max_drawdown_r_at_5"],
         "worstDailyNetRAt5": ranking["worst_daily_net_r_at_5"],
+        "stress10Coverage": round(stress_coverage, 6),
+        "stress10MeanNetRAt5": (
+            stress_ranking["mean_net_r_at_5"]
+            if stress_ranking else None
+        ),
+        "stress10NetRLowerBound95": (
+            block_bootstrap_lower_bound(
+                stress_ranking["daily_net_r"],
+                samples=5000,
+                random_state=42,
+            )
+            if stress_ranking else None
+        ),
+        "accountDrawdownPctAtRisk07Top5": round(
+            float(ranking["max_drawdown_r_at_5"]) * 3.5,
+            6,
+        ),
+        "account": account,
+    }
+
+
+def _account_metrics(ranking, stress_ranking, *, risk_per_trade=0.007):
+    dates = sorted(ranking["daily_net_r"])
+    equity = 1.0
+    peak = 1.0
+    maximum_drawdown = 0.0
+    equity_by_date = {}
+    annual_start = {}
+    annual_end = {}
+    for date in dates:
+        year = str(date)[:4]
+        annual_start.setdefault(year, equity)
+        count = int(ranking["daily_selected"].get(date, 0))
+        daily_return = (
+            float(ranking["daily_net_r"][date])
+            * count
+            * risk_per_trade
+        )
+        equity *= max(0.0, 1.0 + daily_return)
+        peak = max(peak, equity)
+        if peak > 0:
+            maximum_drawdown = max(
+                maximum_drawdown,
+                (peak - equity) / peak,
+            )
+        equity_by_date[date] = equity
+        annual_end[year] = equity
+    annual_returns = [
+        annual_end[year] / annual_start[year] - 1.0
+        for year in sorted(annual_start)
+        if annual_start[year] > 0
+    ]
+    rolling = []
+    window = 252
+    if len(dates) >= window:
+        for end in range(window - 1, len(dates)):
+            start_equity = (
+                1.0
+                if end == window - 1
+                else equity_by_date[dates[end - window]]
+            )
+            if start_equity > 0:
+                rolling.append(
+                    equity_by_date[dates[end]] / start_equity - 1.0
+                )
+    stress_equity = 1.0
+    if stress_ranking is not None:
+        for date in dates:
+            count = int(stress_ranking["daily_selected"].get(date, 0))
+            stress_equity *= max(
+                0.0,
+                1.0
+                + float(stress_ranking["daily_net_r"][date])
+                * count
+                * risk_per_trade,
+            )
+    return {
+        "schemaVersion": "review-account-replay.v1",
+        "riskPerTradePct": round(risk_per_trade * 100, 4),
+        "tradingDays": len(dates),
+        "trades": int(sum(ranking["daily_selected"].values())),
+        "returnPct": round((equity - 1.0) * 100, 6),
+        "annualMedianReturnPct": (
+            round(float(np.median(annual_returns)) * 100, 6)
+            if annual_returns else None
+        ),
+        "rolling12MonthProfitProbability": (
+            round(float(np.mean(np.asarray(rolling) > 0)), 6)
+            if rolling else None
+        ),
+        "maximumDrawdownPct": round(maximum_drawdown * 100, 6),
+        "stress10ReturnPct": (
+            round((stress_equity - 1.0) * 100, 6)
+            if stress_ranking is not None else None
+        ),
     }
 
 
@@ -638,8 +788,12 @@ def train_review_ensemble(
     seeds=DEFAULT_SEEDS,
     estimators=180,
     threads=4,
+    feature_schema="v3",
 ):
-    dataset = load_dataset(input_path)
+    schema_version, feature_names, missing_indices = _resolve_feature_schema(
+        feature_schema,
+    )
+    dataset = load_dataset(input_path, feature_schema=feature_schema)
     if (
         len(dataset["X"]) < 500
         or len(dataset["X_all"]) < 500
@@ -876,15 +1030,30 @@ def train_review_ensemble(
         "policy": selected_policy["policy"],
         "metrics": opportunity_confirmation_metrics,
     }
-    selection_policy_blockers = (
-        []
-        if selected_policy["metrics"]["netRLowerBound95"] > 0
-        else ["机会Top5净R下界未转正"]
+    def policy_blockers(metrics):
+        values = []
+        if metrics["netRLowerBound95"] <= 0:
+            values.append("机会Top5净R下界未转正")
+        if feature_schema == "v4":
+            if metrics.get("stress10Coverage") != 1.0:
+                values.append("10bps压力标签覆盖不足100%")
+            if (
+                metrics.get("stress10NetRLowerBound95") is None
+                or metrics["stress10NetRLowerBound95"] <= 0
+            ):
+                values.append("10bps压力净R下界未转正")
+            if (
+                metrics.get("accountDrawdownPctAtRisk07Top5") is None
+                or metrics["accountDrawdownPctAtRisk07Top5"] > 10
+            ):
+                values.append("按单笔0.7%风险映射的账户回撤超过10%")
+        return values
+
+    selection_policy_blockers = policy_blockers(
+        selected_policy["metrics"]
     )
-    confirmation_policy_blockers = (
-        []
-        if opportunity_confirmation_metrics["netRLowerBound95"] > 0
-        else ["机会Top5净R下界未转正"]
+    confirmation_policy_blockers = policy_blockers(
+        opportunity_confirmation_metrics
     )
     blockers = [
         *[
@@ -905,7 +1074,7 @@ def train_review_ensemble(
     ))
     artifact = {
         "schemaVersion": REVIEW_ARTIFACT_SCHEMA_VERSION,
-        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+        "featureSchemaVersion": schema_version,
         "members": [{
             "seed": member["config"]["seed"],
             "models": {
@@ -916,8 +1085,8 @@ def train_review_ensemble(
     }
     metadata = {
         "schemaVersion": REVIEW_MODEL_SCHEMA_VERSION,
-        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
-        "featureNames": list(FEATURE_NAMES),
+        "featureSchemaVersion": schema_version,
+        "featureNames": list(feature_names),
         "predictionContract": REVIEW_PREDICTION_CONTRACT,
         "priceContractSchemaVersion":
             REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
@@ -960,7 +1129,9 @@ def train_review_ensemble(
         "calibrationSampleCount": int(len(calibration)),
         "fillCalibrationSampleCount": int(len(fill_calibration)),
         "featureSupport": _feature_support(
-            dataset["X_all"][final_fill_development]
+            dataset["X_all"][final_fill_development],
+            feature_names,
+            missing_indices,
         ),
         "productionEligible": not blockers,
         "baselineSelected": False,
@@ -998,7 +1169,10 @@ def train_review_ensemble(
                 str(dataset["dates"][confirmation][-1]),
         },
     }
-    validate_review_metadata(metadata)
+    validate_review_metadata(
+        metadata,
+        feature_schema=schema_version,
+    )
     os.makedirs(output_directory, exist_ok=True)
     for slot, payload in (
         ("ensemble", artifact),
@@ -1029,6 +1203,12 @@ def main():
     parser.add_argument("--seeds", default="42,7,2026")
     parser.add_argument("--estimators", type=int, default=180)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument(
+        "--feature-schema",
+        default="v3",
+        choices=("v3", "v4"),
+        help="特征合同：v3(生产默认) 或 v4(Alpha158 连续特征挑战者)",
+    )
     args = parser.parse_args()
     metadata = train_review_ensemble(
         args.input,
@@ -1040,9 +1220,11 @@ def main():
         ),
         estimators=args.estimators,
         threads=args.threads,
+        feature_schema=args.feature_schema,
     )
     print(json.dumps({
         "modelVersion": metadata["modelVersion"],
+        "featureSchemaVersion": metadata["featureSchemaVersion"],
         "productionEligible": metadata["productionEligible"],
         "blockers": metadata["validation"]["blockers"],
     }, ensure_ascii=False))

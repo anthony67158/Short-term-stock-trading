@@ -17,6 +17,10 @@ from .heads.review_contract import (
     FEATURE_SCHEMA_VERSION,
     REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
 )
+from .heads.review_contract_v4 import (
+    FEATURE_NAMES_V4,
+    FEATURE_SCHEMA_VERSION_V4,
+)
 from .registry import CatBoostJsonRanker
 
 
@@ -30,6 +34,12 @@ REVIEW_RISK_PROFILE_VERSION = "account-risk-profiles.v1"
 REVIEW_OBSERVATION_POLICY_VERSION = "trigger-review-observation.v1"
 REVIEW_OBSERVATION_DURATION_MS = 10 * 60 * 1000
 REVIEW_ENTRY_TIMING = "NEXT_BAR_AFTER_OBSERVATION"
+# v3/v4 都必须按清单声明的合同严格加载；发布端仍由冠军挑战者门禁控制，
+# 不能因为本地文件合法就自动切换生产模型。
+REVIEW_FEATURE_SCHEMAS = {
+    FEATURE_SCHEMA_VERSION: FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION_V4: FEATURE_NAMES_V4,
+}
 REVIEW_ARTIFACT_FILENAMES = {
     "ensemble": "review_seed_ensemble.json",
     "meta": "review_meta.json",
@@ -48,7 +58,7 @@ _LAST_CHECK_AT = 0.0
 _LOAD_LOCK = threading.Lock()
 
 
-def _valid_feature_support(value):
+def _valid_feature_support(value, feature_names=FEATURE_NAMES):
     if not isinstance(value, dict):
         return False
     lower = value.get("lower")
@@ -60,8 +70,8 @@ def _valid_feature_support(value):
         value.get("schemaVersion") != "review-feature-support.v1"
         or not isinstance(lower, list)
         or not isinstance(upper, list)
-        or len(lower) != len(FEATURE_NAMES)
-        or len(upper) != len(FEATURE_NAMES)
+        or len(lower) != len(feature_names)
+        or len(upper) != len(feature_names)
         or not isinstance(indices, list)
         or not isinstance(patterns, list)
         or not patterns
@@ -79,7 +89,7 @@ def _valid_feature_support(value):
         or any(
             not isinstance(index, int)
             or index < 0
-            or index >= len(FEATURE_NAMES)
+            or index >= len(feature_names)
             for index in indices
         )
     ):
@@ -157,7 +167,15 @@ def sha256_file(path):
     return digest.hexdigest()
 
 
-def validate_review_metadata(metadata, model_version=None):
+def validate_review_metadata(
+    metadata,
+    model_version=None,
+    *,
+    feature_schema=FEATURE_SCHEMA_VERSION,
+):
+    expected_names = REVIEW_FEATURE_SCHEMAS.get(feature_schema)
+    if expected_names is None:
+        raise ValueError("触价复核模型特征合同版本不受支持")
     observation = (
         metadata.get("observationPolicy")
         if isinstance(metadata, dict)
@@ -166,8 +184,8 @@ def validate_review_metadata(metadata, model_version=None):
     if (
         not isinstance(metadata, dict)
         or metadata.get("schemaVersion") != REVIEW_MODEL_SCHEMA_VERSION
-        or metadata.get("featureSchemaVersion") != FEATURE_SCHEMA_VERSION
-        or tuple(metadata.get("featureNames") or ()) != FEATURE_NAMES
+        or metadata.get("featureSchemaVersion") != feature_schema
+        or tuple(metadata.get("featureNames") or ()) != expected_names
         or metadata.get("predictionContract")
         != REVIEW_PREDICTION_CONTRACT
         or metadata.get("priceContractSchemaVersion")
@@ -196,7 +214,10 @@ def validate_review_metadata(metadata, model_version=None):
             metadata.get("selectionPolicy"),
             metadata.get("valueHead"),
         )
-        or not _valid_feature_support(metadata.get("featureSupport"))
+        or not _valid_feature_support(
+            metadata.get("featureSupport"),
+            expected_names,
+        )
         or not _valid_confirmation_audit(
             metadata.get("confirmationAudit")
         )
@@ -238,7 +259,7 @@ def validate_review_metadata(metadata, model_version=None):
             or any(
                 not isinstance(index, int)
                 or index < 0
-                or index >= len(FEATURE_NAMES)
+                or index >= len(expected_names)
                 for index in active
             )
             or not active_fill
@@ -246,7 +267,7 @@ def validate_review_metadata(metadata, model_version=None):
             or any(
                 not isinstance(index, int)
                 or index < 0
-                or index >= len(FEATURE_NAMES)
+                or index >= len(expected_names)
                 for index in active_fill
             )
             or not active_rank
@@ -254,7 +275,7 @@ def validate_review_metadata(metadata, model_version=None):
             or any(
                 not isinstance(index, int)
                 or index < 0
-                or index >= len(FEATURE_NAMES)
+                or index >= len(expected_names)
                 for index in active_rank
             )
             or fill_calibration.get("method")
@@ -267,15 +288,22 @@ def validate_review_metadata(metadata, model_version=None):
     return metadata
 
 
-def validate_review_manifest(manifest):
+def validate_review_manifest(
+    manifest,
+    prefix=REVIEW_MODEL_PREFIX,
+):
+    feature_schema = (
+        manifest.get("featureSchemaVersion")
+        if isinstance(manifest, dict)
+        else None
+    )
     if (
         not isinstance(manifest, dict)
         or manifest.get("schemaVersion")
         != REVIEW_MANIFEST_SCHEMA_VERSION
         or manifest.get("predictionContract")
         != REVIEW_PREDICTION_CONTRACT
-        or manifest.get("featureSchemaVersion")
-        != FEATURE_SCHEMA_VERSION
+        or feature_schema not in REVIEW_FEATURE_SCHEMAS
         or manifest.get("priceContractSchemaVersion")
         != REVIEW_PRICE_CONTRACT_SCHEMA_VERSION
         or manifest.get("labelContractVersion")
@@ -300,9 +328,10 @@ def validate_review_manifest(manifest):
         REVIEW_ARTIFACT_FILENAMES
     ):
         raise ValueError("触价复核模型文件清单不完整")
-    expected_prefix = (
-        f"{REVIEW_MODEL_PREFIX.rstrip('/')}/runs/{run_id}/"
-    )
+    normalized_prefix = str(
+        prefix or REVIEW_MODEL_PREFIX
+    ).strip("/")
+    expected_prefix = f"{normalized_prefix}/runs/{run_id}/"
     for slot, filename in REVIEW_ARTIFACT_FILENAMES.items():
         item = files.get(slot) or {}
         key = str(item.get("key") or "")
@@ -317,9 +346,17 @@ def validate_review_manifest(manifest):
     return manifest
 
 
-def load_review_release(artifact_path, metadata_path):
+def load_review_release(
+    artifact_path,
+    metadata_path,
+    *,
+    feature_schema=FEATURE_SCHEMA_VERSION,
+):
     with open(metadata_path, encoding="utf-8") as handle:
-        metadata = validate_review_metadata(json.load(handle))
+        metadata = validate_review_metadata(
+            json.load(handle),
+            feature_schema=feature_schema,
+        )
     with open(artifact_path, encoding="utf-8") as handle:
         artifact = json.load(handle)
     members = artifact.get("members")
@@ -327,7 +364,7 @@ def load_review_release(artifact_path, metadata_path):
         artifact.get("schemaVersion")
         != REVIEW_ARTIFACT_SCHEMA_VERSION
         or artifact.get("featureSchemaVersion")
-        != FEATURE_SCHEMA_VERSION
+        != feature_schema
         or not isinstance(members, list)
         or len(members) != metadata["ensembleSize"]
     ):
@@ -403,8 +440,13 @@ def _download_release():
         loaded = load_review_release(
             final_paths["ensemble"] + ".part",
             final_paths["meta"] + ".part",
+            feature_schema=manifest["featureSchemaVersion"],
         )
-        validate_review_metadata(loaded[1], run_id)
+        validate_review_metadata(
+            loaded[1],
+            run_id,
+            feature_schema=manifest["featureSchemaVersion"],
+        )
         for field in (
             "predictionContract",
             "featureSchemaVersion",

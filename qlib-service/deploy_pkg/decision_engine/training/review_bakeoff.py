@@ -1,6 +1,7 @@
 """Offline same-split bake-off for trigger-observation review features."""
 
 import argparse
+import gzip
 import json
 import os
 import time
@@ -14,8 +15,10 @@ from .evaluation import (
     fit_probability_calibrator,
     regression_metrics,
 )
-from opportunity_history import normalize_history_outcomes
-from .review_dataset import build_opportunity_review_dataset
+from .review_dataset import (
+    build_opportunity_review_dataset,
+    normalize_review_history_outcomes,
+)
 from .bakeoff import (
     CatBoostFamily,
     LightGbmFamily,
@@ -59,11 +62,13 @@ def select_review_candidate(families):
     )[0]
 
 
-def load_dataset(path):
-    with open(path, encoding="utf-8") as handle:
+def load_dataset(path, *, feature_schema="v3"):
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rt", encoding="utf-8") as handle:
         payload = json.load(handle)
     return build_opportunity_review_dataset(
-        normalize_history_outcomes(payload)
+        normalize_review_history_outcomes(payload),
+        feature_schema=feature_schema,
     )
 
 
@@ -195,8 +200,16 @@ def aggregate(folds):
     }
 
 
-def run(path, output, *, seed=42, estimators=180, threads=4):
-    dataset = load_dataset(path)
+def run(
+    path,
+    output,
+    *,
+    seed=42,
+    estimators=180,
+    threads=4,
+    feature_schema="v3",
+):
+    dataset = load_dataset(path, feature_schema=feature_schema)
     folds = interval_expanding_folds(dataset, n_splits=3)
     families = {}
     for name, factory in (
@@ -222,6 +235,7 @@ def run(path, output, *, seed=42, estimators=180, threads=4):
             "samples": len(dataset["X"]),
             "dates": len(set(dataset["dates"].tolist())),
             "features": dataset["X"].shape[1],
+            "featureSchema": feature_schema,
             "summary": dataset["summary"],
             "folds": [fold["metadata"] for fold in folds],
         },
@@ -252,6 +266,11 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--estimators", type=int, default=180)
     parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument(
+        "--feature-schema",
+        default="v3",
+        choices=("v3", "v4"),
+    )
     args = parser.parse_args()
     report = run(
         args.input,
@@ -259,6 +278,7 @@ def main():
         seed=args.seed,
         estimators=args.estimators,
         threads=args.threads,
+        feature_schema=args.feature_schema,
     )
     print(json.dumps(report["decision"], ensure_ascii=False))
 
