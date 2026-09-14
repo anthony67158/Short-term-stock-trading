@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONTRACT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(HERE)),
     "contracts",
-    "opportunity-review-features.json",
+    "opportunity-review-features-v2.json",
 )
 with open(CONTRACT_PATH, encoding="utf-8") as _handle:
     _CONTRACT = json.load(_handle)
@@ -22,6 +22,18 @@ FEATURE_NAMES = tuple(_CONTRACT["featureNames"])
 _CODE = re.compile(r"^\d{6}$")
 _VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 REVIEW_PRICE_CONTRACT_SCHEMA_VERSION = "review-price-contract.v1"
+_CANONICAL_PRICE_FIELDS = (
+    "schemaVersion",
+    "entryPriceMilliCny",
+    "stopPriceMilliCny",
+    "priceRiskMilliCny",
+    "feeRateMilliBps",
+    "slippageMilliBps",
+    "lotSize",
+    "tPlusOne",
+    "exitPolicyVersion",
+    "observationPolicyVersion",
+)
 
 
 def _scaled_integer(value, scale, maximum):
@@ -86,6 +98,63 @@ def review_price_contract(value):
     }
 
 
+def validate_bound_review_price_contract(value, checksum):
+    if (
+        not isinstance(value, dict)
+        or set(value) != set(_CANONICAL_PRICE_FIELDS)
+        or value.get("schemaVersion")
+        != REVIEW_PRICE_CONTRACT_SCHEMA_VERSION
+        or not isinstance(checksum, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", checksum)
+    ):
+        raise ValueError("复核价格合同无效")
+    canonical = {
+        name: value.get(name)
+        for name in _CANONICAL_PRICE_FIELDS
+    }
+    integer_fields = (
+        "entryPriceMilliCny",
+        "stopPriceMilliCny",
+        "priceRiskMilliCny",
+        "feeRateMilliBps",
+        "slippageMilliBps",
+        "lotSize",
+    )
+    if (
+        any(
+            isinstance(canonical[name], bool)
+            or not isinstance(canonical[name], int)
+            or canonical[name] < 0
+            for name in integer_fields
+        )
+        or canonical["entryPriceMilliCny"]
+        <= canonical["stopPriceMilliCny"]
+        or canonical["stopPriceMilliCny"] <= 0
+        or canonical["priceRiskMilliCny"]
+        != (
+            canonical["entryPriceMilliCny"]
+            - canonical["stopPriceMilliCny"]
+        )
+        or canonical["lotSize"] <= 0
+        or not isinstance(canonical["tPlusOne"], bool)
+        or not _VERSION.fullmatch(
+            str(canonical["exitPolicyVersion"] or "")
+        )
+        or not _VERSION.fullmatch(
+            str(canonical["observationPolicyVersion"] or "")
+        )
+    ):
+        raise ValueError("复核价格合同无效")
+    raw = json.dumps(
+        canonical,
+        ensure_ascii=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    if hashlib.sha256(raw).hexdigest() != checksum:
+        raise ValueError("复核价格合同摘要不匹配")
+    return canonical
+
+
 def feature_vector(value):
     if (
         not isinstance(value, dict)
@@ -93,6 +162,10 @@ def feature_vector(value):
         or not _CODE.fullmatch(str(value.get("code") or ""))
     ):
         raise ValueError("复核特征身份无效")
+    validate_bound_review_price_contract(
+        value.get("priceContract"),
+        value.get("priceContractHash"),
+    )
     factors = value.get("factors")
     if not isinstance(factors, dict) or tuple(factors) != FEATURE_NAMES:
         raise ValueError("复核特征字段不匹配")

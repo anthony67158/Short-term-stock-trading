@@ -73,14 +73,14 @@
 
 **Estimated scope:** M
 
-### Task 5：升级模型注册表兼容门禁
+### Task 5：升级模型注册表兼容门禁（已完成）
 
 **Description:** 只有包含V2特征、价格合同、标签、退出和风险元数据的模型包可加载。
 
 **Acceptance criteria:**
-- [ ] V1或缺字段模型返回确定性`NOT_READY`。
-- [ ] 模型文件和元数据哈希完整校验。
-- [ ] 热更新失败不保留半加载状态。
+- [x] V1或缺字段模型返回确定性`NOT_READY`。
+- [x] 模型文件和元数据哈希完整校验。
+- [x] 热更新失败不保留半加载状态。
 
 **Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_review_inference qlib-service.tests.test_review_model_upload`
 

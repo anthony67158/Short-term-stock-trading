@@ -7,13 +7,18 @@ import unittest
 from decision_engine.heads.review_contract import (
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
+    REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
 )
 from decision_engine.review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
+    REVIEW_EXIT_POLICY_VERSION,
     REVIEW_ENTRY_TIMING,
+    REVIEW_LABEL_CONTRACT_VERSION,
     REVIEW_MODEL_SCHEMA_VERSION,
     REVIEW_OBSERVATION_DURATION_MS,
     REVIEW_OBSERVATION_POLICY_VERSION,
+    REVIEW_PREDICTION_CONTRACT,
+    REVIEW_RISK_PROFILE_VERSION,
 )
 from upload_review_model import publish_review_release
 
@@ -51,7 +56,12 @@ def metadata(*, eligible=True):
         "schemaVersion": REVIEW_MODEL_SCHEMA_VERSION,
         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
         "featureNames": list(FEATURE_NAMES),
-        "predictionContract": "trigger-review-action-value.v1",
+        "predictionContract": REVIEW_PREDICTION_CONTRACT,
+        "priceContractSchemaVersion":
+            REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
+        "labelContractVersion": REVIEW_LABEL_CONTRACT_VERSION,
+        "exitPolicyVersion": REVIEW_EXIT_POLICY_VERSION,
+        "riskProfileVersion": REVIEW_RISK_PROFILE_VERSION,
         "modelVersion": "decision-review.1789298000.ensemble2",
         "observationPolicy": {
             "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,
@@ -96,6 +106,14 @@ class ReviewModelUploadTests(unittest.TestCase):
         )
         self.assertTrue(manifest["productionEligible"])
         self.assertTrue(manifest["baselineSelected"])
+        self.assertEqual(
+            manifest["priceContractSchemaVersion"],
+            REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            manifest["labelContractVersion"],
+            REVIEW_LABEL_CONTRACT_VERSION,
+        )
         for item in manifest["files"].values():
             self.assertEqual(
                 item["sha256"],
@@ -111,6 +129,25 @@ class ReviewModelUploadTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             self._write_release(directory, eligible=False)
             with self.assertRaisesRegex(ValueError, "未通过生产门禁"):
+                publish_review_release(bucket, directory)
+
+        self.assertEqual(bucket.order, [])
+
+    def test_rejects_legacy_or_incomplete_contract_before_upload(self):
+        bucket = FakeBucket()
+        with tempfile.TemporaryDirectory() as directory:
+            self._write_release(directory)
+            metadata_path = os.path.join(
+                directory,
+                REVIEW_ARTIFACT_FILENAMES["meta"],
+            )
+            with open(metadata_path, encoding="utf-8") as handle:
+                value = json.load(handle)
+            value["predictionContract"] = "trigger-review-action-value.v1"
+            value.pop("priceContractSchemaVersion")
+            with open(metadata_path, "w", encoding="utf-8") as handle:
+                json.dump(value, handle)
+            with self.assertRaisesRegex(ValueError, "元数据无效"):
                 publish_review_release(bucket, directory)
 
         self.assertEqual(bucket.order, [])

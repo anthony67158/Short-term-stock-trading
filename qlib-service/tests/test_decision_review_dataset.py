@@ -13,6 +13,7 @@ from decision_engine.heads.review_contract import (  # noqa: E402
     FEATURE_NAMES,
     FEATURE_SCHEMA_VERSION,
     feature_vector,
+    review_price_contract,
 )
 from decision_engine.training.review_dataset import (  # noqa: E402
     build_opportunity_review_dataset,
@@ -24,10 +25,22 @@ from decision_engine.training.review_ensemble import _evaluate  # noqa: E402
 
 
 def review_input():
+    contract = review_price_contract({
+        "entryPrice": 10.2,
+        "stopPrice": 9.8,
+        "feeRateBps": 6.1,
+        "slippageBps": 5,
+        "lotSize": 100,
+        "tPlusOne": True,
+        "exitPolicyVersion": "trailing-exit.v1",
+        "observationPolicyVersion": "trigger-review-observation.v1",
+    })
     return {
         "schemaVersion": FEATURE_SCHEMA_VERSION,
         "asOf": 1_788_320_060_000,
         "code": "600001",
+        "priceContract": contract["canonical"],
+        "priceContractHash": contract["hash"],
         "factors": {
             name: float(index)
             for index, name in enumerate(FEATURE_NAMES)

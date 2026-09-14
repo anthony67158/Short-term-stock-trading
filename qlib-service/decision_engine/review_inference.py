@@ -150,6 +150,7 @@ def predict_review_items(payload, *, models=None, metadata=None):
             "asOf": item["asOf"],
             "code": item["code"],
             "formulaId": item["formulaId"],
+            "priceContractHash": item["priceContractHash"],
             "pFill": 1.0,
             "pWinGivenFill": round(p_win, 6),
             "expectedNetR": round(expected, 6),

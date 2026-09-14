@@ -10,14 +10,22 @@ import time
 
 import numpy as np
 
-from ..heads.review_contract import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
+from ..heads.review_contract import (
+    FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION,
+    REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
+)
 from ..review_registry import (
     REVIEW_ARTIFACT_FILENAMES,
     REVIEW_ARTIFACT_SCHEMA_VERSION,
+    REVIEW_EXIT_POLICY_VERSION,
     REVIEW_ENTRY_TIMING,
+    REVIEW_LABEL_CONTRACT_VERSION,
     REVIEW_MODEL_SCHEMA_VERSION,
     REVIEW_OBSERVATION_DURATION_MS,
     REVIEW_OBSERVATION_POLICY_VERSION,
+    REVIEW_PREDICTION_CONTRACT,
+    REVIEW_RISK_PROFILE_VERSION,
     validate_review_metadata,
 )
 from .bakeoff import (
@@ -258,7 +266,12 @@ def train_review_ensemble(
         "schemaVersion": REVIEW_MODEL_SCHEMA_VERSION,
         "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
         "featureNames": list(FEATURE_NAMES),
-        "predictionContract": "trigger-review-action-value.v1",
+        "predictionContract": REVIEW_PREDICTION_CONTRACT,
+        "priceContractSchemaVersion":
+            REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
+        "labelContractVersion": REVIEW_LABEL_CONTRACT_VERSION,
+        "exitPolicyVersion": REVIEW_EXIT_POLICY_VERSION,
+        "riskProfileVersion": REVIEW_RISK_PROFILE_VERSION,
         "modelVersion": model_version,
         "observationPolicy": {
             "schemaVersion": REVIEW_OBSERVATION_POLICY_VERSION,

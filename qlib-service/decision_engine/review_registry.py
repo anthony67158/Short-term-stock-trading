@@ -11,13 +11,21 @@ import time
 
 from model_lib import _oss_bucket
 
-from .heads.review_contract import FEATURE_NAMES, FEATURE_SCHEMA_VERSION
+from .heads.review_contract import (
+    FEATURE_NAMES,
+    FEATURE_SCHEMA_VERSION,
+    REVIEW_PRICE_CONTRACT_SCHEMA_VERSION,
+)
 from .registry import CatBoostJsonRanker
 
 
-REVIEW_MANIFEST_SCHEMA_VERSION = "decision-review-model-manifest.v1"
-REVIEW_MODEL_SCHEMA_VERSION = "decision-review-model.v1"
-REVIEW_ARTIFACT_SCHEMA_VERSION = "decision-review-ensemble.v1"
+REVIEW_MANIFEST_SCHEMA_VERSION = "decision-review-model-manifest.v2"
+REVIEW_MODEL_SCHEMA_VERSION = "decision-review-model.v2"
+REVIEW_ARTIFACT_SCHEMA_VERSION = "decision-review-ensemble.v2"
+REVIEW_PREDICTION_CONTRACT = "trigger-review-action-value.v2"
+REVIEW_LABEL_CONTRACT_VERSION = "trigger-review-label.v2"
+REVIEW_EXIT_POLICY_VERSION = "trailing-exit.v1"
+REVIEW_RISK_PROFILE_VERSION = "account-risk-profiles.v1"
 REVIEW_OBSERVATION_POLICY_VERSION = "trigger-review-observation.v1"
 REVIEW_OBSERVATION_DURATION_MS = 10 * 60 * 1000
 REVIEW_ENTRY_TIMING = "NEXT_BAR_AFTER_OBSERVATION"
@@ -59,7 +67,15 @@ def validate_review_metadata(metadata, model_version=None):
         or metadata.get("featureSchemaVersion") != FEATURE_SCHEMA_VERSION
         or tuple(metadata.get("featureNames") or ()) != FEATURE_NAMES
         or metadata.get("predictionContract")
-        != "trigger-review-action-value.v1"
+        != REVIEW_PREDICTION_CONTRACT
+        or metadata.get("priceContractSchemaVersion")
+        != REVIEW_PRICE_CONTRACT_SCHEMA_VERSION
+        or metadata.get("labelContractVersion")
+        != REVIEW_LABEL_CONTRACT_VERSION
+        or metadata.get("exitPolicyVersion")
+        != REVIEW_EXIT_POLICY_VERSION
+        or metadata.get("riskProfileVersion")
+        != REVIEW_RISK_PROFILE_VERSION
         or not str(metadata.get("modelVersion") or "")
         or not isinstance(observation, dict)
         or observation.get("schemaVersion")
@@ -109,6 +125,18 @@ def validate_review_manifest(manifest):
         not isinstance(manifest, dict)
         or manifest.get("schemaVersion")
         != REVIEW_MANIFEST_SCHEMA_VERSION
+        or manifest.get("predictionContract")
+        != REVIEW_PREDICTION_CONTRACT
+        or manifest.get("featureSchemaVersion")
+        != FEATURE_SCHEMA_VERSION
+        or manifest.get("priceContractSchemaVersion")
+        != REVIEW_PRICE_CONTRACT_SCHEMA_VERSION
+        or manifest.get("labelContractVersion")
+        != REVIEW_LABEL_CONTRACT_VERSION
+        or manifest.get("exitPolicyVersion")
+        != REVIEW_EXIT_POLICY_VERSION
+        or manifest.get("riskProfileVersion")
+        != REVIEW_RISK_PROFILE_VERSION
     ):
         raise ValueError("触价复核模型清单版本无效")
     run_id = str(manifest.get("runId") or "")
@@ -224,6 +252,16 @@ def _download_release():
             final_paths["meta"] + ".part",
         )
         validate_review_metadata(loaded[1], run_id)
+        for field in (
+            "predictionContract",
+            "featureSchemaVersion",
+            "priceContractSchemaVersion",
+            "labelContractVersion",
+            "exitPolicyVersion",
+            "riskProfileVersion",
+        ):
+            if manifest.get(field) != loaded[1].get(field):
+                raise ValueError("触价复核模型清单与元数据不一致")
         metadata = {
             **loaded[1],
             "usagePolicy": manifest.get("usagePolicy", "QUALIFIED"),

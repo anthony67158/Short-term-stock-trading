@@ -79,6 +79,12 @@ def publish_review_release(
         "activatedAt": int(activated_at or time.time()),
         "usagePolicy": "DIRECT",
         "predictionContract": metadata["predictionContract"],
+        "featureSchemaVersion": metadata["featureSchemaVersion"],
+        "priceContractSchemaVersion":
+            metadata["priceContractSchemaVersion"],
+        "labelContractVersion": metadata["labelContractVersion"],
+        "exitPolicyVersion": metadata["exitPolicyVersion"],
+        "riskProfileVersion": metadata["riskProfileVersion"],
         "productionEligible": True,
         "baselineSelected": True,
         "files": files,
