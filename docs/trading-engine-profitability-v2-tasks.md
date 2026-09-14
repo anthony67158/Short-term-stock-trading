@@ -218,7 +218,7 @@
 - [x] 同一确认数据哈希第二次择优被拒绝。
 - [x] 失败保持当前生产Manifest。
 
-**Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_release qlib-service.tests.test_decision_release_upload`
+**Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_review_training qlib-service.tests.test_review_model_upload`
 
 **Dependencies:** Tasks 7, 10-11
 
@@ -228,10 +228,10 @@
 
 ## Checkpoint C：可信模型
 
-- [ ] Tasks 9-12全部通过。
-- [ ] 预测语义、模型元数据和API响应一致。
-- [ ] 选择与确认没有数据复用。
-- [ ] 未过门禁模型不能发布。
+- [x] Tasks 9-12全部通过。
+- [x] 预测语义、模型元数据和API响应一致。
+- [x] 选择与确认没有数据复用。
+- [x] 未过门禁模型不能发布。
 
 ## Phase 4：风险档与账户同源回放
 
