@@ -252,6 +252,9 @@ export function compileExecutionPlan({
     : Number(now) + 30 * 60000
   return {
     schemaVersion: EXECUTION_PLAN_SCHEMA_VERSION,
+    executionMode: 'MANUAL_ONLY',
+    brokerOrderAllowed: false,
+    requiresManualFill: true,
     planId,
     decisionId: String(decisionPlan.decisionId || ''),
     marketRegime: String(decisionPlan.marketRegime?.regime || 'UNKNOWN'),

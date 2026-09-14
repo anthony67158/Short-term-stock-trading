@@ -100,6 +100,8 @@ function persistedOutcome(batch, outcome, settlementEvent = null) {
     parentDecisionId: String(outcome.parentDecisionId || ''),
     playbookId: String(outcome.playbookId || ''),
     route: String(outcome.route || ''),
+    alpha158Signal: event.alpha158Signal || null,
+    jointRanking: event.jointRanking || null,
     context: {
       stageReached: String(event.stageReached || 'UNKNOWN'),
       displayedRank: Number(event.displayedRank) || null,

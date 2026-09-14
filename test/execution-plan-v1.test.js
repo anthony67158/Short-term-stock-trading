@@ -58,6 +58,9 @@ test('execution-plan.v1绑定决策、账户版本、证据和有效期', () => 
   })
 
   assert.equal(plan.schemaVersion, 'execution-plan.v1')
+  assert.equal(plan.executionMode, 'MANUAL_ONLY')
+  assert.equal(plan.brokerOrderAllowed, false)
+  assert.equal(plan.requiresManualFill, true)
   assert.equal(plan.decisionId, 'decision.demo')
   assert.equal(plan.accountRevision, 7)
   assert.equal(plan.evidenceAsOf, new Date(now).toISOString())

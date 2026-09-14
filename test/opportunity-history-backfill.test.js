@@ -71,6 +71,26 @@ function batch(source = 'STOCKDB_CAUSAL_REPLAY') {
           tradeDate: '2026-06-01',
         },
         cheapScore: 60,
+        alpha158Signal: {
+          schemaVersion: 'alpha158-signal.v1',
+          state: 'ACTIVE',
+          modelVersion: 'alpha158.test',
+          asOfDate: '20260529',
+          rawScore: 0.12,
+          percentile: 0.9,
+          rank: 10,
+          reliabilityWeight: 0.2,
+          recentRankIc: 0.03,
+        },
+        jointRanking: {
+          schemaVersion: 'joint-opportunity-rank.v1',
+          state: 'BLENDED',
+          v3Score: 0.6,
+          alpha158Score: 0.9,
+          alpha158Weight: 0.2,
+          jointScore: 0.66,
+          alpha158ModelVersion: 'alpha158.test',
+        },
         formulaEvaluations: [{
           formulaId: 'UNKNOWN',
           matched: false,
@@ -206,6 +226,8 @@ test('历史结算复用生产费用和T加一结果合同', () => {
   assert.equal(outcome.labelSource, 'HISTORICAL_SIMULATION')
   assert.equal(outcome.labelContractVersion, 'trigger-review-label.v3')
   assert.equal(outcome.exitContractVersion, 'trailing-exit.v1')
+  assert.equal(outcome.alpha158Signal.percentile, 0.9)
+  assert.equal(outcome.jointRanking.jointScore, 0.66)
   assert.equal(
     outcome.reviewScoreInput.priceContract.entryPriceMilliCny,
     10200,

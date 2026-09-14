@@ -261,6 +261,8 @@ export function settleHistoricalEvent({
     parentDecisionId: String(event.parentDecisionId || ''),
     playbookId: String(event.decision?.playbookId || ''),
     route: String(event.decision?.route || ''),
+    alpha158Signal: event.alpha158Signal || null,
+    jointRanking: event.jointRanking || null,
     context: contextOf(event, batch, scoreInput),
     scoreInput,
   }
