@@ -251,6 +251,7 @@ def parse_args(argv=None):
     parser.add_argument("--output", required=True)
     parser.add_argument("--report", required=True)
     parser.add_argument("--max-per-min", type=int, default=90)
+    parser.add_argument("--retries", type=int, default=24)
     parser.add_argument("--minimum-coverage", type=float, default=0.99)
     parser.add_argument("--reuse-cache", action="store_true")
     parser.add_argument("--stage", default="metadata")
@@ -260,6 +261,8 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     if not 1 <= args.max_per_min <= 120:
         parser.error("--max-per-min 必须在1到120之间")
+    if not 1 <= args.retries <= 48:
+        parser.error("--retries 必须在1到48之间")
     if not DATE.fullmatch(args.start) or not DATE.fullmatch(args.end):
         parser.error("--from/--to 必须为 YYYYMMDD")
     return args
