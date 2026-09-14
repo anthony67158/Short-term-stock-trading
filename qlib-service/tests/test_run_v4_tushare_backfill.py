@@ -24,12 +24,76 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
             Namespace(
                 max_per_min=90,
                 retries=24,
+                minute_source="mcp",
+                workers=4,
                 minimum_coverage=0.85,
             ),
             runner.Path("/tmp/v4-retry-test"),
         )
 
         self.assertEqual(command[command.index("--retries") + 1], "24")
+        self.assertEqual(command[command.index("--minute-source") + 1], "mcp")
+        self.assertEqual(command[command.index("--workers") + 1], "4")
+
+    def test_resumable_download_restarts_from_persisted_cache(self):
+        args = Namespace(
+            max_per_min=60,
+            retries=6,
+            minute_source="mcp",
+            workers=4,
+            minimum_coverage=0.85,
+            download_restarts=0,
+            download_retry_delay=2,
+            download_retry_max_delay=10,
+        )
+        with patch.object(
+            runner,
+            "_run",
+            side_effect=[1, 1, 0],
+        ) as run, patch.object(
+            runner.time,
+            "sleep",
+        ) as sleep:
+            runner._run_resumable_download(
+                args,
+                runner.Path("/tmp/v4-resume-test"),
+            )
+
+        self.assertEqual(run.call_count, 3)
+        self.assertEqual(
+            [call.args[0] for call in sleep.call_args_list],
+            [2, 4],
+        )
+        self.assertTrue(
+            all(call.kwargs["allow_failure"] for call in run.call_args_list)
+        )
+
+    def test_resumable_download_honors_finite_restart_budget(self):
+        args = Namespace(
+            max_per_min=60,
+            retries=6,
+            minute_source="mcp",
+            workers=1,
+            minimum_coverage=0.85,
+            download_restarts=2,
+            download_retry_delay=1,
+            download_retry_max_delay=10,
+        )
+        with patch.object(
+            runner,
+            "_run",
+            return_value=1,
+        ), patch.object(
+            runner.time,
+            "sleep",
+        ) as sleep:
+            with self.assertRaisesRegex(RuntimeError, "重启次数耗尽"):
+                runner._run_resumable_download(
+                    args,
+                    runner.Path("/tmp/v4-resume-test"),
+                )
+
+        sleep.assert_called_once_with(1)
 
     def test_plan_covers_every_eligible_signal_date_once(self):
         dates = [f"2026{i:04d}" for i in range(1, 251)]

@@ -218,6 +218,40 @@ class TushareHistoryExportTest(unittest.TestCase):
                 "--dry-run",
             ])
 
+    def test_mcp_minute_source_supports_bounded_workers(self):
+        args = self.module.parse_args([
+            "--stage",
+            "minutes",
+            "--work-dir",
+            os.path.expanduser("~/.test-mcp-history"),
+            "--manifest",
+            "manifest.json",
+            "--output-dir",
+            os.path.expanduser("~/.test-mcp-minutes"),
+            "--minute-source",
+            "mcp",
+            "--workers",
+            "4",
+            "--dry-run",
+        ])
+
+        self.assertEqual(args.minute_source, "mcp")
+        self.assertEqual(args.workers, 4)
+        with self.assertRaises(SystemExit):
+            self.module.parse_args([
+                "--stage",
+                "minutes",
+                "--work-dir",
+                os.path.expanduser("~/.test-mcp-history"),
+                "--manifest",
+                "manifest.json",
+                "--minute-source",
+                "mcp",
+                "--workers",
+                "9",
+                "--dry-run",
+            ])
+
 
 if __name__ == "__main__":
     unittest.main()

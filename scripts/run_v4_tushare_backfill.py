@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -268,9 +269,45 @@ def _download_command(args, directory):
         str(args.max_per_min),
         "--retries",
         str(args.retries),
+        "--minute-source",
+        str(args.minute_source),
+        "--workers",
+        str(args.workers),
         "--minimum-coverage",
         str(args.minimum_coverage),
     ]
+
+
+def _run_resumable_download(args, directory):
+    attempt = 0
+    while True:
+        return_code = _run(
+            _download_command(args, directory),
+            directory / "minutes.log",
+            allow_failure=True,
+        )
+        if return_code == 0:
+            return
+        attempt += 1
+        if (
+            args.download_restarts > 0
+            and attempt >= args.download_restarts
+        ):
+            raise RuntimeError(
+                "分钟下载重启次数耗尽，"
+                f"查看 {directory / 'minutes.log'}"
+            )
+        delay = min(
+            args.download_retry_max_delay,
+            args.download_retry_delay * (2 ** min(attempt - 1, 10)),
+        )
+        print(json.dumps({
+            "stage": "MINUTES_RETRY",
+            "chunk": directory.name,
+            "attempt": attempt,
+            "delaySeconds": delay,
+        }), flush=True)
+        time.sleep(delay)
 
 
 def _run_chunk(args, chunk):
@@ -305,10 +342,7 @@ def _run_chunk(args, chunk):
 
     minute_report = directory / "tushare-minute-report.json"
     if not minute_report.is_file():
-        _run(
-            _download_command(args, directory),
-            directory / "minutes.log",
-        )
+        _run_resumable_download(args, directory)
 
     _run(
         _manifest_command(args, chunk, directory),
@@ -464,8 +498,30 @@ def parse_args():
     parser.add_argument("--signal-days", type=int, default=145)
     parser.add_argument("--settlement-days", type=int, default=7)
     parser.add_argument("--universe-size", type=int, default=1000)
-    parser.add_argument("--max-per-min", type=int, default=120)
-    parser.add_argument("--retries", type=int, default=4)
+    parser.add_argument("--max-per-min", type=int, default=60)
+    parser.add_argument("--retries", type=int, default=24)
+    parser.add_argument(
+        "--download-restarts",
+        type=int,
+        default=0,
+        help="分钟下载器失败后的重启次数，0表示不限次数",
+    )
+    parser.add_argument(
+        "--download-retry-delay",
+        type=int,
+        default=30,
+    )
+    parser.add_argument(
+        "--download-retry-max-delay",
+        type=int,
+        default=300,
+    )
+    parser.add_argument(
+        "--minute-source",
+        choices=("tushare", "mcp"),
+        default="mcp",
+    )
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--minimum-coverage", type=float, default=0.85)
     parser.add_argument(
         "--alpha-snapshot",
@@ -478,8 +534,23 @@ def parse_args():
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--from-chunk", type=int, default=1)
     args = parser.parse_args()
-    if not os.environ.get("TUSHARE_TOKEN") and not args.prepare_only:
-        parser.error("执行下载前必须通过环境变量提供TUSHARE_TOKEN")
+    if args.download_restarts < 0:
+        parser.error("--download-restarts 不能小于0")
+    if args.download_retry_delay < 1:
+        parser.error("--download-retry-delay 必须大于0")
+    if args.download_retry_max_delay < args.download_retry_delay:
+        parser.error(
+            "--download-retry-max-delay 不能小于"
+            "--download-retry-delay"
+        )
+    if not args.prepare_only:
+        required_env = (
+            "STOCK_MCP_URL"
+            if args.minute_source == "mcp"
+            else "TUSHARE_TOKEN"
+        )
+        if not os.environ.get(required_env):
+            parser.error(f"执行下载前必须通过环境变量提供{required_env}")
     return args
 
 

@@ -2,6 +2,7 @@
 """Export normalized Tushare history for the causal opportunity replay."""
 
 import argparse
+import concurrent.futures
 import gzip
 import json
 import math
@@ -9,6 +10,8 @@ import os
 import re
 import sqlite3
 import sys
+import threading
+import time
 from pathlib import Path
 
 
@@ -18,6 +21,7 @@ if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
 from tushare_client import TushareClient  # noqa: E402
+from stock_mcp_client import StockMcpClient  # noqa: E402
 
 
 DATE = re.compile(r"^\d{8}$")
@@ -459,6 +463,113 @@ def _complete_minute_day(rows):
     return first <= "093500" and last >= "150000"
 
 
+def _store_minute_rows(
+    connection,
+    code,
+    rows,
+    requested_dates,
+    start_date,
+    end_date,
+):
+    normalized, excluded_dates = _minute_rows(
+        rows,
+        code,
+        requested_dates,
+        include_exclusions=True,
+    )
+    with connection:
+        connection.execute(
+            "DELETE FROM bars WHERE code = ?",
+            (code,),
+        )
+        connection.execute(
+            "DELETE FROM exclusions WHERE code = ?",
+            (code,),
+        )
+        connection.executemany("""
+            INSERT INTO bars (
+              code,date,trade_time,open,high,low,close,volume,amount
+            ) VALUES (?,?,?,?,?,?,?,?,?)
+        """, normalized)
+        connection.executemany("""
+            INSERT INTO exclusions(code,date,reason)
+            VALUES (?,?,'ZERO_OHLCV_SUSPENSION')
+        """, [
+            (code, date)
+            for date in excluded_dates
+        ])
+        connection.execute("""
+            INSERT INTO completed(code,start_date,end_date,rows)
+            VALUES (?,?,?,?)
+            ON CONFLICT(code) DO UPDATE SET
+              start_date=excluded.start_date,
+              end_date=excluded.end_date,
+              rows=excluded.rows
+        """, (code, start_date, end_date, len(normalized)))
+
+
+def _download_mcp_rows(codes, dates, retries, workers):
+    local = threading.local()
+
+    def fetch(code):
+        error = None
+        for attempt in range(retries):
+            try:
+                client = getattr(local, "client", None)
+                if client is None:
+                    client = StockMcpClient()
+                    local.client = client
+                rows = client.stock_minutes(
+                    to_tushare_code(code),
+                    f"{dates[0][:4]}-{dates[0][4:6]}-"
+                    f"{dates[0][6:]} 09:30:00",
+                    f"{dates[-1][:4]}-{dates[-1][4:6]}-"
+                    f"{dates[-1][6:]} 15:00:00",
+                )
+                if len(rows) >= 8000:
+                    raise ValueError(
+                        f"MCP分钟响应触及8000行上限: {code}"
+                    )
+                return code, rows
+            except Exception as exc:  # Retry transport and protocol failures.
+                error = exc
+                local.client = None
+                if attempt + 1 < retries:
+                    time.sleep(min(2 ** attempt, 10))
+        raise RuntimeError(f"MCP分钟下载失败: {code}") from error
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=workers,
+        thread_name_prefix="stock-mcp",
+    ) as executor:
+        iterator = iter(codes)
+        futures = {
+            executor.submit(fetch, code): code
+            for code in (
+                next(iterator, None)
+                for _ in range(workers)
+            )
+            if code is not None
+        }
+        deferred = []
+        while futures:
+            done, _pending = concurrent.futures.wait(
+                futures,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                failed_code = futures.pop(future)
+                try:
+                    yield future.result()
+                except RuntimeError:
+                    deferred.append(failed_code)
+                code = next(iterator, None)
+                if code is not None:
+                    futures[executor.submit(fetch, code)] = code
+        for code in deferred:
+            yield fetch(code)
+
+
 def export_minutes(args):
     manifest = load_manifest(args.manifest)
     if args.dry_run:
@@ -477,14 +588,11 @@ def export_minutes(args):
     codes = sorted(requested_by_code)
     dates = [row["date"] for row in manifest]
     connection = _minute_database(work / "tushare-minute.sqlite3")
-    client = TushareClient(
-        max_per_min=args.max_per_min,
-        retries=args.retries,
-    )
     downloaded = 0
     cached = 0
     try:
-        for index, code in enumerate(codes, 1):
+        pending = []
+        for code in codes:
             completed = connection.execute(
                 "SELECT start_date, end_date FROM completed WHERE code = ?",
                 (code,),
@@ -492,64 +600,64 @@ def export_minutes(args):
             if completed == (dates[0], dates[-1]):
                 cached += 1
             else:
-                rows = client.rows(
-                    "stk_mins",
-                    {
-                        "ts_code": to_tushare_code(code),
-                        "freq": "5min",
-                        "start_date":
-                            f"{dates[0][:4]}-{dates[0][4:6]}-"
-                            f"{dates[0][6:]} 09:30:00",
-                        "end_date":
-                            f"{dates[-1][:4]}-{dates[-1][4:6]}-"
-                            f"{dates[-1][6:]} 15:00:00",
-                    },
-                    MINUTE_FIELDS,
+                pending.append(code)
+
+        if args.minute_source == "tushare":
+            client = TushareClient(
+                max_per_min=args.max_per_min,
+                retries=args.retries,
+            )
+
+            def rows_by_code():
+                for code in pending:
+                    rows = client.rows(
+                        "stk_mins",
+                        {
+                            "ts_code": to_tushare_code(code),
+                            "freq": "5min",
+                            "start_date":
+                                f"{dates[0][:4]}-{dates[0][4:6]}-"
+                                f"{dates[0][6:]} 09:30:00",
+                            "end_date":
+                                f"{dates[-1][:4]}-{dates[-1][4:6]}-"
+                                f"{dates[-1][6:]} 15:00:00",
+                        },
+                        MINUTE_FIELDS,
+                    )
+                    yield code, rows
+        else:
+            def rows_by_code():
+                yield from _download_mcp_rows(
+                    pending,
+                    dates,
+                    args.retries,
+                    args.workers,
                 )
-                if len(rows) >= 8000:
-                    raise ValueError(
-                        f"Tushare分钟响应触及8000行上限: {code}"
-                    )
-                normalized, excluded_dates = _minute_rows(
-                    rows,
-                    code,
-                    requested_by_code[code],
-                    include_exclusions=True,
+
+        for code, rows in rows_by_code():
+            if len(rows) >= 8000:
+                raise ValueError(
+                    f"{args.minute_source}分钟响应触及8000行上限: {code}"
                 )
-                with connection:
-                    connection.execute(
-                        "DELETE FROM bars WHERE code = ?",
-                        (code,),
-                    )
-                    connection.execute(
-                        "DELETE FROM exclusions WHERE code = ?",
-                        (code,),
-                    )
-                    connection.executemany("""
-                        INSERT INTO bars (
-                          code,date,trade_time,open,high,low,close,volume,amount
-                        ) VALUES (?,?,?,?,?,?,?,?,?)
-                    """, normalized)
-                    connection.executemany("""
-                        INSERT INTO exclusions(code,date,reason)
-                        VALUES (?,?,'ZERO_OHLCV_SUSPENSION')
-                    """, [
-                        (code, date)
-                        for date in excluded_dates
-                    ])
-                    connection.execute("""
-                        INSERT INTO completed(code,start_date,end_date,rows)
-                        VALUES (?,?,?,?)
-                        ON CONFLICT(code) DO UPDATE SET
-                          start_date=excluded.start_date,
-                          end_date=excluded.end_date,
-                          rows=excluded.rows
-                    """, (code, dates[0], dates[-1], len(normalized)))
-                downloaded += 1
-            if index == 1 or index % 25 == 0 or index == len(codes):
+            _store_minute_rows(
+                connection,
+                code,
+                rows,
+                requested_by_code[code],
+                dates[0],
+                dates[-1],
+            )
+            downloaded += 1
+            progress = cached + downloaded
+            if (
+                downloaded == 1
+                or progress % 25 == 0
+                or progress == len(codes)
+            ):
                 print(json.dumps({
                     "stage": "MINUTE_CODE",
-                    "progress": index,
+                    "source": args.minute_source,
+                    "progress": progress,
                     "total": len(codes),
                     "downloaded": downloaded,
                     "cached": cached,
@@ -611,6 +719,15 @@ def export_minutes(args):
                 }), flush=True)
         report = {
             "schemaVersion": "tushare-minute-export.v1",
+            "source": (
+                (
+                    "TUSHARE_CACHE_PLUS_STOCK_MCP_STK_MINS"
+                    if cached
+                    else "STOCK_MCP_STK_MINS"
+                )
+                if args.minute_source == "mcp"
+                else "TUSHARE_STK_MINS"
+            ),
             "frequency": "5min",
             "dates": len(manifest),
             "codes": len(codes),
@@ -659,6 +776,12 @@ def parse_args(argv=None):
     parser.add_argument("--output-dir")
     parser.add_argument("--max-per-min", type=int, default=90)
     parser.add_argument("--retries", type=int, default=4)
+    parser.add_argument(
+        "--minute-source",
+        choices=("tushare", "mcp"),
+        default="mcp",
+    )
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--minimum-coverage", type=float, default=0.85)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
@@ -666,6 +789,8 @@ def parse_args(argv=None):
         parser.error("--max-per-min 必须在1到120之间")
     if not 1 <= args.retries <= 48:
         parser.error("--retries 必须在1到48之间")
+    if not 1 <= args.workers <= 8:
+        parser.error("--workers 必须在1到8之间")
     if not 0.85 <= args.minimum_coverage <= 1:
         parser.error("--minimum-coverage 必须在0.85到1之间")
     if args.stage == "metadata":
