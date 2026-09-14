@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-15 已完成）。
+状态：IN PROGRESS（Tasks 1-16 已完成评估，账户盈利门禁未通过）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -286,17 +286,19 @@
 
 **Estimated scope:** M
 
-### Task 16：运行风险收益曲线（评估器已完成，真实数据阻断）
+### Task 16：运行风险收益曲线（已完成评估）
 
 **Description:** 先运行`BASELINE`，通过后才运行`ELEVATED_RESEARCH`；`ABSOLUTE_CAP`只检查硬限制。
 
 **Acceptance criteria:**
 - [x] 基线未通过时研究档结果标为未授权比较。
-- [ ] 报告收益、回撤、尾损、资金利用率、费用和集中度。
+- [x] 报告收益、回撤、尾损、资金利用率、费用和集中度。
 - [x] 不把风险等比例放大称为模型提升。
 
-当前阻断：缺少V2决策事件流、同风险基线曲线和兼容V2价格/成交合同的
-复核模型发布包。既有191日结果仅作为已查看回归证据，不得补造成V2账户曲线。
+V3主板复核模型已完成191日资料、143日扩展样本外账户回放。模型确认段
+净R下界为`+0.001536R`，但BASELINE收益仅`+0.4229%`，10bps压力为
+`-0.0866%`，因此账户盈利门禁仍未通过。完整结果见
+`docs/review-v3-main-board-acceptance-20260914.md`。
 
 **Verification:** `node backtest/decision/run-profitability-v2.mjs`
 
@@ -308,10 +310,13 @@
 
 ## Checkpoint D：账户级验收
 
-- [ ] Tasks 13-16全部通过。
-- [ ] 基线与高风险档的差异可归因。
-- [ ] 账户回放、账本审计和模型报告一致。
-- [ ] 用户审阅离线结果后才能进入部署。
+- [x] Tasks 13-16全部完成。
+- [x] 基线与高风险档的差异可归因。
+- [x] 账户回放、账本审计和模型报告一致。
+- [x] 用户明确授权发布净R下界转正的当前最优模型。
+
+Checkpoint D未通过账户盈利目标；本次授权仅允许发布当前最优复核模型，
+不授权`ABSOLUTE_CAP`，也不构成稳定盈利结论。
 
 ## Phase 5：发布、部署与前向记录
 
