@@ -286,14 +286,17 @@
 
 **Estimated scope:** M
 
-### Task 16：运行风险收益曲线
+### Task 16：运行风险收益曲线（评估器已完成，真实数据阻断）
 
 **Description:** 先运行`BASELINE`，通过后才运行`ELEVATED_RESEARCH`；`ABSOLUTE_CAP`只检查硬限制。
 
 **Acceptance criteria:**
-- [ ] 基线未通过时研究档结果标为未授权比较。
+- [x] 基线未通过时研究档结果标为未授权比较。
 - [ ] 报告收益、回撤、尾损、资金利用率、费用和集中度。
-- [ ] 不把风险等比例放大称为模型提升。
+- [x] 不把风险等比例放大称为模型提升。
+
+当前阻断：缺少V2决策事件流、同风险基线曲线和兼容V2价格/成交合同的
+复核模型发布包。既有191日结果仅作为已查看回归证据，不得补造成V2账户曲线。
 
 **Verification:** `node backtest/decision/run-profitability-v2.mjs`
 
