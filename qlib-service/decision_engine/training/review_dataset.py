@@ -1,5 +1,7 @@
 """Build trigger-review training rows without leaking them into entry scores."""
 
+from collections import Counter
+
 import numpy as np
 
 from ..heads.review_contract import FEATURE_NAMES, feature_vector
@@ -18,6 +20,14 @@ def _event_group_id(outcome):
     return f"{code}:{event_id}" if code and event_id else ""
 
 
+def _count_by(values, field):
+    counts = Counter(
+        str(value.get(field) or "UNKNOWN")
+        for value in values
+    )
+    return dict(sorted(counts.items()))
+
+
 def build_opportunity_review_dataset(outcomes):
     source = outcomes if isinstance(outcomes, list) else []
     event_ledger = []
@@ -33,6 +43,16 @@ def build_opportunity_review_dataset(outcomes):
                 outcome.get("fillStatus") or "UNKNOWN"
             ),
             "outcome": str(outcome.get("outcome") or "UNKNOWN"),
+            "source": str(
+                outcome.get("labelSource")
+                or (outcome.get("context") or {}).get("source")
+                or "UNKNOWN"
+            ),
+            "strategy": (
+                f"{str(outcome.get('playbookId') or 'UNKNOWN')}:"
+                f"{str(outcome.get('route') or 'UNKNOWN')}"
+            ),
+            "eventGroupId": _event_group_id(outcome),
             "hasReviewInput": isinstance(
                 outcome.get("reviewScoreInput"),
                 dict,
@@ -200,6 +220,11 @@ def build_opportunity_review_dataset(outcomes):
                 for status in sorted({
                     item["fillStatus"] for item in event_ledger
                 })
+            },
+            "audit_counts": {
+                "by_source": _count_by(event_ledger, "source"),
+                "by_date": _count_by(event_ledger, "tradeDate"),
+                "by_strategy": _count_by(event_ledger, "strategy"),
             },
             "events": len(events),
             "samples": len(conditional),

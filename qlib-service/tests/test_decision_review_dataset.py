@@ -184,6 +184,18 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
                 "TRIGGERED_UNFILLED": 1,
             },
         )
+        self.assertEqual(
+            dataset["summary"]["audit_counts"]["by_source"],
+            {"HISTORICAL_SIMULATION": 5},
+        )
+        self.assertEqual(
+            dataset["summary"]["audit_counts"]["by_date"],
+            {"2026-09-01": 5},
+        )
+        self.assertEqual(
+            dataset["summary"]["audit_counts"]["by_strategy"],
+            {"UNKNOWN:UNKNOWN": 5},
+        )
         self.assertEqual(len(dataset["event_ledger"]), 5)
         self.assertEqual(
             dataset["X_all"].shape,
