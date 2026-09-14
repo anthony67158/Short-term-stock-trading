@@ -71,6 +71,7 @@ jobs:
             tests/test_alpha158_market_history.py \
             tests/test_alpha158_snapshot.py \
             tests/test_review_release.py \
+            tests/test_review_schema_migration.py \
             tests/test_review_model_upload.py \
             tests/test_decision_dataset.py \
             tests/test_decision_evaluation.py \
@@ -360,7 +361,7 @@ jobs:
           python publish_opportunity_history.py \
             --input opportunity-outcomes.json
 
-      - name: Train and publish Alpha158 continuous ranking snapshot
+      - name: Train and publish Alpha158 continuous feature snapshot
         id: alpha158-training
         continue-on-error: true
         run: |
@@ -415,7 +416,8 @@ jobs:
               --output-dir "opportunity-model/review-seed-${seed}" \
               --seed "$seed" \
               --estimators 180 \
-              --threads 4
+              --threads 4 \
+              --feature-schema v4
           done
 
       - name: Train trigger-review action-value ensemble
@@ -425,7 +427,8 @@ jobs:
             --output-dir opportunity-model/review-release \
             --seeds 42,7,2026 \
             --estimators 180 \
-            --threads 4
+            --threads 4 \
+            --feature-schema v4
 
       - name: Compare trigger-review challenger with production
         id: review-selection

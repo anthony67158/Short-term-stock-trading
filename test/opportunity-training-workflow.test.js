@@ -81,14 +81,23 @@ test('复核模型每日训练只允许主板挑战者胜出现役版本后发�
     publishStep,
     /--release-decision opportunity-model\/review-release-decision\.json/,
   )
+  assert.match(
+    workflow,
+    /review_bakeoff[\s\S]*?--feature-schema v4/,
+  )
+  assert.match(
+    workflow,
+    /review_ensemble[\s\S]*?--feature-schema v4/,
+  )
   assert.match(workflow, /tests\/test_review_release\.py/)
+  assert.match(workflow, /tests\/test_review_schema_migration\.py/)
 })
 
-test('Alpha158每日生成连续排名快照且失败不阻断V3训练', () => {
+test('Alpha158每日生成V4连续特征快照且失败不阻断主训练', () => {
   const job = workflow.split('  opportunity-retrain:')[1]
     ?.split('\n  market-data-archive:')[0] || ''
   const alphaStep = job.match(
-    /- name: Train and publish Alpha158 continuous ranking snapshot([\s\S]*?)(?=\n      - name:)/,
+    /- name: Train and publish Alpha158 continuous feature snapshot([\s\S]*?)(?=\n      - name:)/,
   )?.[1] || ''
 
   assert.match(alphaStep, /continue-on-error: true/)
