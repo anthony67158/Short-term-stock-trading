@@ -90,6 +90,29 @@ class AlphaSnapshotPureFnTest(unittest.TestCase):
         self.assertTrue(np.allclose(left[6:12], right[6:12]))
         self.assertFalse(np.allclose(left[12:18], right[12:18]))
 
+    def test_rolling_rank_ic_waits_until_label_end_date(self):
+        dates = np.array(sum([[f"d{d}"] * 6 for d in range(4)], []))
+        label_ends = np.array(sum([
+            ["d2"] * 6,
+            ["d3"] * 6,
+            ["d4"] * 6,
+            ["d5"] * 6,
+        ], []))
+        scores = np.tile(np.arange(6, dtype=float), 4)
+        labels = np.tile(np.arange(6, dtype=float), 4)
+
+        ic = snap._rolling_rank_ic(
+            scores,
+            labels,
+            dates,
+            window=3,
+            label_end_dates=label_ends,
+        )
+
+        self.assertTrue(np.allclose(ic[:18], 0.0))
+        # d0 的标签到 d2 结束，只能从 d3 决策起使用。
+        self.assertTrue(np.allclose(ic[18:24], 1.0))
+
     def test_rolling_rank_ic_small_cross_section_is_zero(self):
         # 每日样本<5 → 日度IC为nan → 全缺回退0
         dates = np.array(["d0", "d0", "d1", "d1"])

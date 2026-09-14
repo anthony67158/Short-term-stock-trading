@@ -71,7 +71,14 @@ def _momentum_by_code(percentiles, codes, dates, *, lag=5):
     return out
 
 
-def _rolling_rank_ic(scores, labels, dates, *, window):
+def _rolling_rank_ic(
+    scores,
+    labels,
+    dates,
+    *,
+    window,
+    label_end_dates=None,
+):
     """每个交易日的滚动 RankIC：此前 window 个交易日的日度 RankIC 均值。
 
     先算每个交易日截面的日度 RankIC(预测 vs 真实标签)，再对交易日序列做
@@ -80,9 +87,18 @@ def _rolling_rank_ic(scores, labels, dates, *, window):
     无历史时为 0。
     """
     unique_dates = sorted(set(dates.tolist()))
+    ends = (
+        np.asarray(label_end_dates).astype(str)
+        if label_end_dates is not None
+        else np.asarray(dates).astype(str)
+    )
+    if ends.shape != np.asarray(dates).shape:
+        raise ValueError("RankIC标签成熟日期与样本日期不对齐")
     daily_ic = {}
+    daily_label_end = {}
     for d in unique_dates:
         idx = np.flatnonzero(dates == d)
+        daily_label_end[d] = max(ends[idx].tolist())
         if len(idx) < 5:
             daily_ic[d] = np.nan
             continue
@@ -93,10 +109,14 @@ def _rolling_rank_ic(scores, labels, dates, *, window):
             daily_ic[d] = np.nan
     # 滚动均值（按交易日序）。
     rolled = {}
-    seq = [daily_ic[d] for d in unique_dates]
-    for pos, d in enumerate(unique_dates):
-        lo = max(0, pos - window)
-        vals = [v for v in seq[lo:pos] if v == v]  # 严格排除当天
+    for d in unique_dates:
+        mature = [
+            daily_ic[source_date]
+            for source_date in unique_dates
+            if daily_label_end[source_date] < d
+            and daily_ic[source_date] == daily_ic[source_date]
+        ]
+        vals = mature[-window:]
         rolled[d] = float(np.mean(vals)) if vals else 0.0
     return np.array([rolled[d] for d in dates], dtype=np.float64)
 
@@ -117,11 +137,26 @@ def build_snapshot(panel, *, threads=4):
         v_dates = panel["dates"][validation].astype(str)
         v_codes = panel["codes"][validation].astype(str)
         v_labels = np.asarray(panel["y_raw"][validation], dtype=np.float64)
+        v_label_ends = (
+            panel["label_end_dates"][validation].astype(str)
+        )
         pct = _percentile_by_date(scores, v_dates)
         centered = np.clip((pct - 0.5) * 2, -1, 1)
         momentum = _momentum_by_code(pct, v_codes, v_dates, lag=5)
-        ic20 = _rolling_rank_ic(scores, v_labels, v_dates, window=20)
-        ic60 = _rolling_rank_ic(scores, v_labels, v_dates, window=60)
+        ic20 = _rolling_rank_ic(
+            scores,
+            v_labels,
+            v_dates,
+            window=20,
+            label_end_dates=v_label_ends,
+        )
+        ic60 = _rolling_rank_ic(
+            scores,
+            v_labels,
+            v_dates,
+            window=60,
+            label_end_dates=v_label_ends,
+        )
         meta = fold["metadata"]
         for i in range(len(validation)):
             rows.append({
