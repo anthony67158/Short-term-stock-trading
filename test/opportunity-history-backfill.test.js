@@ -200,7 +200,15 @@ test('历史结算复用生产费用和T加一结果合同', () => {
   assert.equal(outcome.context.historicalBackfill, true)
   assert.equal(
     outcome.reviewScoreInput.schemaVersion,
-    'opportunity-review-feature.v1',
+    'opportunity-review-feature.v2',
+  )
+  assert.match(outcome.reviewScoreInput.priceContractHash, /^[0-9a-f]{64}$/)
+  assert.equal(outcome.labelSource, 'HISTORICAL_SIMULATION')
+  assert.equal(outcome.labelContractVersion, 'trigger-review-label.v2')
+  assert.equal(outcome.exitContractVersion, 'trailing-exit.v1')
+  assert.equal(
+    outcome.reviewScoreInput.priceContract.entryPriceMilliCny,
+    10200,
   )
   assert.equal(outcome.reviewScoreInput.factors.observationBars, 2)
   assert.equal(
@@ -230,5 +238,27 @@ test('历史样本合并按决策ID去重并保留最新值', () => {
   assert.deepEqual(
     mergeHistoricalOutcomes([first], { outcomes: [latest, second] }),
     [latest, second],
+  )
+})
+
+test('历史样本合并保留未成熟与未成交状态供成交模型审计', () => {
+  const pending = {
+    decisionId: 'pending',
+    tradeDate: '2026-06-01',
+    maturity: 'PENDING',
+    fillStatus: 'TRIGGERED_PENDING',
+  }
+  const unfilled = {
+    decisionId: 'unfilled',
+    tradeDate: '2026-06-01',
+    maturity: 'MATURED',
+    fillStatus: 'TRIGGERED_UNFILLED',
+  }
+
+  assert.deepEqual(
+    mergeHistoricalOutcomes([pending, unfilled]).map(
+      (item) => item.decisionId,
+    ),
+    ['pending', 'unfilled'],
   )
 })

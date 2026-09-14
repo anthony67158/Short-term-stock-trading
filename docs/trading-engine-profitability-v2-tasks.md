@@ -99,14 +99,14 @@
 
 ## Phase 2：事件、标签与时间隔离
 
-### Task 6：拆分完整事件与条件收益数据集
+### Task 6：拆分完整事件与条件收益数据集（已完成）
 
 **Description:** 保留所有合法触发事件用于成交标签；只在可核验成交或明确反事实结算样本上生成条件收益标签。
 
 **Acceptance criteria:**
-- [ ] 未成交、拒绝、撤销和未成熟事件不丢失。
-- [ ] 未成交事件没有伪造`netR=0`。
-- [ ] 标签记录真实/模拟来源及退出合同版本。
+- [x] 未成交、拒绝、撤销和未成熟事件不丢失。
+- [x] 未成交事件没有伪造`netR=0`。
+- [x] 标签记录真实/模拟来源及退出合同版本。
 
 **Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_review_dataset`
 

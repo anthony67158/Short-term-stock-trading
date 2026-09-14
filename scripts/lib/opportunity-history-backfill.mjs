@@ -5,13 +5,21 @@ import {
   resolveOpportunityOutcome,
 } from '../../shared/opportunityOutcomeResolver.js'
 import {
+  A_SHARE_STANDARD_FEE_POLICY,
+  tradeFees,
+} from '../../shared/ashareStrategyExecution.js'
+import {
   buildOpportunityScoreInput,
 } from '../../shared/opportunityScoreContract.js'
 import {
-  buildOpportunityReviewFeatureInput,
+  buildOpportunityReviewFeatureInputV2,
+  OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
 } from '../../shared/opportunityReviewFeatures.js'
+import { reviewPriceContract } from '../../shared/reviewPriceContract.js'
+import { TRAILING_EXIT_VERSION } from '../../shared/trailingExit.js'
 
 const REVIEW_OBSERVATION_MS = 10 * 60 * 1000
+const REVIEW_LABEL_CONTRACT_VERSION = 'trigger-review-label.v2'
 
 function routeKey(decision, index) {
   return String(
@@ -140,7 +148,32 @@ function reviewFeatureInput(event, outcome, bars) {
     .sort((left, right) => left.at - right.at)
     .slice(0, 2)
   if (rows.at(-1)?.at < observationCompleteAt) return null
-  return buildOpportunityReviewFeatureInput({
+  const entryPrice = Number(rows.at(-1)?.price ?? rows.at(-1)?.close)
+  const stopPrice = Number(event.decision?.stopPrice)
+  const lotSize = /^68[89]/.test(String(event.code || '')) ? 200 : 100
+  if (!(entryPrice > stopPrice) || !(stopPrice > 0)) return null
+  const entryGross = entryPrice * lotSize
+  const exitGross = stopPrice * lotSize
+  const feeRateBps = (
+    tradeFees('BUY', entryGross, A_SHARE_STANDARD_FEE_POLICY).total
+    + tradeFees('SELL', exitGross, A_SHARE_STANDARD_FEE_POLICY).total
+  ) / entryGross * 10_000
+  const priceInput = {
+    entryPrice,
+    stopPrice,
+    feeRateBps,
+    slippageBps: 5,
+    lotSize,
+    tPlusOne: true,
+    exitPolicyVersion:
+      event.decision?.trailingStop?.schemaVersion
+      || event.decision?.exitPlan?.trailingStop?.schemaVersion
+      || TRAILING_EXIT_VERSION,
+    observationPolicyVersion:
+      OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
+  }
+  const bound = reviewPriceContract(priceInput)
+  const features = buildOpportunityReviewFeatureInputV2({
     code: event.code,
     asOf: rows.at(-1)?.at,
     triggerPrice: outcome.trigger?.price,
@@ -149,7 +182,39 @@ function reviewFeatureInput(event, outcome, bars) {
       || event.decision?.priceType,
     rows,
     initialScore: event.opportunityScore,
+    priceContract: priceInput,
   })
+  return features && bound ? {
+    ...features,
+    priceContract: bound.canonical,
+    priceContractHash: bound.hash,
+  } : null
+}
+
+function alignReviewRiskBasis(outcome, reviewScoreInput) {
+  if (
+    outcome?.fillStatus !== 'FILLED'
+    || !outcome.metrics
+    || !reviewScoreInput?.priceContract
+  ) return outcome
+  const quantity = Number(outcome.entry?.quantity)
+  const netPnl = Number(outcome.metrics.netPnl)
+  const riskPerShare = (
+    Number(reviewScoreInput.priceContract.priceRiskMilliCny) / 1000
+  )
+  const riskCash = riskPerShare * quantity
+  if (!(quantity > 0) || !(riskCash > 0) || !Number.isFinite(netPnl)) {
+    return outcome
+  }
+  return {
+    ...outcome,
+    metrics: {
+      ...outcome.metrics,
+      netR: +(netPnl / riskCash).toFixed(3),
+      initialRiskCash: +riskCash.toFixed(2),
+      riskBasis: 'REVIEW_PRICE_CONTRACT_V2',
+    },
+  }
 }
 
 export function settleHistoricalEvent({
@@ -159,19 +224,26 @@ export function settleHistoricalEvent({
   evaluatedAt,
 } = {}) {
   const scoreInput = buildOpportunityScoreInput({ event, batch })
-  const outcome = resolveOpportunityOutcome({
+  const lotSize = /^68[89]/.test(String(event.code || '')) ? 200 : 100
+  const resolved = resolveOpportunityOutcome({
     event,
     bars,
     evaluatedAt,
+    quantity: lotSize,
+    lotSize,
     postTriggerObservationMs: REVIEW_OBSERVATION_MS,
   })
+  const reviewScoreInput = reviewFeatureInput(event, resolved, bars)
+  const outcome = alignReviewRiskBasis(resolved, reviewScoreInput)
   return {
     ...outcome,
-    reviewScoreInput: reviewFeatureInput(
-      event,
-      outcome,
-      bars,
-    ),
+    reviewScoreInput,
+    labelSource: 'HISTORICAL_SIMULATION',
+    labelContractVersion: REVIEW_LABEL_CONTRACT_VERSION,
+    exitContractVersion:
+      event.decision?.trailingStop?.schemaVersion
+      || event.decision?.exitPlan?.trailingStop?.schemaVersion
+      || TRAILING_EXIT_VERSION,
     runId: String(batch.runId || ''),
     tradeDate: String(batch.tradeDate || ''),
     mode: String(batch.mode || '').toUpperCase(),
@@ -194,7 +266,7 @@ export function mergeHistoricalOutcomes(...groups) {
       : Array.isArray(group?.outcomes) ? group.outcomes : []
     for (const outcome of values) {
       const decisionId = String(outcome?.decisionId || '')
-      if (!decisionId || outcome?.maturity !== 'MATURED') continue
+      if (!decisionId) continue
       unique.set(decisionId, outcome)
     }
   }

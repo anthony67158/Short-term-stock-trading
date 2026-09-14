@@ -122,7 +122,7 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
             [float(index) for index in range(len(FEATURE_NAMES))],
         )
 
-    def test_dataset_only_accepts_filled_matured_review_paths(self):
+    def test_dataset_separates_fill_events_from_conditional_returns(self):
         valid = {
             "maturity": "MATURED",
             "fillStatus": "FILLED",
@@ -130,14 +130,37 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
             "code": "600001",
             "metrics": {"netR": 1.2},
             "reviewScoreInput": review_input(),
+            "entry": {"at": 1_788_320_120_000},
             "exit": {"at": 1_788_406_400_000},
+            "labelSource": "HISTORICAL_SIMULATION",
+            "exitContractVersion": "trailing-exit.v1",
+        }
+        unfilled = {
+            **valid,
+            "code": "600002",
+            "fillStatus": "TRIGGERED_UNFILLED",
+            "metrics": None,
+            "entry": {"at": 1_788_320_120_000},
+            "exit": None,
+            "reviewScoreInput": {
+                **review_input(),
+                "code": "600002",
+            },
         }
         dataset = build_opportunity_review_dataset([
             valid,
+            unfilled,
             {
-                **valid,
-                "code": "600002",
-                "fillStatus": "NOT_TRIGGERED",
+                **unfilled,
+                "code": "600004",
+                "maturity": "PENDING",
+                "fillStatus": "TRIGGERED_PENDING",
+            },
+            {
+                **unfilled,
+                "code": "600005",
+                "fillStatus": "CANCELLED",
+                "outcome": "USER_CANCELLED",
             },
             {
                 **valid,
@@ -147,10 +170,58 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
         ])
 
         self.assertEqual(dataset["summary"]["samples"], 1)
-        self.assertEqual(dataset["summary"]["excluded"], 2)
+        self.assertEqual(dataset["summary"]["events"], 2)
+        self.assertEqual(dataset["summary"]["excluded"], 3)
+        self.assertEqual(dataset["summary"]["input_outcomes"], 5)
+        self.assertEqual(
+            dataset["summary"]["status_counts"],
+            {
+                "CANCELLED": 1,
+                "FILLED": 2,
+                "TRIGGERED_PENDING": 1,
+                "TRIGGERED_UNFILLED": 1,
+            },
+        )
+        self.assertEqual(len(dataset["event_ledger"]), 5)
+        self.assertEqual(
+            dataset["X_all"].shape,
+            (2, len(FEATURE_NAMES)),
+        )
+        self.assertEqual(dataset["y_fill"].tolist(), [1, 0])
+        self.assertEqual(dataset["conditional_indices"].tolist(), [0])
         self.assertEqual(dataset["X"].shape, (1, len(FEATURE_NAMES)))
         self.assertEqual(dataset["y_win"].tolist(), [1])
         self.assertAlmostEqual(float(dataset["y_net_r"][0]), 1.2)
+        self.assertEqual(
+            dataset["label_sources"].tolist(),
+            ["HISTORICAL_SIMULATION"],
+        )
+        self.assertEqual(
+            dataset["exit_contract_versions"].tolist(),
+            ["trailing-exit.v1"],
+        )
+
+    def test_unfilled_event_never_receives_a_zero_return_label(self):
+        invalid = {
+            "maturity": "MATURED",
+            "fillStatus": "TRIGGERED_UNFILLED",
+            "tradeDate": "2026-09-01",
+            "code": "600002",
+            "metrics": {"netR": 0},
+            "reviewScoreInput": {
+                **review_input(),
+                "code": "600002",
+            },
+            "entry": {"at": 1_788_320_120_000},
+            "evaluatedAt": 1_788_320_180_000,
+            "labelSource": "HISTORICAL_SIMULATION",
+            "exitContractVersion": "trailing-exit.v1",
+        }
+        dataset = build_opportunity_review_dataset([invalid])
+
+        self.assertEqual(dataset["y_fill"].tolist(), [0])
+        self.assertEqual(dataset["conditional_indices"].tolist(), [])
+        self.assertEqual(dataset["y_net_r"].tolist(), [])
 
 
 if __name__ == "__main__":
