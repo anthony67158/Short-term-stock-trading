@@ -51,6 +51,7 @@ class OpportunityAlphaTargetTest(unittest.TestCase):
             ]),
             "y_opportunity_r": np.asarray([1.0, 0.5, 2.0]),
             "y_opportunity_r_stress10": np.asarray([0.9, 0.4, 1.8]),
+            "y_fill_opportunity": np.asarray([1, 0, 1]),
             "label_start_ms_opportunity": np.asarray([20, 10, 30]),
             "label_end_ms_opportunity": np.asarray([40, 50, 60]),
         }
@@ -70,6 +71,34 @@ class OpportunityAlphaTargetTest(unittest.TestCase):
         self.assertEqual(result["label_start_ms"].tolist(), [10])
         self.assertEqual(result["label_end_ms"].tolist(), [60])
         self.assertEqual(result["path_counts"].tolist(), [3])
+        self.assertEqual(result["filled_path_counts"].tolist(), [2])
+
+    def test_filled_loss_is_not_hidden_by_an_unfilled_path(self):
+        dataset = {
+            "X_opportunity": np.zeros((2, 1)),
+            "dates_opportunity": np.asarray([
+                "2026-01-05",
+                "2026-01-05",
+            ]),
+            "codes_opportunity": np.asarray(["600001", "600001"]),
+            "decision_ids_opportunity": np.asarray([
+                "formula:2026-01-05:close:1510:600001:IMMEDIATE",
+                "formula:2026-01-05:close:1510:600001:PULLBACK",
+            ]),
+            "y_opportunity_r": np.asarray([-1.0, 0.0]),
+            "y_opportunity_r_stress10": np.asarray([-1.1, 0.0]),
+            "y_fill_opportunity": np.asarray([1, 0]),
+            "label_start_ms_opportunity": np.asarray([10, 20]),
+            "label_end_ms_opportunity": np.asarray([30, 40]),
+        }
+
+        result = aggregate_stock_day_targets(
+            dataset,
+            ["20260105"],
+        )
+
+        self.assertEqual(result["y_best_net_r"].tolist(), [-1.0])
+        self.assertEqual(result["filled_path_counts"].tolist(), [1])
 
     def test_percentile_and_momentum_are_cross_sectional_and_per_stock(self):
         dates = np.asarray(["d1", "d1", "d2", "d2"])

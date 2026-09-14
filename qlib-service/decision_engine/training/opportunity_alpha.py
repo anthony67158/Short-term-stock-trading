@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from .review_dataset import opportunity_modes
+from .review_dataset import opportunity_fill_labels, opportunity_modes
 
 
 OPPORTUNITY_ALPHA_TARGET_VERSION = "alpha158-opportunity-target.v1"
@@ -158,6 +158,7 @@ def aggregate_stock_day_targets(dataset, available_dates):
         dataset["label_end_ms_opportunity"],
         dtype=np.int64,
     )
+    fills = opportunity_fill_labels(dataset).astype(bool)
     modes = opportunity_modes(dataset)
     if not (
         dates.shape
@@ -166,6 +167,7 @@ def aggregate_stock_day_targets(dataset, available_dates):
         == stress_rewards.shape
         == starts.shape
         == ends.shape
+        == fills.shape
         == modes.shape
     ):
         raise ValueError("Alpha机会目标数组未对齐")
@@ -187,8 +189,14 @@ def aggregate_stock_day_targets(dataset, available_dates):
 
     rows = []
     for (feature_date, code), indices in sorted(grouped.items()):
+        filled_indices = [
+            index
+            for index in indices
+            if fills[index]
+        ]
+        candidates = filled_indices or indices
         selected = max(
-            indices,
+            candidates,
             key=lambda index: (
                 rewards[index],
                 stress_rewards[index],
@@ -203,6 +211,7 @@ def aggregate_stock_day_targets(dataset, available_dates):
             min(starts[indices]),
             max(ends[indices]),
             len(indices),
+            len(filled_indices),
         ))
     return {
         "schema_version": OPPORTUNITY_ALPHA_TARGET_VERSION,
@@ -226,6 +235,10 @@ def aggregate_stock_day_targets(dataset, available_dates):
         ),
         "path_counts": np.asarray(
             [row[6] for row in rows],
+            dtype=np.int16,
+        ),
+        "filled_path_counts": np.asarray(
+            [row[7] for row in rows],
             dtype=np.int16,
         ),
     }
