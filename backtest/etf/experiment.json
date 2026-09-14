@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "etf-research.v1",
+  "status": "RESEARCH_ONLY",
+  "frozenOn": "2026-09-14",
+  "dataStart": "20140101",
+  "start": "20160104",
+  "end": "20260911",
+  "initialCash": 100000,
+  "warmupSessions": 252,
+  "minimumAverageAmount": 10000000,
+  "maxPositions": 3,
+  "maxWeight": 0.20,
+  "cashBuffer": 0.10,
+  "riskPerPosition": 0.006,
+  "maxOpenRisk": 0.05,
+  "gapStress": 0.03,
+  "atrMultiple": 3,
+  "commissionRate": 0.0003,
+  "minimumCommission": 5,
+  "slippageBps": [5, 10],
+  "models": ["cash", "static_risk_matched", "monthly_trend", "weekly_rotation"],
+  "staticCodes": ["510300.SH", "518880.SH", "511010.SH"],
+  "assets": [
+    {"code": "510300.SH", "name": "沪深300ETF", "group": "equity", "tPlusOne": true, "limitRatio": 0.10},
+    {"code": "510500.SH", "name": "中证500ETF", "group": "equity", "tPlusOne": true, "limitRatio": 0.10},
+    {"code": "510880.SH", "name": "红利ETF", "group": "equity", "tPlusOne": true, "limitRatio": 0.10},
+    {"code": "518880.SH", "name": "黄金ETF", "group": "gold", "tPlusOne": false, "limitRatio": 0.10},
+    {"code": "511010.SH", "name": "国债ETF", "group": "bond", "tPlusOne": false, "limitRatio": 0.10}
+  ],
+  "limitations": [
+    "Fixed representative universe chosen in 2026; not a point-in-time whole-ETF universe.",
+    "Static comparator uses the same sizing, hard stop and trailing policy, not unconditional buy-and-hold.",
+    "Monthly version uses fixed equity/gold/bond representatives; weekly version ranks one asset per group.",
+    "All versions have identical 3-ATR entry stops, monotone 3-ATR trailing stops and gap stress sizing.",
+    "Daily OHLC execution is an approximation without auction depth; opening orders use prior-day liquidity capacity.",
+    "No production ETF action-value model exists; these rule portfolios must not receive DIRECT eligibility.",
+    "Study is exploratory; prior reviewed history is not a fresh holdout. Cash earns zero by assumption.",
+    "No strategy or threshold may be selected from this run and relabeled as an untouched holdout."
+  ]
+}
