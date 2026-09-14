@@ -27,7 +27,7 @@ function finite(value) {
   return Number.isFinite(number) ? number : null
 }
 
-function compactDate(value) {
+export function compactDecisionDate(value) {
   const match = String(value || '').match(
     /^(\d{4})-?(\d{2})-?(\d{2})/,
   )
@@ -43,15 +43,40 @@ function beijingDate(timestamp) {
     .replaceAll('-', '')
 }
 
-function dailyRows(file, codes) {
+export function filterReviewSelectionByAlpha(
+  selected,
+  alphaPayload,
+  topN = 50,
+) {
+  const allowed = new Map()
+  for (const row of alphaPayload?.rankings || []) {
+    const rank = Math.trunc(finite(row.rank) || 0)
+    const code = String(row.code || '')
+    if (rank < 1 || rank > topN || !code) continue
+    const date = compactDecisionDate(row.date)
+    if (!date) continue
+    const codes = allowed.get(date) || new Set()
+    codes.add(code)
+    allowed.set(date, codes)
+  }
+  return (Array.isArray(selected) ? selected : []).filter((row) => {
+    const date = compactDecisionDate(row.date)
+    return allowed.get(date)?.has(String(row.code || '')) === true
+  })
+}
+
+export function loadDecisionDailyRows(
+  file,
+  codes,
+  { adjustPrices = false } = {},
+) {
   const payload = JSON.parse(
     gunzipSync(fs.readFileSync(file)).toString('utf8'),
   )
-  const byDate = new Map()
-  const byCode = new Map()
+  const rows = []
   for (const row of payload) {
     const code = String(row?.code || '')
-    const date = compactDate(row?.date)
+    const date = compactDecisionDate(row?.date)
     if (!codes.has(code) || !date) continue
     const normalized = {
       date,
@@ -70,6 +95,34 @@ function dailyRows(file, codes) {
       || !(normalized.close > 0)
       || !(normalized.previousClose > 0)
     ) continue
+    rows.push(normalized)
+  }
+  if (adjustPrices) {
+    const grouped = new Map()
+    for (const row of rows) {
+      const values = grouped.get(row.code) || []
+      values.push(row)
+      grouped.set(row.code, values)
+    }
+    for (const values of grouped.values()) {
+      values.sort((left, right) => left.date.localeCompare(right.date))
+      let previousAdjustedClose = null
+      for (const row of values) {
+        const scale = previousAdjustedClose == null
+          ? 1
+          : previousAdjustedClose / row.previousClose
+        for (const name of ['open', 'high', 'low', 'close']) {
+          row[name] *= scale
+        }
+        row.previousClose = previousAdjustedClose ?? row.previousClose
+        previousAdjustedClose = row.close
+      }
+    }
+  }
+  const byDate = new Map()
+  const byCode = new Map()
+  for (const normalized of rows) {
+    const { code, date } = normalized
     if (!byDate.has(date)) byDate.set(date, new Map())
     byDate.get(date).set(code, normalized)
     if (!byCode.has(code)) byCode.set(code, new Map())
@@ -92,11 +145,11 @@ function actionsByDate(rows, tradingDates, nextOpen) {
   }
   for (const row of rows) {
     const outcome = row.outcome || {}
-    const signalDate = compactDate(row.date)
+    const signalDate = compactDecisionDate(row.date)
     add(signalDate, 'SIGNAL', row)
     if (outcome.fillStatus === 'FILLED') {
-      const entryDate = compactDate(outcome.entry?.tradeDate)
-      const rawExitDate = compactDate(outcome.exit?.tradeDate)
+      const entryDate = compactDecisionDate(outcome.entry?.tradeDate)
+      const rawExitDate = compactDecisionDate(outcome.exit?.tradeDate)
       add(entryDate, 'ENTRY', row)
       add(
         nextOpen ? nextDate(rawExitDate) : rawExitDate,
@@ -105,7 +158,7 @@ function actionsByDate(rows, tradingDates, nextOpen) {
       )
     } else {
       const terminalDate =
-        compactDate(outcome.entry?.date)
+        compactDecisionDate(outcome.entry?.date)
         || beijingDate(outcome.evaluatedAt)
         || signalDate
       add(terminalDate, 'CANCEL', row)
@@ -309,8 +362,8 @@ export function replayReviewAccount({
       }
       const planned = plannedPrices(row)
       const entryDate =
-        compactDate(row.outcome?.entry?.tradeDate)
-        || compactDate(row.outcome?.entry?.date)
+        compactDecisionDate(row.outcome?.entry?.tradeDate)
+        || compactDecisionDate(row.outcome?.entry?.date)
         || date
       try {
         state = submitDecisionOrder(state, {
@@ -424,16 +477,30 @@ function main() {
   const selection = JSON.parse(
     fs.readFileSync(args['--selection'], 'utf8'),
   )
-  const selected = selection.selected || []
+  const rawSelected = selection.selected || []
+  const alphaPayload = args['--alpha-scores']
+    ? JSON.parse(fs.readFileSync(args['--alpha-scores'], 'utf8'))
+    : null
+  const alphaTopN = Math.max(
+    1,
+    Math.trunc(finite(args['--alpha-top-n']) || 50),
+  )
+  const selected = alphaPayload
+    ? filterReviewSelectionByAlpha(
+        rawSelected,
+        alphaPayload,
+        alphaTopN,
+      )
+    : rawSelected
   const riskProfile = String(
     args['--risk-profile'] || 'BASELINE',
   ).toUpperCase()
   const codes = new Set(selected.map((row) => row.code))
-  const daily = dailyRows(args['--daily'], codes)
+  const daily = loadDecisionDailyRows(args['--daily'], codes)
   const signalDates = [...new Set(
-    selected.map((row) => compactDate(row.date)),
+    selected.map((row) => compactDecisionDate(row.date)),
   )]
-  const lower = compactDate(
+  const lower = compactDecisionDate(
     selection.source?.reports?.[0]?.ranges
       ?.opportunity?.trainStartDate,
   ) || signalDates.sort()[0]
@@ -469,8 +536,14 @@ function main() {
     schemaVersion: REVIEW_V3_ACCOUNT_REPLAY_VERSION,
     generatedAt: Date.now(),
     sourceSelection: path.resolve(args['--selection']),
+    alphaFilter: alphaPayload ? {
+      source: path.resolve(args['--alpha-scores']),
+      topN: alphaTopN,
+      inputCandidates: rawSelected.length,
+      selectedCandidates: selected.length,
+    } : null,
     signalDateRange: {
-      from: lower,
+      from: signalDates.sort()[0],
       to: signalDates.sort().at(-1),
     },
     accountDateRange: {

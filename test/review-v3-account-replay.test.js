@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  filterReviewSelectionByAlpha,
   replayReviewAccount,
 } from '../backtest/decision/replay-review-v3.mjs'
 
@@ -70,4 +71,25 @@ test('V3账户回放按风险预算执行并通过独立分币审计', () => {
   assert.ok(result.riskEvidence.maximumSingleTradeRiskPct <= 0.6)
   assert.equal(result.summary.audit.ok, true)
   assert.equal(result.accountState.positions['600001'], undefined)
+})
+
+test('Alpha158候选过滤按信号日和排名收紧V3事件', () => {
+  const selected = [
+    { date: '2026-01-01', code: '600001' },
+    { date: '2026-01-01', code: '600002' },
+    { date: '2026-01-02', code: '600001' },
+  ]
+  const alpha = {
+    rankings: [
+      { date: '20260101', code: '600001', rank: 20 },
+      { date: '20260101', code: '600002', rank: 60 },
+      { date: '20260102', code: '600001', rank: 51 },
+      { date: '20260102', code: '600001', rank: null },
+    ],
+  }
+
+  assert.deepEqual(
+    filterReviewSelectionByAlpha(selected, alpha, 50),
+    [{ date: '2026-01-01', code: '600001' }],
+  )
 })

@@ -59,7 +59,10 @@ def _eligible(row):
         and "ST" not in name.upper()
         and "退" not in name
         and (_finite(row.get("close")) or 0) > 0
-        and (_finite(row.get("amount")) or 0) >= 30_000_000
+        and (
+            _finite(row.get("selectionAmount") or row.get("amount"))
+            or 0
+        ) >= 30_000_000
         and (
             _finite(row.get("turnover") or row.get("turnover_rate"))
             or 0
@@ -73,7 +76,7 @@ def select_causal_universe(rows, trade_date, limit=1000):
     liquid = sorted(
         candidates,
         key=lambda row: (
-            -float(row.get("amount") or 0),
+            -float(row.get("selectionAmount") or row.get("amount") or 0),
             str(row.get("code") or ""),
         ),
     )[:liquid_limit]
@@ -113,14 +116,51 @@ def _load_daily(path):
             "high": _finite(value.get("high")),
             "low": _finite(value.get("low")),
             "close": _finite(value.get("close")),
+            "preClose": _finite(
+                value.get("preClose") or value.get("pre_close")
+            ),
             "volume": _finite(value.get("volume") or value.get("vol")),
             "amount": _finite(value.get("amount") or value.get("money")),
+            "selectionAmount": _finite(
+                value.get("amount") or value.get("money")
+            ),
             "turnover": _finite(
                 value.get("turnover") or value.get("turnover_rate")
             ),
             "isSt": bool(value.get("isSt") or value.get("is_st")),
         })
-    return rows
+    by_code = defaultdict(list)
+    for row in rows:
+        by_code[row["code"]].append(row)
+    adjusted = []
+    for code_rows in by_code.values():
+        code_rows.sort(key=lambda row: row["date"])
+        previous_adjusted_close = None
+        previous_raw_close = None
+        for row in code_rows:
+            raw_close = row["close"]
+            reference = row["preClose"] or previous_raw_close
+            scale = (
+                previous_adjusted_close / reference
+                if (
+                    previous_adjusted_close is not None
+                    and reference is not None
+                    and reference > 0
+                )
+                else 1.0
+            )
+            for name in ("open", "high", "low", "close", "amount"):
+                value = row[name]
+                row[name] = value * scale if value is not None else None
+            row["preClose"] = (
+                previous_adjusted_close
+                if previous_adjusted_close is not None
+                else row["preClose"]
+            )
+            previous_adjusted_close = row["close"]
+            previous_raw_close = raw_close
+            adjusted.append(row)
+    return adjusted
 
 
 def _date_zscore(values, dates):
