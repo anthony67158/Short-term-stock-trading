@@ -23,6 +23,7 @@ from decision_engine.training.review_dataset import (  # noqa: E402
     load_opportunity_review_dataset,
     merge_opportunity_review_datasets,
     normalize_review_history_outcomes,
+    opportunity_modes,
     save_opportunity_review_dataset,
 )
 from decision_engine.training.review_bakeoff import (  # noqa: E402
@@ -236,6 +237,7 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
         valid = {
             "maturity": "MATURED",
             "fillStatus": "FILLED",
+            "mode": "CLOSE",
             "tradeDate": "2026-09-01",
             "code": "600001",
             "decisionId": "decision-1:pullback",
@@ -326,6 +328,10 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
             [1, 0],
         )
         self.assertEqual(
+            dataset["modes_opportunity"].tolist(),
+            ["CLOSE", "CLOSE"],
+        )
+        self.assertEqual(
             dataset["event_group_ids_all"].tolist(),
             ["600001:decision-1", "600002:decision-1"],
         )
@@ -343,6 +349,21 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
         self.assertEqual(
             dataset["exit_contract_versions"].tolist(),
             ["trailing-exit.v1"],
+        )
+
+    def test_legacy_archive_modes_are_derived_from_decision_ids(self):
+        dataset = {
+            "X_opportunity": np.zeros((3, len(FEATURE_NAMES))),
+            "decision_ids_opportunity": np.asarray([
+                "formula:2026-09-01:intraday:1030:600001:IMMEDIATE",
+                "formula:2026-09-01:close:1510:600002:PULLBACK",
+                "legacy-id",
+            ]),
+        }
+
+        self.assertEqual(
+            opportunity_modes(dataset).tolist(),
+            ["INTRADAY", "CLOSE", "UNKNOWN"],
         )
 
     def test_unfilled_event_never_receives_a_zero_return_label(self):

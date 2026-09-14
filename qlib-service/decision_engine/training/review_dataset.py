@@ -57,7 +57,10 @@ _DATASET_ARRAY_FIELDS = (
     "label_sources",
     "exit_contract_versions",
 )
-_OPTIONAL_DATASET_ARRAY_FIELDS = ("y_fill_opportunity",)
+_OPTIONAL_DATASET_ARRAY_FIELDS = (
+    "y_fill_opportunity",
+    "modes_opportunity",
+)
 
 
 def opportunity_fill_labels(dataset):
@@ -85,6 +88,25 @@ def opportunity_fill_labels(dataset):
     if not aligned:
         raise ValueError("旧复核归档无法可靠恢复机会成交标签")
     return np.asarray(dataset["y_fill"], dtype=np.int8)
+
+
+def opportunity_modes(dataset):
+    modes = dataset.get("modes_opportunity")
+    if modes is not None:
+        values = np.asarray(modes).astype(str)
+        if len(values) != len(dataset["X_opportunity"]):
+            raise ValueError("复核机会时段标签与样本不对齐")
+        return values
+    values = []
+    for decision_id in dataset["decision_ids_opportunity"].astype(str):
+        lowered = decision_id.lower()
+        if ":intraday:" in lowered:
+            values.append("INTRADAY")
+        elif ":close:" in lowered:
+            values.append("CLOSE")
+        else:
+            values.append("UNKNOWN")
+    return np.asarray(values, dtype="<U20")
 
 
 def is_main_board_code(value):
@@ -164,6 +186,10 @@ def merge_opportunity_review_datasets(datasets):
             ])
     merged["y_fill_opportunity"] = np.concatenate([
         opportunity_fill_labels(dataset)
+        for dataset in values
+    ])
+    merged["modes_opportunity"] = np.concatenate([
+        opportunity_modes(dataset)
         for dataset in values
     ])
     summaries = [dataset.get("summary") or {} for dataset in values]
@@ -264,6 +290,7 @@ def load_opportunity_review_dataset(path):
     if dataset["schema_version"] != DATASET_SCHEMA_VERSION:
         raise ValueError("复核训练数据集版本无效")
     dataset["y_fill_opportunity"] = opportunity_fill_labels(dataset)
+    dataset["modes_opportunity"] = opportunity_modes(dataset)
     return dataset
 
 
@@ -656,6 +683,13 @@ def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
                 for item in opportunity
             ],
             dtype=np.int8,
+        ),
+        "modes_opportunity": np.asarray(
+            [
+                str(item[0].get("mode") or "UNKNOWN").upper()
+                for item in opportunity
+            ],
+            dtype="<U20",
         ),
         "y_opportunity_r_stress10": np.asarray(
             [item[5] for item in opportunity],
