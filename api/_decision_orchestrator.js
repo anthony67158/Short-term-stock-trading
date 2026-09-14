@@ -19,9 +19,12 @@ import { buildMarketOpportunityContext } from '../shared/marketOpportunityContex
 import { scoreOpportunityPlaybooks } from '../shared/opportunityPlaybooks.js'
 import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatures.js'
 import {
-  buildOpportunityReviewFeatureInputV3,
+  buildOpportunityReviewFeatureInputV4,
   OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
 } from '../shared/opportunityReviewFeatures.js'
+import {
+  alpha158SignalFromSnapshot,
+} from '../shared/alpha158SignalFeatures.js'
 import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
 import { reviewPriceContract } from '../shared/reviewPriceContract.js'
 import { summarizeStrategyPatterns } from '../shared/strategyPatternFeatures.js'
@@ -49,10 +52,6 @@ import {
 } from '../shared/trailingExit.js'
 import { isTriggeredReviewEvent } from '../shared/triggeredReviewDecision.js'
 import { allocationMarketFrom } from '../shared/targetPositionModel.js'
-import {
-  alpha158SignalFor,
-  buildJointOpportunityRanking,
-} from '../shared/alpha158Signal.js'
 
 async function bounded(promise, fallback, milliseconds = 7000) {
   let timer
@@ -305,17 +304,13 @@ export async function evaluateDecision({
   const accountRisk = buildAccountRiskContext(book, quoteMap, now)
   const candles = (detail?.candles || []).filter((bar) =>
     [bar.close, bar.high, bar.low].every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
-  const evidenceTradeDate = quote.live
+  const currentSessionSnapshot = (
+    quote.tradeDate === beijingDayKey(now)
+    && ['LUNCH_CLOSE', 'CLOSE'].includes(quote.priceStatus)
+  )
+  const evidenceTradeDate = quote.live || currentSessionSnapshot
     ? quote.tradeDate
     : candles.at(-1)?.date || quote.tradeDate
-  const alpha158Snapshot = suppliedAlpha158Snapshot === undefined
-    ? await bounded(fetchAlpha158Snapshot({ now }), null, 1200)
-    : suppliedAlpha158Snapshot
-  const alpha158Signal = alpha158SignalFor(
-    alpha158Snapshot,
-    code,
-    { expectedDate: evidenceTradeDate },
-  )
   const validatedFund = currentFundEvidence(
     fund,
     evidenceTradeDate,
@@ -350,7 +345,6 @@ export async function evaluateDecision({
     strategyPatternPolicy: strategyPatternCapabilities.playbookBlend
       ? 'ACTIVE'
       : 'RESEARCH',
-    alpha158Signal,
   }
   const playbook = scoreOpportunityPlaybooks(candidate, context).selected
   let plans = buildAdaptivePricePlans({
@@ -484,7 +478,6 @@ export async function evaluateDecision({
             plan.entryPlan.price * input.factors.stopDistancePct / 100,
         },
       },
-      alpha158Signal,
     }
   }))
   // Budget every path on the same account snapshot before comparing them.
@@ -516,10 +509,6 @@ export async function evaluateDecision({
     })
     return {
       ...plan,
-      jointRanking: buildJointOpportunityRanking({
-        opportunityScore: plan.opportunityScore,
-        alpha158Signal: plan.alpha158Signal,
-      }),
       targetPosition: hypothetical.targetPosition,
     }
   }
@@ -534,6 +523,13 @@ export async function evaluateDecision({
   let reviewScoreInput = null
   let reviewEvaluation = null
   if (isTriggeredReviewEvent(reviewEvent)) {
+    const alpha158Snapshot = suppliedAlpha158Snapshot === undefined
+      ? await bounded(fetchAlpha158Snapshot({ now }), null, 1200)
+      : suppliedAlpha158Snapshot
+    const alpha158Signal = alpha158SignalFromSnapshot(
+      alpha158Snapshot,
+      code,
+    )
     const direction = String(reviewEvent?.direction || '').toUpperCase()
     const requestedRoute = direction.includes('GTE')
       ? 'BREAKOUT'
@@ -577,7 +573,7 @@ export async function evaluateDecision({
       && rawReviewPriceContract
       && boundReviewPriceContract
     )
-      ? buildOpportunityReviewFeatureInputV3({
+      ? buildOpportunityReviewFeatureInputV4({
           code,
           asOf: now,
           formulaId: 'TRIGGER_REVIEW',
@@ -592,6 +588,8 @@ export async function evaluateDecision({
           initialScoreInput: scoreInputsByRoute.get(
             reviewedPlan.route,
           ),
+          alpha158Signal,
+          alphaExpectedDate: evidenceTradeDate,
           priceContract: rawReviewPriceContract,
         })
       : null

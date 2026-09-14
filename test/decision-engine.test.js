@@ -699,7 +699,15 @@ test('触发后路径特征只在复核事件中生成', async () => {
   assert.equal(initial.meta.reviewScoreInput, null)
   assert.equal(
     review.meta.reviewScoreInput.schemaVersion,
-    'opportunity-review-feature.v3',
+    'opportunity-review-feature.v4',
+  )
+  assert.equal(
+    Object.keys(review.meta.reviewScoreInput.factors).length,
+    176,
+  )
+  assert.equal(
+    review.meta.reviewScoreInput.factors.alpha_alphaScoreZMissing,
+    1,
   )
   assert.match(review.meta.reviewScoreInput.priceContractHash, /^[0-9a-f]{64}$/)
   assert.equal(
@@ -873,6 +881,48 @@ test('休市报价日期领先时按最后有效日线校验收盘资金', async
   assert.equal(result.result.decisionEvidence.funds.mainNetYi, 1)
 })
 
+test('午休时使用当日午间收盘资金而不是按上一交易日日线判缺失', async () => {
+  let scoreCalls = 0
+  const result = await evaluateDecision(scenario({
+    now: Date.parse('2026-09-14T04:00:00Z'),
+    quotes: [{
+      code: '600001',
+      price: 10,
+      isLivePrice: false,
+      priceStatus: 'LUNCH_CLOSE',
+      tradeDate: '2026-09-14',
+    }],
+    detail: {
+      candles: Array.from({ length: 30 }, (_, index) => ({
+        date: index === 29
+          ? '2026-09-11'
+          : `2026-08-${String(index + 1).padStart(2, '0')}`,
+        close: 10,
+        high: 10.2,
+        low: 9.8,
+        amount: 100000000,
+      })),
+    },
+    fund: {
+      asOfDate: '2026-09-14',
+      mainNetYi: -8.02,
+      retailNetYi: 5.01,
+    },
+    score: async ([input]) => {
+      scoreCalls += 1
+      return new Map([[input.code, plan.opportunityScore]])
+    },
+  }))
+
+  assert.equal(scoreCalls, 3)
+  assert.notEqual(
+    result.result.decisionSource.state,
+    'EVIDENCE_INCOMPLETE',
+  )
+  assert.equal(result.result.decisionEvidence.funds.mainNetYi, -8.02)
+  assert.equal(result.result.decisionEvidence.funds.retailNetYi, 5.01)
+})
+
 test('模型缺失及资金故障不能阻断持仓硬止损', async () => {
   const result = await evaluateDecision(scenario({
     book: { account: { cash: 80000 }, closed: [],
@@ -1029,6 +1079,70 @@ test('模型换版期间不得混用三条路径的模型概率', () => {
   }] })
   assert.equal(result.selectedDecisionPlan, null)
   assert.equal(result.planQty, 0)
+})
+
+test('高波动突破候选编译时保持所选路径的入场止损关系', async () => {
+  const volatileCandles = Array.from({ length: 30 }, (_, index) => ({
+    date: `2026-08-${String(index + 1).padStart(2, '0')}`,
+    open: 100,
+    close: index % 2 ? 101 : 99,
+    high: index === 25 ? 109 : 103,
+    low: 97,
+    amount: 100_000_000,
+  }))
+  volatileCandles[volatileCandles.length - 1] = {
+    date: '2026-09-14',
+    open: 99,
+    close: 100,
+    high: 103,
+    low: 97,
+    amount: 100_000_000,
+  }
+  const result = await evaluateDecision(scenario({
+    now: Date.parse('2026-09-14T02:10:00Z'),
+    book: {
+      account: { cash: 1_000_000, totalAssets: 1_000_000 },
+      holding: [],
+      closed: [],
+      executionPlans: [],
+    },
+    quotes: [{
+      code: '600001',
+      price: 100,
+      open: 99,
+      high: 102,
+      low: 98,
+      isLivePrice: true,
+      priceStatus: 'LIVE',
+      tradeDate: '2026-09-14',
+    }],
+    detail: { candles: volatileCandles },
+    trends: [{ time: '10:10', price: 100, avg: 99 }],
+    fund: {
+      asOfDate: '2026-09-14',
+      mainNetYi: 1,
+      retailNetYi: -1,
+    },
+    score: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      expectedNetR: input.dimensions.route === 'BREAKOUT' ? 1 : 0.1,
+    }]]),
+  }))
+
+  const advice = result.result
+  assert.equal(advice.selectedDecisionPlan.route, 'BREAKOUT')
+  assert.equal(
+    advice.decisionPlan.prices.reference,
+    advice.selectedDecisionPlan.entryPlan.price,
+  )
+  assert.ok(
+    advice.decisionPlan.prices.stop
+      < advice.decisionPlan.prices.reference,
+  )
+  assert.doesNotMatch(
+    advice.decisionPlan.blockedReasons.join('；'),
+    /breakoutWatchPrice|止损价必须低于入场价|价格关系无效/,
+  )
 })
 
 test('到价复核终态采用账户核定后的动作而不是核定前买入', async () => {

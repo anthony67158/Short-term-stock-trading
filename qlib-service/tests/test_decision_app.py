@@ -174,7 +174,7 @@ class DecisionAppTest(unittest.TestCase):
     def test_alpha158_snapshot_endpoint_returns_verified_snapshot(self):
         expected = {
             "schemaVersion": "alpha158-ranking-snapshot.v1",
-            "state": "RESEARCH",
+            "state": "ACTIVE",
             "asOfDate": "20260910",
             "stocks": {"600001": {"percentile": 0.88}},
         }
