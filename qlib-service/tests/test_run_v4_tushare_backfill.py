@@ -170,6 +170,41 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
 
         self.assertEqual(result, plan)
 
+    def test_prepare_limits_plan_to_requested_data_range(self):
+        dates = [f"2026{index:04d}" for index in range(1, 151)]
+        with tempfile.TemporaryDirectory() as directory:
+            daily = os.path.join(directory, "daily.json.gz")
+            funds = os.path.join(directory, "funds.json.gz")
+            runner._write_gzip(
+                runner.Path(daily),
+                [{"date": date} for date in dates],
+            )
+            runner._write_gzip(
+                runner.Path(funds),
+                [{"date": date} for date in dates],
+            )
+            args = Namespace(
+                output=os.path.join(directory, "output"),
+                history_days=60,
+                signal_days=145,
+                settlement_days=7,
+                universe_size=1000,
+                daily=daily,
+                funds=funds,
+                refresh_plan=False,
+                data_from=dates[20],
+                data_to=dates[130],
+            )
+
+            plan = runner._prepare_chunks(args)
+
+        self.assertEqual(plan["dataFrom"], dates[20])
+        self.assertEqual(plan["dataTo"], dates[130])
+        self.assertEqual(plan["chunks"][0]["from"], dates[20])
+        self.assertEqual(plan["chunks"][0]["signalFrom"], dates[80])
+        self.assertEqual(plan["chunks"][-1]["to"], dates[130])
+        self.assertEqual(plan["chunks"][-1]["signalTo"], dates[123])
+
     def test_final_chunk_can_be_shorter(self):
         dates = [f"2026{i:04d}" for i in range(1, 104)]
         chunks = runner.build_chunk_plan(

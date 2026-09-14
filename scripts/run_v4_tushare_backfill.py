@@ -191,6 +191,8 @@ def _prepare_chunks(args):
             "signalDaysPerChunk": args.signal_days,
             "settlementDays": args.settlement_days,
             "universeSize": args.universe_size,
+            "dataFrom": getattr(args, "data_from", None),
+            "dataTo": getattr(args, "data_to", None),
         }
         if all(cached.get(key) == value for key, value in expected.items()):
             chunks = cached.get("chunks")
@@ -208,7 +210,17 @@ def _prepare_chunks(args):
     dates = sorted({
         str(row.get("date") or "")
         for row in daily
-        if str(row.get("date") or "").isdigit()
+        if (
+            str(row.get("date") or "").isdigit()
+            and (
+                not getattr(args, "data_from", None)
+                or str(row.get("date")) >= args.data_from
+            )
+            and (
+                not getattr(args, "data_to", None)
+                or str(row.get("date")) <= args.data_to
+            )
+        )
     })
     chunks = build_chunk_plan(
         dates,
@@ -244,6 +256,8 @@ def _prepare_chunks(args):
         "signalDaysPerChunk": args.signal_days,
         "settlementDays": args.settlement_days,
         "universeSize": args.universe_size,
+        "dataFrom": getattr(args, "data_from", None),
+        "dataTo": getattr(args, "data_to", None),
         "chunks": chunks,
     }
     plan_path.write_text(
@@ -515,6 +529,8 @@ def parse_args():
         ),
     )
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--data-from")
+    parser.add_argument("--data-to")
     parser.add_argument("--history-days", type=int, default=60)
     parser.add_argument("--signal-days", type=int, default=145)
     parser.add_argument("--settlement-days", type=int, default=7)
@@ -565,6 +581,18 @@ def parse_args():
     )
     parser.add_argument("--from-chunk", type=int, default=1)
     args = parser.parse_args()
+    for field in ("data_from", "data_to"):
+        value = getattr(args, field)
+        if value is None:
+            continue
+        normalized = "".join(
+            character
+            for character in str(value)
+            if character.isdigit()
+        )
+        if len(normalized) != 8:
+            parser.error(f"--{field.replace('_', '-')} 必须为YYYYMMDD")
+        setattr(args, field, normalized)
     if args.download_restarts < 0:
         parser.error("--download-restarts 不能小于0")
     if args.download_retry_delay < 1:
@@ -574,6 +602,12 @@ def parse_args():
             "--download-retry-max-delay 不能小于"
             "--download-retry-delay"
         )
+    if (
+        args.data_from
+        and args.data_to
+        and args.data_from > args.data_to
+    ):
+        parser.error("--data-from 不能晚于 --data-to")
     if not args.prepare_only:
         required_env = (
             "STOCK_MCP_URL"
