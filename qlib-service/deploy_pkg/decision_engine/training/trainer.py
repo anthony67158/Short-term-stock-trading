@@ -496,6 +496,10 @@ def _fit_rank_value_calibrator(scores, values):
         }
     sums = np.bincount(inverse, weights=ordered_y).astype(np.float64)
     counts = np.bincount(inverse).astype(np.float64)
+    x_sums = np.bincount(
+        inverse,
+        weights=ordered_x,
+    ).astype(np.float64)
     blocks = [
         {
             "start": index,
@@ -521,15 +525,26 @@ def _fit_rank_value_calibrator(scores, values):
             "sum": left["sum"] + right["sum"],
         }]
         cursor = max(0, cursor - 1)
-    fitted = np.empty(len(unique_x), dtype=np.float64)
+    node_x = []
+    node_y = []
     for block in blocks:
-        fitted[block["start"]:block["end"] + 1] = (
-            block["sum"] / block["weight"]
+        start = block["start"]
+        end = block["end"]
+        weight = float(counts[start:end + 1].sum())
+        node_x.append(
+            float(x_sums[start:end + 1].sum()) / weight
         )
+        node_y.append(float(block["sum"] / block["weight"]))
+    if node_x[0] > float(unique_x[0]):
+        node_x.insert(0, float(unique_x[0]))
+        node_y.insert(0, node_y[0])
+    if node_x[-1] < float(unique_x[-1]):
+        node_x.append(float(unique_x[-1]))
+        node_y.append(node_y[-1])
     return {
-        "method": "isotonic",
-        "score": unique_x.astype(float).tolist(),
-        "expectedNetR": fitted.astype(float).tolist(),
+        "method": "centered_isotonic",
+        "score": node_x,
+        "expectedNetR": node_y,
         "sampleCount": int(len(x)),
         "labelClip": {
             "lower": round(float(lower), 6),

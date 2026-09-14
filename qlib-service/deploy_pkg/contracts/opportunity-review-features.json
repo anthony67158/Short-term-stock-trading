@@ -1,0 +1,24 @@
+{
+  "featureSchemaVersion": "opportunity-review-feature.v1",
+  "featureNames": [
+    "observationBars",
+    "changeFromTriggerPct",
+    "lowFromTriggerPct",
+    "highFromTriggerPct",
+    "closeLocationPct",
+    "volumeContinuation",
+    "aboveTriggerRatio",
+    "aboveVwapRatio",
+    "reclaimedVwap",
+    "heldAboveVwap",
+    "higherLows",
+    "lowerHighs",
+    "initialPFill",
+    "initialPWinGivenFill",
+    "initialExpectedNetR",
+    "direction_BREAKOUT",
+    "direction_PULLBACK",
+    "direction_EXIT",
+    "direction_UNKNOWN"
+  ]
+}

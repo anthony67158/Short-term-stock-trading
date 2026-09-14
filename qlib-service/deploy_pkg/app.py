@@ -27,6 +27,8 @@ from decision_engine import (
     get_decision_models,
     predict_decision_items,
 )
+from decision_engine.review_inference import predict_review_items
+from decision_engine.review_registry import get_review_models
 from sector_model import get_sector_models, predict_sector_items
 from archive_public_market_day import archive_latest_public
 from opportunity_pattern_snapshot import load_strategy_pattern_snapshot
@@ -318,6 +320,41 @@ def decision_score(
                 (metadata or {}).get("modelVersion"),
             "predictions": predictions,
             "note": "直接使用当前模块化决策模型；回测与资格状态独立记录",
+        }
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)[:120])
+
+
+@app.post("/decision-review-score")
+def decision_review_score(
+    payload: dict = Body(...),
+    x_api_key: str = Header(default=""),
+):
+    _check_key(x_api_key)
+    try:
+        models, metadata = get_review_models()
+        predictions = predict_review_items(
+            payload,
+            models=models,
+            metadata=metadata,
+        )
+        production_eligible = bool(
+            (metadata or {}).get("productionEligible")
+            and (metadata or {}).get("baselineSelected")
+        )
+        return {
+            "ok": True,
+            "productionEligible": production_eligible,
+            "baselineSelected": bool(
+                (metadata or {}).get("baselineSelected")
+            ),
+            "usagePolicy": (
+                "DIRECT" if production_eligible else "QUALIFIED"
+            ),
+            "modelLoaded": bool(models),
+            "modelVersion": (metadata or {}).get("modelVersion"),
+            "predictions": predictions,
+            "note": "触价后时序特征只更新动作价值，最终动作仍由统一仲裁器决定",
         }
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)[:120])

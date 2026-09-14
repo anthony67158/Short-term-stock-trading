@@ -1,0 +1,6 @@
+{
+  "featureSchemaVersion": "opportunity-review-feature.v3",
+  "baseFeatureContract": "opportunity-review-features-v2.json",
+  "initialFeatureContract": "opportunity-score-features.json",
+  "initialFeaturePrefix": "initial_"
+}

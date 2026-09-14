@@ -34,6 +34,31 @@ from .backtest_dataset import interval_expanding_folds
 FAMILIES = ("lightgbm", "catboost")
 
 
+def select_review_candidate(families):
+    eligible = [
+        (name, value["aggregate"])
+        for name, value in families.items()
+        if (
+            value["aggregate"]["pWinBrierSkill"] > 0
+            and value["aggregate"]["netRMaeSkill"] > 0
+            and value["aggregate"]["valueTop5LowerBound"] > 0
+            and 0.88 <= value["aggregate"]["q10Coverage"] <= 0.92
+        )
+    ]
+    if not eligible:
+        return None
+    return max(
+        eligible,
+        key=lambda item: (
+            item[1]["valueTop5LowerBound"],
+            item[1]["valueTop5MeanNetR"],
+            item[1]["pWinBrierSkill"],
+            item[1]["netRMaeSkill"],
+            item[0],
+        ),
+    )[0]
+
+
 def load_dataset(path):
     with open(path, encoding="utf-8") as handle:
         payload = json.load(handle)
@@ -188,16 +213,7 @@ def run(path, output, *, seed=42, estimators=180, threads=4):
             "folds": values,
             "aggregate": aggregate(values),
         }
-    eligible = [
-        name
-        for name, value in families.items()
-        if (
-            value["aggregate"]["pWinBrierSkill"] > 0
-            and value["aggregate"]["netRMaeSkill"] > 0
-            and value["aggregate"]["valueTop5LowerBound"] > 0
-            and 0.88 <= value["aggregate"]["q10Coverage"] <= 0.92
-        )
-    ]
+    candidate = select_review_candidate(families)
     report = {
         "schemaVersion": "decision-review-model-bakeoff.v1",
         "generatedAt": int(time.time() * 1000),
@@ -213,10 +229,10 @@ def run(path, output, *, seed=42, estimators=180, threads=4):
         "decision": {
             "state": (
                 "REVIEW_MODEL_CANDIDATE"
-                if len(eligible) == 1
+                if candidate
                 else "NO_REVIEW_MODEL"
             ),
-            "candidate": eligible[0] if len(eligible) == 1 else None,
+            "candidate": candidate,
         },
     }
     os.makedirs(output, exist_ok=True)

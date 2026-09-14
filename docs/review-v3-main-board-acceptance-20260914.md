@@ -51,3 +51,12 @@
 - 10%-20%收益和 70%盈利概率未达到，继续作为优化目标。
 - 不启用 `ABSOLUTE_CAP`，不把账户回放结果表述为稳定盈利证明。
 - 保留完整回滚版本和 60 个交易日前向记录要求。
+
+## 发布结果
+
+- 量化 FC 已部署 V3 运行时。
+- OSS 已原子切换至 `decision-review.1789360354.ensemble3`。
+- 线上状态：`modelLoaded=true`、`productionEligible=true`、
+  `baselineSelected=true`、`usagePolicy=DIRECT`。
+- 线上 V3 样本已分别验证策略拒绝和 `READY` 两条路径；`READY` 响应
+  返回与请求一致的价格合同哈希。
