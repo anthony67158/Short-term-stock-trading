@@ -16,6 +16,8 @@ const FEATURES = [
   'alphaScorePctRank',
   'alphaScoreZ',
   'alphaScoreMomentum5',
+  'alphaRankIc20',
+  'alphaRankIc60',
 ]
 
 function finite(v) {
