@@ -34,6 +34,7 @@ def evaluation(
     stress_coverage=1.0,
     stress_lower_bound=0.005,
     account_drawdown_pct=2.0,
+    annualized_trades=120.0,
 ):
     return {
         "conditional": {
@@ -52,6 +53,9 @@ def evaluation(
             "stress10Coverage": stress_coverage,
             "stress10NetRLowerBound95": stress_lower_bound,
             "accountDrawdownPctAtRisk07Top5": account_drawdown_pct,
+            "account": {
+                "annualizedTrades": annualized_trades,
+            },
         },
     }
 
@@ -131,6 +135,19 @@ class ReviewReleaseTest(unittest.TestCase):
             "新增交易日少于10" in value
             for value in result["blockers"]
         ))
+
+    def test_gate_rejects_insufficient_annualized_trade_coverage(self):
+        result = review_promotion_gate(
+            evaluation(),
+            evaluation(mean_net_r=0.08, annualized_trades=30),
+            fresh_evidence(),
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertIn(
+            "挑战者年化有效交易数低于80笔",
+            result["blockers"],
+        )
 
     def test_fresh_holdout_only_uses_dates_after_champion_cutoff(self):
         dataset = {

@@ -21,6 +21,7 @@ from decision_engine.heads.review_contract import (  # noqa: E402
     FEATURE_SCHEMA_VERSION,
 )
 from decision_engine.training.review_ensemble import (  # noqa: E402
+    MINIMUM_ANNUALIZED_TRADES,
     POLICY_MINIMUM_EXPECTED_R,
     _account_metrics,
     _fit_member,
@@ -33,6 +34,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
     def test_v4_policy_search_never_allows_negative_expected_net_r(self):
         self.assertTrue(POLICY_MINIMUM_EXPECTED_R)
         self.assertGreaterEqual(min(POLICY_MINIMUM_EXPECTED_R), 0.0)
+        self.assertGreaterEqual(MINIMUM_ANNUALIZED_TRADES, 80)
 
     def test_account_metrics_use_actual_daily_selection_count(self):
         dates = [f"2025-{index:03d}" for index in range(300)]
@@ -48,6 +50,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
         metrics = _account_metrics(ranking, stress)
 
         self.assertEqual(metrics["trades"], 600)
+        self.assertEqual(metrics["annualizedTrades"], 504)
         self.assertGreater(metrics["returnPct"], 0)
         self.assertEqual(metrics["rolling12MonthProfitProbability"], 1.0)
         self.assertGreater(metrics["stress10ReturnPct"], 0)
