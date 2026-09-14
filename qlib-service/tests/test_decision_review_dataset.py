@@ -322,6 +322,10 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
             [1.2, 0.0],
         ))
         self.assertEqual(
+            dataset["y_fill_opportunity"].tolist(),
+            [1, 0],
+        )
+        self.assertEqual(
             dataset["event_group_ids_all"].tolist(),
             ["600001:decision-1", "600002:decision-1"],
         )

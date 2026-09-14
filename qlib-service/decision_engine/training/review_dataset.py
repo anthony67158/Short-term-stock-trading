@@ -57,6 +57,34 @@ _DATASET_ARRAY_FIELDS = (
     "label_sources",
     "exit_contract_versions",
 )
+_OPTIONAL_DATASET_ARRAY_FIELDS = ("y_fill_opportunity",)
+
+
+def opportunity_fill_labels(dataset):
+    labels = dataset.get("y_fill_opportunity")
+    if labels is not None:
+        values = np.asarray(labels, dtype=np.int8)
+        if len(values) != len(dataset["X_opportunity"]):
+            raise ValueError("复核机会成交标签与样本不对齐")
+        return values
+    aligned = (
+        len(dataset["X_opportunity"]) == len(dataset["X_all"])
+        and np.array_equal(
+            dataset["dates_opportunity"],
+            dataset["dates_all"],
+        )
+        and np.array_equal(
+            dataset["codes_opportunity"],
+            dataset["codes_all"],
+        )
+        and np.array_equal(
+            dataset["event_group_ids_opportunity"],
+            dataset["event_group_ids_all"],
+        )
+    )
+    if not aligned:
+        raise ValueError("旧复核归档无法可靠恢复机会成交标签")
+    return np.asarray(dataset["y_fill"], dtype=np.int8)
 
 
 def is_main_board_code(value):
@@ -134,6 +162,10 @@ def merge_opportunity_review_datasets(datasets):
                 np.asarray(dataset[field])
                 for dataset in values
             ])
+    merged["y_fill_opportunity"] = np.concatenate([
+        opportunity_fill_labels(dataset)
+        for dataset in values
+    ])
     summaries = [dataset.get("summary") or {} for dataset in values]
     merged["summary"] = {
         "input_outcomes": sum(
@@ -181,6 +213,11 @@ def save_opportunity_review_dataset(path, dataset):
         for field in _DATASET_ARRAY_FIELDS
     }
     payload.update({
+        field: np.asarray(dataset[field])
+        for field in _OPTIONAL_DATASET_ARRAY_FIELDS
+        if field in dataset
+    })
+    payload.update({
         "archive_schema_version": np.asarray(
             DATASET_ARCHIVE_SCHEMA_VERSION,
         ),
@@ -211,6 +248,11 @@ def load_opportunity_review_dataset(path):
             for field in _DATASET_ARRAY_FIELDS
         }
         dataset.update({
+            field: np.asarray(payload[field])
+            for field in _OPTIONAL_DATASET_ARRAY_FIELDS
+            if field in payload.files
+        })
+        dataset.update({
             "schema_version": str(
                 payload["dataset_schema_version"].item()
             ),
@@ -221,6 +263,7 @@ def load_opportunity_review_dataset(path):
         })
     if dataset["schema_version"] != DATASET_SCHEMA_VERSION:
         raise ValueError("复核训练数据集版本无效")
+    dataset["y_fill_opportunity"] = opportunity_fill_labels(dataset)
     return dataset
 
 
@@ -606,6 +649,13 @@ def build_opportunity_review_dataset(outcomes, *, feature_schema="v3"):
         "y_opportunity_r": np.asarray(
             [item[2] for item in opportunity],
             dtype=np.float32,
+        ),
+        "y_fill_opportunity": np.asarray(
+            [
+                1 if item[0].get("fillStatus") == "FILLED" else 0
+                for item in opportunity
+            ],
+            dtype=np.int8,
         ),
         "y_opportunity_r_stress10": np.asarray(
             [item[5] for item in opportunity],

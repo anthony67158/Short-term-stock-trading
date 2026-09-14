@@ -110,6 +110,30 @@ class OpportunityEvaluationTest(unittest.TestCase):
         self.assertEqual(metrics["daily_net_r"]["2026-09-02"], 0.0)
         self.assertEqual(metrics["mean_net_r_at_5"], 0.5)
 
+    def test_ranking_metrics_count_only_executed_selections_as_trades(self):
+        dates = np.asarray([
+            "2026-09-01",
+            "2026-09-01",
+            "2026-09-02",
+        ])
+        relevance = np.asarray([0.0, 1.0, -1.0])
+
+        metrics = ranking_metrics(
+            relevance > 0,
+            relevance,
+            np.asarray([0.9, 0.8, 0.7]),
+            dates,
+            top_k=1,
+            executed_labels=np.asarray([0, 1, 1]),
+        )
+
+        self.assertEqual(metrics["selected"], 2)
+        self.assertEqual(metrics["executed"], 1)
+        self.assertEqual(
+            metrics["daily_executed"],
+            {"2026-09-01": 0, "2026-09-02": 1},
+        )
+
     def test_regression_metrics_and_daily_bootstrap_are_deterministic(self):
         actual = np.asarray([-1.0, 0.0, 1.0, 2.0])
         predicted = np.asarray([-0.8, 0.1, 0.8, 1.7])

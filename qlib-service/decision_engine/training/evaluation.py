@@ -183,6 +183,7 @@ def ranking_metrics(
     top_k=5,
     group_ids=None,
     eligible_mask=None,
+    executed_labels=None,
 ):
     positive = np.asarray(positive_labels, dtype=bool)
     relevance = np.asarray(relevance, dtype=np.float64)
@@ -198,6 +199,11 @@ def ranking_metrics(
         if eligible_mask is None
         else np.asarray(eligible_mask, dtype=bool)
     )
+    executed = (
+        None
+        if executed_labels is None
+        else np.asarray(executed_labels, dtype=bool)
+    )
     if not (
         positive.shape
         == relevance.shape
@@ -205,6 +211,8 @@ def ranking_metrics(
         == dates.shape
         == groups.shape
         == eligible.shape
+    ) or (
+        executed is not None and executed.shape != dates.shape
     ) or positive.ndim != 1:
         raise ValueError("排序评测输入维度不一致")
     if not np.isfinite(relevance).all() or not np.isfinite(scores).all():
@@ -214,7 +222,9 @@ def ranking_metrics(
     net_returns = []
     daily_net_r = {}
     daily_selected = {}
+    daily_executed = {}
     selected_total = 0
+    executed_total = 0
     active_days = 0
     k = max(1, int(top_k))
     for date in sorted(set(dates)):
@@ -224,6 +234,7 @@ def ranking_metrics(
             ndcgs.append(0.0)
             daily_net_r[date] = 0.0
             daily_selected[date] = 0
+            daily_executed[date] = 0
             net_returns.append(0.0)
             continue
         active_days += 1
@@ -243,6 +254,13 @@ def ranking_metrics(
         order = np.asarray(order, dtype=np.int64)
         selected_total += len(order)
         daily_selected[date] = int(len(order))
+        executed_count = (
+            int(np.count_nonzero(executed[order]))
+            if executed is not None
+            else int(len(order))
+        )
+        executed_total += executed_count
+        daily_executed[date] = executed_count
         ideal_by_group = {}
         for index in selected:
             group = groups[index]
@@ -282,7 +300,9 @@ def ranking_metrics(
         ),
         "daily_net_r": daily_net_r,
         "daily_selected": daily_selected,
+        "daily_executed": daily_executed,
         "selected": int(selected_total),
+        "executed": int(executed_total),
         "active_days": int(active_days),
     }
 

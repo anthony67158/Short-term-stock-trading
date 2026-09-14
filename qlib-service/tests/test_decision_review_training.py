@@ -98,6 +98,23 @@ class DecisionReviewTrainingTest(unittest.TestCase):
         self.assertGreater(metrics["stress10ReturnPct"], 0)
         self.assertEqual(metrics["maximumDrawdownPct"], 0)
 
+    def test_account_trade_coverage_counts_only_filled_selections(self):
+        dates = [f"2025-{index:03d}" for index in range(252)]
+        ranking = {
+            "daily_net_r": {date: 0.1 for date in dates},
+            "daily_selected": {date: 2 for date in dates},
+            "daily_executed": {
+                date: 1 if index % 2 == 0 else 0
+                for index, date in enumerate(dates)
+            },
+        }
+
+        metrics = _account_metrics(ranking, None)
+
+        self.assertEqual(metrics["recommendations"], 504)
+        self.assertEqual(metrics["trades"], 126)
+        self.assertEqual(metrics["annualizedTrades"], 126)
+
     def dataset(self, feature_names=FEATURE_NAMES):
         samples_per_date = 10
         date_count = 50

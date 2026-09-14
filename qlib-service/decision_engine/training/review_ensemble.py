@@ -52,6 +52,7 @@ from .evaluation import (
     regression_metrics,
 )
 from .review_bakeoff import load_dataset
+from .review_dataset import opportunity_fill_labels
 from time_splits import four_way_interval_split
 
 
@@ -431,6 +432,7 @@ def _ensemble_q10_offset(dataset, calibration, predictions):
 
 
 def _policy_metrics(dataset, holdout, predictions, policy):
+    fill_labels = opportunity_fill_labels(dataset)[holdout]
     p_fill = np.mean([
         value["pFill"] for value in predictions
     ], axis=0)
@@ -477,6 +479,7 @@ def _policy_metrics(dataset, holdout, predictions, policy):
         top_k=5,
         group_ids=dataset["codes_opportunity"][holdout],
         eligible_mask=eligible,
+        executed_labels=fill_labels,
     )
     stress_values = np.asarray(
         dataset.get(
@@ -502,6 +505,7 @@ def _policy_metrics(dataset, holdout, predictions, policy):
             top_k=5,
             group_ids=dataset["codes_opportunity"][holdout],
             eligible_mask=eligible,
+            executed_labels=fill_labels,
         )
         if stress_coverage >= 1.0
         else None
@@ -510,6 +514,7 @@ def _policy_metrics(dataset, holdout, predictions, policy):
     return {
         "samples": int(len(holdout)),
         "selected": ranking["selected"],
+        "executed": ranking["executed"],
         "activeDays": ranking["active_days"],
         "precisionAt5": ranking["precision_at_5"],
         "meanNetRAt5": ranking["mean_net_r_at_5"],
@@ -543,6 +548,9 @@ def _policy_metrics(dataset, holdout, predictions, policy):
 
 def _account_metrics(ranking, stress_ranking, *, risk_per_trade=0.007):
     dates = sorted(ranking["daily_net_r"])
+    daily_executed = ranking.get("daily_executed")
+    if not isinstance(daily_executed, dict):
+        daily_executed = ranking["daily_selected"]
     equity = 1.0
     peak = 1.0
     maximum_drawdown = 0.0
@@ -600,10 +608,11 @@ def _account_metrics(ranking, stress_ranking, *, risk_per_trade=0.007):
         "schemaVersion": "review-account-replay.v1",
         "riskPerTradePct": round(risk_per_trade * 100, 4),
         "tradingDays": len(dates),
-        "trades": int(sum(ranking["daily_selected"].values())),
+        "recommendations": int(sum(ranking["daily_selected"].values())),
+        "trades": int(sum(daily_executed.values())),
         "annualizedTrades": (
             round(
-                sum(ranking["daily_selected"].values())
+                sum(daily_executed.values())
                 * 252
                 / len(dates),
                 6,
