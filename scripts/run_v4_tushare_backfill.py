@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""Resumable five-year Tushare minute backfill for V4 causal replay.
+
+Each chunk contains:
+  - 60 history sessions used only to construct point-in-time features;
+  - up to 145 signal sessions;
+  - 7 settlement sessions.
+
+The 152-day minute request stays below Tushare's 8,000-row per-stock limit at
+5-minute frequency. Every chunk has isolated SQLite/cache state so resuming or
+retrying one range cannot delete another range's data.
+"""
+
+from __future__ import annotations
+
+import argparse
+import gzip
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_OUTPUT = Path.home() / ".tushare-v4-5y"
+
+
+def _read_gzip(path):
+    with gzip.open(path, "rt", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
+def _write_gzip(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_suffix(path.suffix + ".part")
+    with gzip.open(
+        temporary,
+        "wt",
+        encoding="utf-8",
+        compresslevel=6,
+    ) as handle:
+        json.dump(
+            value,
+            handle,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+        )
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+
+
+def build_chunk_plan(
+    dates,
+    *,
+    history_days=60,
+    signal_days=145,
+    settlement_days=7,
+    minimum_signal_days=60,
+):
+    ordered = sorted(set(str(value) for value in dates))
+    eligible = ordered[history_days:len(ordered) - settlement_days]
+    signal_chunks = [
+        eligible[offset:offset + signal_days]
+        for offset in range(0, len(eligible), signal_days)
+    ]
+    if (
+        len(signal_chunks) > 1
+        and len(signal_chunks[-1]) < minimum_signal_days
+    ):
+        combined = signal_chunks[-2] + signal_chunks[-1]
+        maximum_signal_days = 160 - settlement_days
+        if len(combined) <= maximum_signal_days:
+            signal_chunks[-2:] = [combined]
+        else:
+            split = len(combined) // 2
+            left, right = combined[:split], combined[split:]
+            if min(len(left), len(right)) < minimum_signal_days:
+                raise ValueError("无法生成满足最小信号日要求的分片")
+            signal_chunks[-2:] = [left, right]
+
+    chunks = []
+    for signals in signal_chunks:
+        first = ordered.index(signals[0])
+        last = ordered.index(signals[-1])
+        chunks.append({
+            "index": len(chunks) + 1,
+            "from": ordered[first - history_days],
+            "to": ordered[last + settlement_days],
+            "signalFrom": signals[0],
+            "signalTo": signals[-1],
+            "signalDays": len(signals),
+        })
+    return chunks
+
+
+def _run(command, log_path, *, allow_failure=False):
+    log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with open(log_path, "a", encoding="utf-8") as log:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    if result.returncode and not allow_failure:
+        raise RuntimeError(
+            f"命令失败({result.returncode})，查看 {log_path}"
+        )
+    return result.returncode
+
+
+def _prepare_chunks(args):
+    daily = _read_gzip(Path(args.daily).expanduser())
+    funds = _read_gzip(Path(args.funds).expanduser())
+    dates = sorted({
+        str(row.get("date") or "")
+        for row in daily
+        if str(row.get("date") or "").isdigit()
+    })
+    chunks = build_chunk_plan(
+        dates,
+        history_days=args.history_days,
+        signal_days=args.signal_days,
+        settlement_days=args.settlement_days,
+    )
+    output = Path(args.output).expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    for chunk in chunks:
+        directory = output / f"chunk-{chunk['index']:02d}"
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        daily_path = directory / "daily.json.gz"
+        fund_path = directory / "funds.json.gz"
+        if not daily_path.exists():
+            _write_gzip(
+                daily_path,
+                [
+                    row for row in daily
+                    if chunk["from"] <= str(row.get("date") or "") <= chunk["to"]
+                ],
+            )
+        if not fund_path.exists():
+            _write_gzip(
+                fund_path,
+                [
+                    row for row in funds
+                    if chunk["from"] <= str(row.get("date") or "") <= chunk["to"]
+                ],
+            )
+    plan = {
+        "schemaVersion": "v4-tushare-backfill-plan.v1",
+        "historyDays": args.history_days,
+        "signalDaysPerChunk": args.signal_days,
+        "settlementDays": args.settlement_days,
+        "universeSize": args.universe_size,
+        "chunks": chunks,
+    }
+    plan_path = output / "plan.json"
+    plan_path.write_text(
+        json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return plan
+
+
+def _manifest_command(args, chunk, directory):
+    return [
+        "node",
+        "--max-old-space-size=6144",
+        str(ROOT / "scripts" / "backfill-opportunity-stockdb.mjs"),
+        "--provider",
+        "cache",
+        "--work-dir",
+        str(directory),
+        "--from",
+        chunk["from"],
+        "--to",
+        chunk["to"],
+        "--signal-days",
+        str(chunk["signalDays"]),
+        "--universe-size",
+        str(args.universe_size),
+    ]
+
+
+def _download_command(args, directory):
+    return [
+        sys.executable,
+        str(ROOT / "scripts" / "tushare_export_history.py"),
+        "--stage",
+        "minutes",
+        "--work-dir",
+        str(directory),
+        "--manifest",
+        str(directory / "minute-manifest.json"),
+        "--output-dir",
+        str(directory / "minutes"),
+        "--max-per-min",
+        str(args.max_per_min),
+        "--minimum-coverage",
+        str(args.minimum_coverage),
+    ]
+
+
+def _run_chunk(args, chunk):
+    directory = Path(args.output).expanduser().resolve() / (
+        f"chunk-{chunk['index']:02d}"
+    )
+    outcome = directory / "opportunity-outcomes-combined.json"
+    if outcome.is_file() and outcome.stat().st_size > 1024:
+        print(json.dumps({
+            "stage": "CHUNK_CACHED",
+            **chunk,
+            "output": str(outcome),
+        }), flush=True)
+        return
+
+    manifest = directory / "minute-manifest.json"
+    if not manifest.is_file():
+        # The cache replay intentionally stops on the first missing minute
+        # file, after writing the exact causal manifest.
+        _run(
+            _manifest_command(args, chunk, directory),
+            directory / "manifest.log",
+            allow_failure=True,
+        )
+    if not manifest.is_file():
+        raise RuntimeError(f"未生成分钟清单: {manifest}")
+
+    minute_report = directory / "tushare-minute-report.json"
+    if not minute_report.is_file():
+        _run(
+            _download_command(args, directory),
+            directory / "minutes.log",
+        )
+
+    _run(
+        _manifest_command(args, chunk, directory),
+        directory / "replay.log",
+    )
+    if not outcome.is_file():
+        raise RuntimeError(f"回放未生成结果: {outcome}")
+    print(json.dumps({
+        "stage": "CHUNK_DONE",
+        **chunk,
+        "output": str(outcome),
+    }), flush=True)
+
+
+def _merge_chunks(args, plan):
+    output_root = Path(args.output).expanduser().resolve()
+    destination = output_root / "opportunity-outcomes-5y.json"
+    temporary = destination.with_suffix(".json.part")
+    seen = set()
+    total = 0
+    with open(temporary, "w", encoding="utf-8") as handle:
+        header = {
+            "schemaVersion": "opportunity-outcome-export.v1",
+            "source": {
+                "type": "TUSHARE_CAUSAL_REPLAY",
+                "version": "five-year-chunked-v1",
+                "chunks": len(plan["chunks"]),
+            },
+            "range": {
+                "from": plan["chunks"][0]["signalFrom"],
+                "to": plan["chunks"][-1]["signalTo"],
+            },
+        }
+        prefix = json.dumps(header, ensure_ascii=False, separators=(",", ":"))
+        handle.write(prefix[:-1] + ',"outcomes":[')
+        first = True
+        for chunk in plan["chunks"]:
+            source = output_root / (
+                f"chunk-{chunk['index']:02d}"
+            ) / "opportunity-outcomes-combined.json"
+            payload = json.loads(source.read_text(encoding="utf-8"))
+            for outcome in payload.get("outcomes") or []:
+                decision_id = str(outcome.get("decisionId") or "")
+                if not decision_id or decision_id in seen:
+                    continue
+                seen.add(decision_id)
+                if not first:
+                    handle.write(",")
+                first = False
+                json.dump(
+                    outcome,
+                    handle,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                )
+                total += 1
+        handle.write("]}")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, destination)
+    print(json.dumps({
+        "stage": "MERGE_DONE",
+        "outcomes": total,
+        "output": str(destination),
+    }), flush=True)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--daily",
+        default=str(Path.home() / ".mainboard-5y" / "mainboard.json.gz"),
+    )
+    parser.add_argument(
+        "--funds",
+        default=str(
+            Path.home() / ".mainboard-5y" / "mainboard-funds.json.gz"
+        ),
+    )
+    parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument("--history-days", type=int, default=60)
+    parser.add_argument("--signal-days", type=int, default=145)
+    parser.add_argument("--settlement-days", type=int, default=7)
+    parser.add_argument("--universe-size", type=int, default=1000)
+    parser.add_argument("--max-per-min", type=int, default=120)
+    parser.add_argument("--minimum-coverage", type=float, default=0.85)
+    parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--from-chunk", type=int, default=1)
+    args = parser.parse_args()
+    if not os.environ.get("TUSHARE_TOKEN") and not args.prepare_only:
+        parser.error("执行下载前必须通过环境变量提供TUSHARE_TOKEN")
+    return args
+
+
+def main():
+    args = parse_args()
+    plan = _prepare_chunks(args)
+    print(json.dumps({
+        "stage": "PLAN_READY",
+        "chunks": len(plan["chunks"]),
+        "signalDays": sum(row["signalDays"] for row in plan["chunks"]),
+        "output": str(Path(args.output).expanduser().resolve()),
+    }), flush=True)
+    if args.prepare_only:
+        return
+    for chunk in plan["chunks"]:
+        if chunk["index"] < args.from_chunk:
+            continue
+        _run_chunk(args, chunk)
+    _merge_chunks(args, plan)
+
+
+if __name__ == "__main__":
+    main()
