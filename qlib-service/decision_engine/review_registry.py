@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import threading
@@ -47,6 +48,50 @@ _LAST_CHECK_AT = 0.0
 _LOAD_LOCK = threading.Lock()
 
 
+def _valid_feature_support(value):
+    if not isinstance(value, dict):
+        return False
+    lower = value.get("lower")
+    upper = value.get("upper")
+    indices = value.get("missingFeatureIndices")
+    patterns = value.get("missingPatterns")
+    threshold = value.get("maximumOutlierFraction")
+    if (
+        value.get("schemaVersion") != "review-feature-support.v1"
+        or not isinstance(lower, list)
+        or not isinstance(upper, list)
+        or len(lower) != len(FEATURE_NAMES)
+        or len(upper) != len(FEATURE_NAMES)
+        or not isinstance(indices, list)
+        or not isinstance(patterns, list)
+        or not patterns
+        or not isinstance(threshold, (int, float))
+        or not 0 < threshold <= 1
+    ):
+        return False
+    if any(
+        not isinstance(item, (int, float)) or not math.isfinite(item)
+        for item in (*lower, *upper)
+    ) or any(left > right for left, right in zip(lower, upper)):
+        return False
+    if (
+        len(indices) != len(set(indices))
+        or any(
+            not isinstance(index, int)
+            or index < 0
+            or index >= len(FEATURE_NAMES)
+            for index in indices
+        )
+    ):
+        return False
+    return all(
+        isinstance(pattern, str)
+        and len(pattern) == len(indices)
+        and set(pattern).issubset({"0", "1"})
+        for pattern in patterns
+    )
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -83,6 +128,7 @@ def validate_review_metadata(metadata, model_version=None):
             int,
         )
         or metadata["fillCalibrationSampleCount"] <= 0
+        or not _valid_feature_support(metadata.get("featureSupport"))
         or not isinstance(observation, dict)
         or observation.get("schemaVersion")
         != REVIEW_OBSERVATION_POLICY_VERSION

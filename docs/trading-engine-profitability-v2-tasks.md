@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-10 已完成）。
+状态：IN PROGRESS（Tasks 1-11 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -192,14 +192,14 @@
 
 **Estimated scope:** M
 
-### Task 11：实现逐样本尾损与支持度门禁
+### Task 11：实现逐样本尾损与支持度门禁（已完成）
 
 **Description:** 训练Q10并根据训练支持范围、缺失模式和特征漂移给出可执行性状态。
 
 **Acceptance criteria:**
-- [ ] Q10为逐样本预测，不使用全局尾均值冒充。
-- [ ] OOD和关键缺失不能固定为false。
-- [ ] 尾部覆盖率不合格时阻断发布。
+- [x] Q10为逐样本预测，不使用全局尾均值冒充。
+- [x] OOD和关键缺失不能固定为false。
+- [x] 尾部覆盖率不合格时阻断发布。
 
 **Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_review_inference qlib-service.tests.test_decision_review_training`
 

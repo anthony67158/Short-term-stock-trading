@@ -30,6 +30,11 @@ class FakeModel:
         return np.full(len(matrix), self.value, dtype=np.float64)
 
 
+class FirstColumnModel:
+    def predict(self, matrix):
+        return np.asarray(matrix[:, 0], dtype=np.float64) - 1.0
+
+
 def request_item():
     price_contract = review_price_contract({
         "entryPrice": 10.2,
@@ -53,6 +58,11 @@ def request_item():
 
 
 def metadata(**overrides):
+    missing_indices = [
+        index
+        for index, name in enumerate(FEATURE_NAMES)
+        if name.endswith("Missing")
+    ]
     member = {
         "seed": 42,
         "activeFeatures": list(range(len(FEATURE_NAMES))),
@@ -91,6 +101,14 @@ def metadata(**overrides):
         "ensembleMembers": [member, {**member, "seed": 7}],
         "calibrationSampleCount": 200,
         "fillCalibrationSampleCount": 240,
+        "featureSupport": {
+            "schemaVersion": "review-feature-support.v1",
+            "lower": [0.0] * len(FEATURE_NAMES),
+            "upper": [2.0] * len(FEATURE_NAMES),
+            "missingFeatureIndices": missing_indices,
+            "missingPatterns": ["1" * len(missing_indices)],
+            "maximumOutlierFraction": 0.2,
+        },
         "risk": {"expectedShortfall10": -1.2},
         "productionEligible": True,
         "baselineSelected": True,
@@ -197,6 +215,58 @@ class ReviewInferenceTests(unittest.TestCase):
 
         self.assertEqual(result["state"], "NOT_READY")
         self.assertEqual(result["reason"], "REVIEW_MODEL_INVALID")
+
+    def test_out_of_support_features_fail_closed(self):
+        item = request_item()
+        for name in FEATURE_NAMES[:10]:
+            item["factors"][name] = 100.0
+
+        result = predict_review_items(
+            {"items": [item]},
+            models=models(),
+            metadata=metadata(),
+        )[0]
+
+        self.assertEqual(result["state"], "NOT_READY")
+        self.assertEqual(
+            result["reason"],
+            "REVIEW_MODEL_OUT_OF_DISTRIBUTION",
+        )
+        self.assertTrue(result["outOfDistribution"])
+
+    def test_unseen_missing_pattern_fails_closed(self):
+        item = request_item()
+        missing_name = next(
+            name for name in FEATURE_NAMES if name.endswith("Missing")
+        )
+        item["factors"][missing_name] = 0.0
+
+        result = predict_review_items(
+            {"items": [item]},
+            models=models(),
+            metadata=metadata(),
+        )[0]
+
+        self.assertEqual(result["state"], "NOT_READY")
+        self.assertTrue(result["outOfDistribution"])
+
+    def test_q10_is_predicted_per_sample_instead_of_using_a_global_tail(self):
+        first = request_item()
+        second = request_item()
+        first["factors"][FEATURE_NAMES[0]] = 0.5
+        second["factors"][FEATURE_NAMES[0]] = 1.5
+        fitted_models = models()
+        for member in fitted_models["ensemble"]:
+            member["netRLower10"] = FirstColumnModel()
+
+        results = predict_review_items(
+            {"items": [first, second]},
+            models=fitted_models,
+            metadata=metadata(),
+        )
+
+        self.assertAlmostEqual(results[0]["netRLowerBound"], -0.5)
+        self.assertAlmostEqual(results[1]["netRLowerBound"], 0.5)
 
     def test_review_request_rejects_price_contract_hash_drift(self):
         invalid = request_item()

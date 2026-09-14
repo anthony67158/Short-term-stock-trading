@@ -42,6 +42,11 @@ class FakeBucket:
 
 
 def metadata(*, eligible=True):
+    missing_indices = [
+        index
+        for index, name in enumerate(FEATURE_NAMES)
+        if name.endswith("Missing")
+    ]
     member = {
         "seed": 42,
         "activeFeatures": list(range(len(FEATURE_NAMES))),
@@ -78,6 +83,14 @@ def metadata(*, eligible=True):
         "ensembleSize": 2,
         "ensembleMembers": [member, {**member, "seed": 7}],
         "fillCalibrationSampleCount": 120,
+        "featureSupport": {
+            "schemaVersion": "review-feature-support.v1",
+            "lower": [0.0] * len(FEATURE_NAMES),
+            "upper": [2.0] * len(FEATURE_NAMES),
+            "missingFeatureIndices": missing_indices,
+            "missingPatterns": ["0" * len(missing_indices)],
+            "maximumOutlierFraction": 0.2,
+        },
         "productionEligible": eligible,
         "baselineSelected": False,
     }

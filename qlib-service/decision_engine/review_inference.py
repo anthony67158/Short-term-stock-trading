@@ -114,6 +114,34 @@ def _prediction_arrays(models, metadata, matrix):
     }
 
 
+def _out_of_distribution(metadata, matrix):
+    support = metadata["featureSupport"]
+    lower = np.asarray(support["lower"], dtype=np.float64)
+    upper = np.asarray(support["upper"], dtype=np.float64)
+    outside = np.mean(
+        (matrix < lower) | (matrix > upper),
+        axis=1,
+    ) > float(support["maximumOutlierFraction"])
+    missing_indices = np.asarray(
+        support["missingFeatureIndices"],
+        dtype=np.int64,
+    )
+    supported_patterns = set(support["missingPatterns"])
+    if len(missing_indices):
+        patterns = [
+            "".join(
+                "1" if value >= 0.5 else "0"
+                for value in row
+            )
+            for row in matrix[:, missing_indices]
+        ]
+        outside |= np.asarray([
+            pattern not in supported_patterns
+            for pattern in patterns
+        ])
+    return outside
+
+
 def predict_review_items(payload, *, models=None, metadata=None):
     items = validate_review_request(payload)
     if models is None or metadata is None:
@@ -129,6 +157,7 @@ def predict_review_items(payload, *, models=None, metadata=None):
             [item["vector"] for item in items],
             dtype=np.float64,
         )
+        out_of_distribution = _out_of_distribution(metadata, matrix)
         arrays = _prediction_arrays(models, metadata, matrix)
     except Exception:
         return [
@@ -150,6 +179,16 @@ def predict_review_items(payload, *, models=None, metadata=None):
     )
     predictions = []
     for index, item in enumerate(items):
+        if out_of_distribution[index]:
+            predictions.append({
+                **not_ready_prediction(
+                    item,
+                    "REVIEW_MODEL_OUT_OF_DISTRIBUTION",
+                ),
+                "modelVersion": metadata["modelVersion"],
+                "outOfDistribution": True,
+            })
+            continue
         expected = float(arrays["expectedNetR"][index])
         lower = float(arrays["netRLowerBound"][index])
         p_fill = float(arrays["pFill"][index])

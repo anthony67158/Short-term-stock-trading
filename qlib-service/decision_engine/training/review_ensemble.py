@@ -49,6 +49,11 @@ from time_splits import four_way_interval_split
 
 
 DEFAULT_SEEDS = (42, 7, 2026)
+MISSING_FEATURE_INDICES = tuple(
+    index
+    for index, name in enumerate(FEATURE_NAMES)
+    if name.endswith("Missing")
+)
 
 
 def _catboost_payload(model):
@@ -57,6 +62,30 @@ def _catboost_payload(model):
         model.save_model(path, format="json")
         with open(path, encoding="utf-8") as handle:
             return json.load(handle)
+
+
+def _feature_support(matrix):
+    values = np.asarray(matrix, dtype=np.float64)
+    if (
+        values.ndim != 2
+        or values.shape[1] != len(FEATURE_NAMES)
+        or not len(values)
+        or not np.isfinite(values).all()
+    ):
+        raise ValueError("触价复核特征支持样本无效")
+    missing = values[:, MISSING_FEATURE_INDICES]
+    patterns = sorted({
+        "".join("1" if value >= 0.5 else "0" for value in row)
+        for row in missing
+    })
+    return {
+        "schemaVersion": "review-feature-support.v1",
+        "lower": np.quantile(values, 0.005, axis=0).tolist(),
+        "upper": np.quantile(values, 0.995, axis=0).tolist(),
+        "missingFeatureIndices": list(MISSING_FEATURE_INDICES),
+        "missingPatterns": patterns,
+        "maximumOutlierFraction": 0.2,
+    }
 
 
 def _fit_member(
@@ -492,6 +521,9 @@ def train_review_ensemble(
         ],
         "calibrationSampleCount": int(len(calibration)),
         "fillCalibrationSampleCount": int(len(fill_calibration)),
+        "featureSupport": _feature_support(
+            dataset["X_all"][fill_development]
+        ),
         "productionEligible": not blockers,
         "baselineSelected": False,
         "rankingPolicy": {
