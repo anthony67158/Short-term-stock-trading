@@ -181,6 +181,28 @@ def _write_chunk_audit(directory):
 
 
 def _prepare_chunks(args):
+    output = Path(args.output).expanduser().resolve()
+    plan_path = output / "plan.json"
+    if plan_path.is_file() and not getattr(args, "refresh_plan", False):
+        with open(plan_path, encoding="utf-8") as handle:
+            cached = json.load(handle)
+        expected = {
+            "historyDays": args.history_days,
+            "signalDaysPerChunk": args.signal_days,
+            "settlementDays": args.settlement_days,
+            "universeSize": args.universe_size,
+        }
+        if all(cached.get(key) == value for key, value in expected.items()):
+            chunks = cached.get("chunks")
+            if isinstance(chunks, list) and chunks and all(
+                (
+                    output / f"chunk-{chunk['index']:02d}" / filename
+                ).is_file()
+                for chunk in chunks
+                for filename in ("daily.json.gz", "funds.json.gz")
+            ):
+                return cached
+
     daily = _read_gzip(Path(args.daily).expanduser())
     funds = _read_gzip(Path(args.funds).expanduser())
     dates = sorted({
@@ -194,7 +216,6 @@ def _prepare_chunks(args):
         signal_days=args.signal_days,
         settlement_days=args.settlement_days,
     )
-    output = Path(args.output).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
     for chunk in chunks:
         directory = output / f"chunk-{chunk['index']:02d}"
@@ -225,7 +246,6 @@ def _prepare_chunks(args):
         "universeSize": args.universe_size,
         "chunks": chunks,
     }
-    plan_path = output / "plan.json"
     plan_path.write_text(
         json.dumps(plan, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -532,6 +552,11 @@ def parse_args():
         ),
     )
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument(
+        "--refresh-plan",
+        action="store_true",
+        help="忽略已有计划并从日线、资金源重新生成分片",
+    )
     parser.add_argument("--from-chunk", type=int, default=1)
     args = parser.parse_args()
     if args.download_restarts < 0:

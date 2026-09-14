@@ -122,6 +122,54 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
         self.assertEqual(signals, dates[20:-5])
         self.assertEqual(len(signals), len(set(signals)))
 
+    def test_prepare_reuses_complete_existing_plan_without_loading_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chunk = os.path.join(directory, "chunk-01")
+            os.makedirs(chunk)
+            for filename in ("daily.json.gz", "funds.json.gz"):
+                with open(os.path.join(chunk, filename), "wb") as handle:
+                    handle.write(b"cached")
+            plan = {
+                "schemaVersion": "v4-tushare-backfill-plan.v1",
+                "historyDays": 60,
+                "signalDaysPerChunk": 145,
+                "settlementDays": 7,
+                "universeSize": 1000,
+                "chunks": [{
+                    "index": 1,
+                    "from": "20210104",
+                    "to": "20211118",
+                    "signalFrom": "20210406",
+                    "signalTo": "20211109",
+                    "signalDays": 145,
+                }],
+            }
+            with open(
+                os.path.join(directory, "plan.json"),
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                json.dump(plan, handle)
+            args = Namespace(
+                output=directory,
+                history_days=60,
+                signal_days=145,
+                settlement_days=7,
+                universe_size=1000,
+                daily="/missing/daily.json.gz",
+                funds="/missing/funds.json.gz",
+                refresh_plan=False,
+            )
+
+            with patch.object(
+                runner,
+                "_read_gzip",
+                side_effect=AssertionError("不应读取源文件"),
+            ):
+                result = runner._prepare_chunks(args)
+
+        self.assertEqual(result, plan)
+
     def test_final_chunk_can_be_shorter(self):
         dates = [f"2026{i:04d}" for i in range(1, 104)]
         chunks = runner.build_chunk_plan(

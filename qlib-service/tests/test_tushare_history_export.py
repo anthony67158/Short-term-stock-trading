@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = os.path.abspath(os.path.join(
@@ -251,6 +252,31 @@ class TushareHistoryExportTest(unittest.TestCase):
                 "9",
                 "--dry-run",
             ])
+
+    def test_mcp_download_defers_one_failed_code_without_blocking_others(self):
+        attempts = {}
+
+        class FakeClient:
+            def stock_minutes(self, symbol, _start, _end):
+                attempts[symbol] = attempts.get(symbol, 0) + 1
+                if symbol == "600000.SH" and attempts[symbol] == 1:
+                    raise RuntimeError("transient")
+                return [{"ts_code": symbol}]
+
+        with patch.object(self.module, "StockMcpClient", FakeClient):
+            rows = list(self.module._download_mcp_rows(
+                ["600000", "600001"],
+                ["20260910", "20260911"],
+                retries=1,
+                workers=1,
+            ))
+
+        self.assertEqual(
+            {code for code, _values in rows},
+            {"600000", "600001"},
+        )
+        self.assertEqual(attempts["600000.SH"], 2)
+        self.assertEqual(attempts["600001.SH"], 1)
 
 
 if __name__ == "__main__":
