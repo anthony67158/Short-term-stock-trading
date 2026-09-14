@@ -90,10 +90,17 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
                 output=directory,
                 alpha_snapshot=os.path.join(directory, "alpha.json.gz"),
             )
-            with patch.object(runner, "_build_v4_chunk") as build:
+            with patch.object(
+                runner,
+                "_build_v4_chunk",
+            ) as build, patch.object(
+                runner,
+                "_write_chunk_audit",
+            ) as audit:
                 runner._run_chunk(args, {"index": 1})
 
             build.assert_called_once()
+            audit.assert_called_once()
 
     def test_merge_uses_v4_chunk_outputs(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import hashlib
 import json
 import os
 import subprocess
@@ -110,6 +111,48 @@ def _run(command, log_path, *, allow_failure=False):
             f"命令失败({result.returncode})，查看 {log_path}"
         )
     return result.returncode
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_chunk_audit(directory):
+    minute_files = sorted((directory / "minutes").glob("*.json.gz"))
+    required = [
+        directory / "daily.json.gz",
+        directory / "funds.json.gz",
+        directory / "minute-manifest.json",
+        directory / "opportunity-outcomes-combined.json",
+        directory / "opportunity-outcomes-v4.json.gz",
+        *minute_files,
+    ]
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise RuntimeError(f"分片审计缺少文件: {missing[:3]}")
+    audit = {
+        "schemaVersion": "v4-tushare-chunk-audit.v1",
+        "files": [
+            {
+                "path": str(path.relative_to(directory)),
+                "size": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+            for path in required
+        ],
+    }
+    destination = directory / "audit.json"
+    temporary = destination.with_suffix(".json.part")
+    temporary.write_text(
+        json.dumps(audit, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, destination)
 
 
 def _prepare_chunks(args):
@@ -213,6 +256,8 @@ def _run_chunk(args, chunk):
     if outcome.is_file() and outcome.stat().st_size > 1024:
         if not v4_outcome.is_file():
             _build_v4_chunk(args, directory)
+        if not (directory / "audit.json").is_file():
+            _write_chunk_audit(directory)
         print(json.dumps({
             "stage": "CHUNK_CACHED",
             **chunk,
@@ -246,6 +291,7 @@ def _run_chunk(args, chunk):
     if not outcome.is_file():
         raise RuntimeError(f"回放未生成结果: {outcome}")
     _build_v4_chunk(args, directory)
+    _write_chunk_audit(directory)
     print(json.dumps({
         "stage": "CHUNK_DONE",
         **chunk,
