@@ -13,6 +13,9 @@ if SERVICE_ROOT not in sys.path:
 from decision_engine.training.opportunity_alpha import (  # noqa: E402
     aggregate_stock_day_targets,
     causal_feature_date,
+    momentum_by_code,
+    percentile_by_date,
+    rolling_mature_rank_ic,
 )
 
 
@@ -67,6 +70,49 @@ class OpportunityAlphaTargetTest(unittest.TestCase):
         self.assertEqual(result["label_start_ms"].tolist(), [10])
         self.assertEqual(result["label_end_ms"].tolist(), [60])
         self.assertEqual(result["path_counts"].tolist(), [3])
+
+    def test_percentile_and_momentum_are_cross_sectional_and_per_stock(self):
+        dates = np.asarray(["d1", "d1", "d2", "d2"])
+        codes = np.asarray(["A", "B", "A", "B"])
+        percentile = percentile_by_date(
+            np.asarray([1.0, 3.0, 4.0, 2.0]),
+            dates,
+        )
+
+        np.testing.assert_allclose(percentile, [0.0, 1.0, 1.0, 0.0])
+        np.testing.assert_allclose(
+            momentum_by_code(percentile, codes, dates, lag=1),
+            [0.0, 0.0, 1.0, -1.0],
+        )
+
+    def test_rolling_rank_ic_only_uses_mature_prior_dates(self):
+        dates = np.asarray(
+            ["20260102"] * 6
+            + ["20260105"] * 6
+            + ["20260106"] * 6
+        )
+        scores = np.tile(np.arange(6, dtype=float), 3)
+        targets = np.tile(np.arange(6, dtype=float), 3)
+        day_ms = 24 * 60 * 60 * 1000
+        first_end = 1_767_290_400_000
+        ends = np.asarray(
+            [first_end] * 6
+            + [first_end + 3 * day_ms] * 6
+            + [first_end + 4 * day_ms] * 6,
+        )
+
+        result = rolling_mature_rank_ic(
+            scores,
+            targets,
+            dates,
+            ends,
+            ["20260102", "20260105", "20260106"],
+            window=20,
+        )
+
+        self.assertEqual(result["20260102"], 0.0)
+        self.assertEqual(result["20260105"], 1.0)
+        self.assertEqual(result["20260106"], 1.0)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import bisect
 from collections import defaultdict
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import numpy as np
 
@@ -11,6 +13,7 @@ from .review_dataset import opportunity_modes
 
 
 OPPORTUNITY_ALPHA_TARGET_VERSION = "alpha158-opportunity-target.v1"
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _compact_date(value):
@@ -20,6 +23,104 @@ def _compact_date(value):
         if character.isdigit()
     )
     return digits[:8] if len(digits) >= 8 else ""
+
+
+def date_start_ms(value):
+    date = _compact_date(value)
+    if not date:
+        raise ValueError("Alpha机会日期无效")
+    return int(
+        datetime.strptime(date, "%Y%m%d")
+        .replace(tzinfo=SHANGHAI)
+        .timestamp()
+        * 1000
+    )
+
+
+def percentile_by_date(scores, dates):
+    values = np.asarray(scores, dtype=np.float64)
+    groups = np.asarray(dates).astype(str)
+    if values.shape != groups.shape or values.ndim != 1:
+        raise ValueError("Alpha机会分位输入未对齐")
+    output = np.zeros(len(values), dtype=np.float64)
+    for date in np.unique(groups):
+        indices = np.flatnonzero(groups == date)
+        if len(indices) == 1:
+            output[indices[0]] = 0.5
+            continue
+        order = np.argsort(values[indices], kind="stable")
+        ranks = np.empty(len(indices), dtype=np.float64)
+        ranks[order] = np.arange(len(indices), dtype=np.float64)
+        output[indices] = ranks / (len(indices) - 1)
+    return output
+
+
+def momentum_by_code(percentiles, codes, dates, *, lag=5):
+    values = np.asarray(percentiles, dtype=np.float64)
+    code_values = np.asarray(codes).astype(str)
+    date_values = np.asarray(dates).astype(str)
+    if not (
+        values.shape == code_values.shape == date_values.shape
+    ) or values.ndim != 1:
+        raise ValueError("Alpha机会动量输入未对齐")
+    output = np.zeros(len(values), dtype=np.float64)
+    grouped = defaultdict(list)
+    for index, code in enumerate(code_values):
+        grouped[code].append(index)
+    for indices in grouped.values():
+        ordered = sorted(indices, key=lambda index: date_values[index])
+        for position in range(lag, len(ordered)):
+            current = ordered[position]
+            previous = ordered[position - lag]
+            output[current] = values[current] - values[previous]
+    return output
+
+
+def rolling_mature_rank_ic(
+    scores,
+    targets,
+    dates,
+    label_end_ms,
+    output_dates,
+    *,
+    window,
+):
+    scores = np.asarray(scores, dtype=np.float64)
+    targets = np.asarray(targets, dtype=np.float64)
+    dates = np.asarray(dates).astype(str)
+    ends = np.asarray(label_end_ms, dtype=np.int64)
+    if not (
+        scores.shape == targets.shape == dates.shape == ends.shape
+    ) or scores.ndim != 1:
+        raise ValueError("Alpha机会RankIC输入未对齐")
+    daily = []
+    for date in np.unique(dates):
+        indices = np.flatnonzero(dates == date)
+        correlation = np.nan
+        if (
+            len(indices) >= 5
+            and np.std(scores[indices]) > 1e-12
+            and np.std(targets[indices]) > 1e-12
+        ):
+            correlation = float(np.corrcoef(
+                np.argsort(np.argsort(scores[indices], kind="stable")),
+                np.argsort(np.argsort(targets[indices], kind="stable")),
+            )[0, 1])
+        daily.append((date, int(ends[indices].max()), correlation))
+    result = {}
+    for date in sorted(set(map(str, output_dates))):
+        current_ms = date_start_ms(date)
+        mature = [
+            value
+            for _source_date, end_ms, value in daily
+            if end_ms < current_ms and np.isfinite(value)
+        ]
+        result[date] = (
+            float(np.mean(mature[-window:]))
+            if mature
+            else 0.0
+        )
+    return result
 
 
 def causal_feature_date(trade_date, mode, available_dates):
