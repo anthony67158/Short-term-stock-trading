@@ -39,14 +39,14 @@
 
 **Estimated scope:** M
 
-### Task 3：实现规范价格合同哈希
+### Task 3：实现规范价格合同哈希（已完成）
 
 **Description:** 对模型实际评分的入场、止损、风险分母、费用和退出版本生成跨语言稳定哈希。
 
 **Acceptance criteria:**
-- [ ] JS/Python对金样生成相同哈希。
-- [ ] 字段顺序不影响哈希，价格或费用变化必然改变哈希。
-- [ ] 非法价格和非有限数值失败关闭。
+- [x] JS/Python对金样生成相同哈希。
+- [x] 字段顺序不影响哈希，价格或费用变化必然改变哈希。
+- [x] 非法价格和非有限数值失败关闭。
 
 **Verification:** `node --test test/review-price-contract.test.js && PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_review_price_contract`
 
