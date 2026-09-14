@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-13 已完成）。
+状态：IN PROGRESS（Tasks 1-14 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -252,20 +252,20 @@
 
 **Estimated scope:** M
 
-### Task 14：建立脱敏决策包和同源回放适配器
+### Task 14：建立脱敏决策包和同源回放适配器（已完成）
 
 **Description:** 从版本化决策包恢复生产纯内核输入，并输出动作、价格、数量和阻断原因。
 
 **Acceptance criteria:**
-- [ ] 决策包不包含账号、令牌或完整账户快照。
-- [ ] 线上纯内核与回放结果逐字段一致。
-- [ ] 输入版本不匹配时失败关闭。
+- [x] 决策包不包含账号、令牌或完整账户快照。
+- [x] 线上纯内核与回放结果逐字段一致。
+- [x] 输入版本不匹配时失败关闭。
 
 **Verification:** `node --test test/decision-replay.test.js && npm run harness:lifecycle`
 
 **Dependencies:** Tasks 4-5, 13
 
-**Files likely touched:** `shared/reviewDecisionPacket.js`, `backtest/decision/replay.mjs`, `test/decision-replay.test.js`, `harness/cases/decision-lifecycle.json`
+**Files touched:** `shared/decisionReplayPacket.js`, `shared/decisionEnginePolicy.js`, `api/_decision_orchestrator.js`, `backtest/decision/replay.mjs`, `test/decision-replay.test.js`, `test/decision-engine.test.js`
 
 **Estimated scope:** M
 

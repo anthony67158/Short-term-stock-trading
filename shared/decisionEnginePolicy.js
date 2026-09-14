@@ -226,6 +226,7 @@ export function buildDecisionAction({
     },
     decisionState: state,
     actionValues: decision.vector,
+    decisionReason: decision.reason,
     holdingAddPlan,
     decisionPaths: plans,
     selectedDecisionPlan: selected,

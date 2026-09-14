@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildDecisionAction } from '../shared/decisionEnginePolicy.js'
 import { evaluateDecision } from '../api/_decision_orchestrator.js'
+import { replayDecisionPacket } from '../backtest/decision/replay.mjs'
 import { adviceCompleteness } from '../shared/adviceBatchPolicy.js'
 import { readFileSync } from 'node:fs'
 import { buildAdviceCacheEntry } from '../shared/adviceContinuity.js'
@@ -340,6 +341,9 @@ function scenario(overrides = {}) {
 test('系统完整编译保留同一路径价格与概率，保存恢复不依赖LLM', async () => {
   const result = await evaluateDecision(scenario())
   const decision = result.result.decisionPlan
+  const replay = replayDecisionPacket(
+    result.result.decisionReplayPacket,
+  )
   assert.equal(decision.action, 'BUY')
   assert.equal(decision.actionability, 'READY')
   assert.ok(decision.quantity.lots > 0)
@@ -360,6 +364,18 @@ test('系统完整编译保留同一路径价格与概率，保存恢复不依�
   assert.equal(
     result.result.quantNote,
     result.result.decisionRationale.summary,
+  )
+  assert.deepEqual(
+    replay.result,
+    result.result.decisionReplayResult,
+  )
+  assert.equal(
+    result.result.decisionReplayResult.quantityLots,
+    decision.quantity.lots,
+  )
+  assert.equal(
+    result.result.decisionReplayResult.prices.buy,
+    decision.prices.reference,
   )
   const entry = buildAdviceCacheEntry(null, { mode: result.mode, advice: result.result }, now)
   const restored = JSON.parse(JSON.stringify(entry))

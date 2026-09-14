@@ -28,7 +28,10 @@ import {
   resolveStrategyPatternCapabilities,
   strategyPatternAnalysisEnabled,
 } from '../shared/strategyPatternCapabilities.js'
-import { buildDecisionAction } from '../shared/decisionEnginePolicy.js'
+import {
+  buildDecisionReplayPacket,
+  executeDecisionReplayPacket,
+} from '../shared/decisionReplayPacket.js'
 import { compileDecisionPlan, applyCompiledDecisionPlan } from '../shared/decisionPlan.js'
 import { compileExecutionPlan } from '../shared/executionPlan.js'
 import {
@@ -499,11 +502,13 @@ export async function evaluateDecision({
     }
   }
   let decisionPlans = evaluated.map(attachTargetPosition)
-  const initialAdvice = buildDecisionAction({
-    payload,
-    plans: decisionPlans,
-    now,
-  })
+  const initialAdvice = executeDecisionReplayPacket(
+    buildDecisionReplayPacket({
+      payload,
+      plans: decisionPlans,
+      now,
+    }),
+  ).advice
   let reviewScoreInput = null
   let reviewEvaluation = null
   if (isTriggeredReviewEvent(reviewEvent)) {
@@ -623,8 +628,18 @@ export async function evaluateDecision({
       : []
     payload.reviewScoreInput = reviewScoreInput
   }
+  const decisionReplayPacket = buildDecisionReplayPacket({
+    payload,
+    plans: decisionPlans,
+    now,
+  })
+  const replayedDecision = executeDecisionReplayPacket(
+    decisionReplayPacket,
+  )
   let advice = {
-    ...buildDecisionAction({ payload, plans: decisionPlans, now }),
+    ...replayedDecision.advice,
+    decisionReplayPacket,
+    decisionReplayResult: replayedDecision.result,
     ...(reviewEvaluation ? { reviewEvaluation } : {}),
     fundNote: '',
     strategyPattern,
