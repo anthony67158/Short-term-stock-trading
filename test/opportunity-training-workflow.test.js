@@ -69,6 +69,11 @@ test('复核模型每日训练只允许主板挑战者胜出现役版本后发�
   assert.ok(trainAt > downloadAt)
   assert.ok(selectAt > trainAt)
   assert.ok(publishAt > selectAt)
+  assert.match(workflow, /champion_schema=/)
+  assert.match(
+    workflow,
+    /opportunity-review-feature\.v3[\s\S]*?review_schema_migration/,
+  )
   assert.match(
     workflow,
     /decision\.get\("action"\) == "PUBLISH"/,

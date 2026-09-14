@@ -433,11 +433,28 @@ jobs:
       - name: Compare trigger-review challenger with production
         id: review-selection
         run: |
-          python -m decision_engine.training.review_release \
-            --dataset opportunity-outcomes.json \
-            --champion opportunity-model/review-champion \
-            --challenger opportunity-model/review-release \
-            --decision-output opportunity-model/review-release-decision.json
+          champion_schema=$(python - <<'PY'
+          import json
+          with open(
+              "opportunity-model/review-champion/review_meta.json",
+              encoding="utf-8",
+          ) as handle:
+              print(json.load(handle).get("featureSchemaVersion", ""))
+          PY
+          )
+          if [ "$champion_schema" = "opportunity-review-feature.v3" ]; then
+            python -m decision_engine.training.review_schema_migration \
+              --dataset opportunity-outcomes.json \
+              --champion opportunity-model/review-champion \
+              --challenger opportunity-model/review-release \
+              --decision-output opportunity-model/review-release-decision.json
+          else
+            python -m decision_engine.training.review_release \
+              --dataset opportunity-outcomes.json \
+              --champion opportunity-model/review-champion \
+              --challenger opportunity-model/review-release \
+              --decision-output opportunity-model/review-release-decision.json
+          fi
           publish=$(python - <<'PY'
           import json
           with open(
