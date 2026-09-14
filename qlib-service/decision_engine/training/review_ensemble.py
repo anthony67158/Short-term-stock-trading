@@ -45,7 +45,7 @@ from .evaluation import (
     regression_metrics,
 )
 from .review_bakeoff import load_dataset
-from time_splits import three_way_purged_split
+from time_splits import four_way_interval_split
 
 
 DEFAULT_SEEDS = (42, 7, 2026)
@@ -228,11 +228,21 @@ def train_review_ensemble(
     dataset = load_dataset(input_path)
     if len(dataset["X"]) < 500 or len(set(dataset["dates"])) < 30:
         raise ValueError("触价复核训练数据不足")
-    development, calibration, holdout, split = three_way_purged_split(
+    (
+        development,
+        calibration,
+        selection,
+        confirmation,
+        split,
+    ) = four_way_interval_split(
         dataset["dates"],
+        dataset["label_start_ms"],
+        dataset["label_end_ms"],
+        dataset["event_group_ids"],
         calibration_fraction=0.15,
-        holdout_fraction=0.15,
-        purge_dates=5,
+        selection_fraction=0.15,
+        confirmation_fraction=0.15,
+        embargo_dates=5,
     )
     members = [
         _fit_member(
@@ -245,16 +255,30 @@ def train_review_ensemble(
         )
         for seed in seeds
     ]
-    predictions = [
-        _member_predictions(member, dataset["X"][holdout])
+    selection_predictions = [
+        _member_predictions(member, dataset["X"][selection])
         for member in members
     ]
-    metrics, blockers = _evaluate(
+    selection_metrics, selection_blockers = _evaluate(
         dataset,
         development,
-        holdout,
-        predictions,
+        selection,
+        selection_predictions,
     )
+    confirmation_predictions = [
+        _member_predictions(member, dataset["X"][confirmation])
+        for member in members
+    ]
+    confirmation_metrics, confirmation_blockers = _evaluate(
+        dataset,
+        development,
+        confirmation,
+        confirmation_predictions,
+    )
+    blockers = [
+        *[f"候选选择段: {value}" for value in selection_blockers],
+        *[f"最终确认段: {value}" for value in confirmation_blockers],
+    ]
     model_version = (
         f"decision-review.{int(time.time())}.ensemble{len(members)}"
     )
@@ -296,10 +320,15 @@ def train_review_ensemble(
         },
         "validation": {
             "split": split,
-            "metrics": metrics,
+            "selectionMetrics": selection_metrics,
+            "confirmationMetrics": confirmation_metrics,
             "blockers": blockers,
-            "holdoutStartDate": str(dataset["dates"][holdout][0]),
-            "holdoutEndDate": str(dataset["dates"][holdout][-1]),
+            "selectionStartDate": str(dataset["dates"][selection][0]),
+            "selectionEndDate": str(dataset["dates"][selection][-1]),
+            "confirmationStartDate":
+                str(dataset["dates"][confirmation][0]),
+            "confirmationEndDate":
+                str(dataset["dates"][confirmation][-1]),
         },
     }
     validate_review_metadata(metadata)

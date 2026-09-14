@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：PROPOSED，等待任务清单审阅。
+状态：IN PROGRESS（Tasks 1-7 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -116,16 +116,16 @@
 
 **Estimated scope:** M
 
-### Task 7：按真实标签区间实现四段分区
+### Task 7：按真实标签区间实现四段分区（已完成）
 
 **Description:** 用`labelStartAt`/`labelEndAt`清除跨界样本，输出训练、校准、选择和最终确认四段。
 
 **Acceptance criteria:**
-- [ ] 任一结果区间跨界样本被purge。
-- [ ] 同股同事件路径保持同组，不能跨分区。
-- [ ] 样本不足明确阻断，不缩短embargo凑数。
+- [x] 任一结果区间跨界样本被purge。
+- [x] 同股同事件路径保持同组，不能跨分区。
+- [x] 样本不足明确阻断，不缩短embargo凑数。
 
-**Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_time_splits qlib-service.tests.test_decision_review_training`
+**Verification:** `PYTHONPATH=qlib-service python3 qlib-service/test_time_splits.py && PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_review_training`
 
 **Dependencies:** Task 6
 

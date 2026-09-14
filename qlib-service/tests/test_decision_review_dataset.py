@@ -128,6 +128,8 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
             "fillStatus": "FILLED",
             "tradeDate": "2026-09-01",
             "code": "600001",
+            "decisionId": "decision-1:pullback",
+            "parentDecisionId": "decision-1",
             "metrics": {"netR": 1.2},
             "reviewScoreInput": review_input(),
             "entry": {"at": 1_788_320_120_000},
@@ -189,7 +191,15 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
         )
         self.assertEqual(dataset["y_fill"].tolist(), [1, 0])
         self.assertEqual(dataset["conditional_indices"].tolist(), [0])
+        self.assertEqual(
+            dataset["event_group_ids_all"].tolist(),
+            ["600001:decision-1", "600002:decision-1"],
+        )
         self.assertEqual(dataset["X"].shape, (1, len(FEATURE_NAMES)))
+        self.assertEqual(
+            dataset["event_group_ids"].tolist(),
+            ["600001:decision-1"],
+        )
         self.assertEqual(dataset["y_win"].tolist(), [1])
         self.assertAlmostEqual(float(dataset["y_net_r"][0]), 1.2)
         self.assertEqual(

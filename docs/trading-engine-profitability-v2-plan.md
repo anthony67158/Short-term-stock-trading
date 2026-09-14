@@ -1,6 +1,6 @@
 # Implementation Plan: 交易价值模型与可验证执行架构 V2
 
-状态：PROPOSED，等待实施计划审阅。
+状态：APPROVED（2026-09-14），实施中。
 依据：[交易价值模型与可验证执行架构 V2 规格](./trading-engine-profitability-v2-spec.md)。
 
 ## Overview

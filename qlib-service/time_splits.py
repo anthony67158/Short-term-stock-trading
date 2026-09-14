@@ -16,6 +16,204 @@ def _purge(value):
     return value
 
 
+def _aligned_interval_inputs(
+    dates,
+    label_start_ms,
+    label_end_ms,
+    group_ids,
+):
+    dates, unique_dates = _dates(dates)
+    starts = np.asarray(label_start_ms, dtype=np.int64)
+    ends = np.asarray(label_end_ms, dtype=np.int64)
+    groups = np.asarray(group_ids).astype(str)
+    if any(
+        value.ndim != 1 or len(value) != len(dates)
+        for value in (starts, ends, groups)
+    ):
+        raise ValueError("interval split inputs must be aligned")
+    if np.any(starts <= 0) or np.any(ends < starts):
+        raise ValueError("label intervals must be positive and ordered")
+    if np.any(np.char.str_len(groups) == 0):
+        raise ValueError("group_ids must not contain empty values")
+    return dates, unique_dates, starts, ends, groups
+
+
+def four_way_interval_split(
+    dates,
+    label_start_ms,
+    label_end_ms,
+    group_ids,
+    *,
+    calibration_fraction=0.15,
+    selection_fraction=0.15,
+    confirmation_fraction=0.15,
+    embargo_dates=5,
+    minimum_partition_samples=30,
+):
+    (
+        dates,
+        unique_dates,
+        starts,
+        ends,
+        groups,
+    ) = _aligned_interval_inputs(
+        dates,
+        label_start_ms,
+        label_end_ms,
+        group_ids,
+    )
+    embargo_dates = _purge(embargo_dates)
+    fractions = (
+        calibration_fraction,
+        selection_fraction,
+        confirmation_fraction,
+    )
+    if any(not 0 < value < 0.5 for value in fractions):
+        raise ValueError("split fractions must be between zero and 0.5")
+    if sum(fractions) >= 0.8:
+        raise ValueError("calibration, selection and confirmation are too large")
+    if (
+        not isinstance(minimum_partition_samples, int)
+        or minimum_partition_samples < 1
+    ):
+        raise ValueError("minimum_partition_samples must be positive")
+
+    calibration_count, selection_count, confirmation_count = (
+        max(1, math.ceil(len(unique_dates) * value))
+        for value in fractions
+    )
+    confirmation_position = len(unique_dates) - confirmation_count
+    confirmation_embargo_position = (
+        confirmation_position - embargo_dates
+    )
+    selection_position = (
+        confirmation_embargo_position - selection_count
+    )
+    selection_embargo_position = selection_position - embargo_dates
+    calibration_position = (
+        selection_embargo_position - calibration_count
+    )
+    calibration_embargo_position = (
+        calibration_position - embargo_dates
+    )
+    if calibration_embargo_position <= 0:
+        raise ValueError("dataset is too short for four-way embargoes")
+
+    ranges = {
+        "train": (
+            unique_dates[0],
+            unique_dates[calibration_embargo_position - 1],
+        ),
+        "calibration": (
+            unique_dates[calibration_position],
+            unique_dates[selection_embargo_position - 1],
+        ),
+        "selection": (
+            unique_dates[selection_position],
+            unique_dates[confirmation_embargo_position - 1],
+        ),
+        "confirmation": (
+            unique_dates[confirmation_position],
+            unique_dates[-1],
+        ),
+    }
+    raw = {
+        name: np.flatnonzero(
+            (dates >= start_date) & (dates <= end_date)
+        )
+        for name, (start_date, end_date) in ranges.items()
+    }
+    assigned_partition = {}
+    for name, indices in raw.items():
+        for index in indices:
+            assigned_partition[int(index)] = name
+
+    group_partitions = {}
+    group_has_unassigned_row = {}
+    for index, group in enumerate(groups):
+        if index in assigned_partition:
+            group_partitions.setdefault(group, set()).add(
+                assigned_partition[index]
+            )
+        else:
+            group_has_unassigned_row[group] = True
+    invalid_groups = {
+        group
+        for group, partitions in group_partitions.items()
+        if len(partitions) != 1 or group_has_unassigned_row.get(group, False)
+    }
+
+    boundaries = {
+        "train": int(starts[raw["calibration"]].min()),
+        "calibration": int(starts[raw["selection"]].min()),
+        "selection": int(starts[raw["confirmation"]].min()),
+    }
+    interval_invalid_groups = set()
+    for name, boundary in boundaries.items():
+        crossed = raw[name][ends[raw[name]] >= boundary]
+        interval_invalid_groups.update(groups[crossed].tolist())
+
+    all_invalid_groups = invalid_groups | interval_invalid_groups
+    partitions = {
+        name: indices[
+            ~np.isin(groups[indices], list(all_invalid_groups))
+        ]
+        for name, indices in raw.items()
+    }
+    undersized = {
+        name: int(len(indices))
+        for name, indices in partitions.items()
+        if len(indices) < minimum_partition_samples
+    }
+    if undersized:
+        details = ", ".join(
+            f"{name}={count}"
+            for name, count in undersized.items()
+        )
+        raise ValueError(f"四段分区样本不足: {details}")
+
+    embargo_ranges = {
+        "before_calibration": unique_dates[
+            calibration_embargo_position:calibration_position
+        ].astype(str).tolist(),
+        "before_selection": unique_dates[
+            selection_embargo_position:selection_position
+        ].astype(str).tolist(),
+        "before_confirmation": unique_dates[
+            confirmation_embargo_position:confirmation_position
+        ].astype(str).tolist(),
+    }
+    metadata = {
+        "schema_version": "four-way-label-interval-split.v1",
+        "embargo_dates": embargo_dates,
+        "embargo_date_values": embargo_ranges,
+        "ranges": {
+            name: {
+                "start_date": str(start_date),
+                "end_date": str(end_date),
+            }
+            for name, (start_date, end_date) in ranges.items()
+        },
+        "train_samples": int(len(partitions["train"])),
+        "calibration_samples": int(len(partitions["calibration"])),
+        "selection_samples": int(len(partitions["selection"])),
+        "confirmation_samples": int(len(partitions["confirmation"])),
+        "interval_purged_samples": int(np.count_nonzero(
+            np.isin(groups, list(interval_invalid_groups))
+        )),
+        "group_purged_samples": int(np.count_nonzero(
+            np.isin(groups, list(invalid_groups))
+        )),
+    }
+    return (
+        partitions["train"],
+        partitions["calibration"],
+        partitions["selection"],
+        partitions["confirmation"],
+        metadata,
+    )
+
+
 def purged_holdout_split(
     dates,
     *,

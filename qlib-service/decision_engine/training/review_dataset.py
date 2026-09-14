@@ -8,6 +8,16 @@ from ..heads.review_contract import FEATURE_NAMES, feature_vector
 DATASET_SCHEMA_VERSION = "opportunity-review-dataset.v2"
 
 
+def _event_group_id(outcome):
+    code = str(outcome.get("code") or "")
+    event_id = str(
+        outcome.get("parentDecisionId")
+        or outcome.get("decisionId")
+        or ""
+    )
+    return f"{code}:{event_id}" if code and event_id else ""
+
+
 def build_opportunity_review_dataset(outcomes):
     source = outcomes if isinstance(outcomes, list) else []
     event_ledger = []
@@ -119,6 +129,10 @@ def build_opportunity_review_dataset(outcomes):
             [str(item[0].get("code") or "") for item in events],
             dtype="<U6",
         ),
+        "event_group_ids_all": np.asarray(
+            [_event_group_id(item[0]) for item in events],
+            dtype="<U200",
+        ),
         "label_start_ms_all": np.asarray(
             [item[3] for item in events],
             dtype=np.int64,
@@ -146,6 +160,10 @@ def build_opportunity_review_dataset(outcomes):
         "codes": np.asarray(
             [str(item[1].get("code") or "") for item in conditional],
             dtype="<U6",
+        ),
+        "event_group_ids": np.asarray(
+            [_event_group_id(item[1]) for item in conditional],
+            dtype="<U200",
         ),
         "label_start_ms": np.asarray(
             [item[4] for item in conditional],
