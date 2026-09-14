@@ -226,6 +226,37 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
             build.assert_called_once()
             audit.assert_called_once()
 
+    def test_refresh_v4_rebuilds_cached_chunk_and_audit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chunk = os.path.join(directory, "chunk-01")
+            os.makedirs(chunk)
+            for filename in (
+                "opportunity-outcomes-combined.json",
+                "opportunity-outcomes-v4.json.gz",
+                "audit.json",
+            ):
+                with open(
+                    os.path.join(chunk, filename),
+                    "wb",
+                ) as handle:
+                    handle.write(b"x" * 2048)
+            args = Namespace(
+                output=directory,
+                alpha_snapshot=os.path.join(directory, "alpha.json.gz"),
+                refresh_v4=True,
+            )
+            with patch.object(
+                runner,
+                "_build_v4_chunk",
+            ) as build, patch.object(
+                runner,
+                "_write_chunk_audit",
+            ) as audit:
+                runner._run_chunk(args, {"index": 1})
+
+            build.assert_called_once()
+            audit.assert_called_once()
+
     def test_merge_uses_v4_chunk_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
             for index in (1, 2):

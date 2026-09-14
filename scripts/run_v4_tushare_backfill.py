@@ -337,12 +337,13 @@ def _run_chunk(args, chunk):
     outcome = directory / "opportunity-outcomes-combined.json"
     v4_outcome = directory / "opportunity-outcomes-v4.json.gz"
     if outcome.is_file() and outcome.stat().st_size > 1024:
-        if not v4_outcome.is_file():
+        refresh_v4 = bool(getattr(args, "refresh_v4", False))
+        if refresh_v4 or not v4_outcome.is_file():
             _build_v4_chunk(args, directory)
-        if not (directory / "audit.json").is_file():
+        if refresh_v4 or not (directory / "audit.json").is_file():
             _write_chunk_audit(directory)
         print(json.dumps({
-            "stage": "CHUNK_CACHED",
+            "stage": "CHUNK_REBUILT" if refresh_v4 else "CHUNK_CACHED",
             **chunk,
             "output": str(v4_outcome),
         }), flush=True)
@@ -556,6 +557,11 @@ def parse_args():
         "--refresh-plan",
         action="store_true",
         help="忽略已有计划并从日线、资金源重新生成分片",
+    )
+    parser.add_argument(
+        "--refresh-v4",
+        action="store_true",
+        help="复用已完成的行情重放，仅重建V4特征与分片审计",
     )
     parser.add_argument("--from-chunk", type=int, default=1)
     args = parser.parse_args()
