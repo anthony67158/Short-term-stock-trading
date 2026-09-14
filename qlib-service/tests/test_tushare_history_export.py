@@ -253,6 +253,30 @@ class TushareHistoryExportTest(unittest.TestCase):
                 "--dry-run",
             ])
 
+    def test_tushare_download_uses_shared_client_with_workers(self):
+        calls = []
+
+        class FakeClient:
+            def rows(self, api_name, params, fields):
+                calls.append((api_name, params["ts_code"], fields))
+                return [{"ts_code": params["ts_code"]}]
+
+        result = list(self.module._download_tushare_rows(
+            FakeClient(),
+            ["600000", "000001", "002415"],
+            ["20260102", "20260105"],
+            workers=2,
+        ))
+
+        self.assertEqual(
+            {code for code, _rows in result},
+            {"600000", "000001", "002415"},
+        )
+        self.assertEqual(
+            {call[1] for call in calls},
+            {"600000.SH", "000001.SZ", "002415.SZ"},
+        )
+
     def test_http_source_derives_root_endpoint_and_token_from_mcp_url(self):
         with patch.dict(os.environ, {
             "STOCK_MCP_URL": (

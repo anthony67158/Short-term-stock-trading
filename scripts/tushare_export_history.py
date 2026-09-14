@@ -588,6 +588,35 @@ def _download_mcp_rows(codes, dates, retries, workers):
             yield fetch(code)
 
 
+def _download_tushare_rows(client, codes, dates, workers):
+    def fetch(code):
+        rows = client.rows(
+            "stk_mins",
+            {
+                "ts_code": to_tushare_code(code),
+                "freq": "5min",
+                "start_date":
+                    f"{dates[0][:4]}-{dates[0][4:6]}-"
+                    f"{dates[0][6:]} 09:30:00",
+                "end_date":
+                    f"{dates[-1][:4]}-{dates[-1][4:6]}-"
+                    f"{dates[-1][6:]} 15:00:00",
+            },
+            MINUTE_FIELDS,
+        )
+        return code, rows
+
+    if workers <= 1:
+        for code in codes:
+            yield fetch(code)
+        return
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=workers,
+        thread_name_prefix="tushare",
+    ) as executor:
+        yield from executor.map(fetch, codes)
+
+
 def _stock_http_config():
     raw_endpoint = os.environ.get("STOCK_MCP_URL", "")
     endpoint = validate_stock_mcp_url(raw_endpoint)
@@ -651,8 +680,16 @@ def export_minutes(args):
             )
 
             def rows_by_code():
+                if args.minute_source == "tushare":
+                    yield from _download_tushare_rows(
+                        client,
+                        pending,
+                        dates,
+                        args.workers,
+                    )
+                    return
                 for code in pending:
-                    rows = client.rows(
+                    yield code, client.rows(
                         "stk_mins",
                         {
                             "ts_code": to_tushare_code(code),
@@ -666,7 +703,6 @@ def export_minutes(args):
                         },
                         MINUTE_FIELDS,
                     )
-                    yield code, rows
         else:
             def rows_by_code():
                 yield from _download_mcp_rows(
