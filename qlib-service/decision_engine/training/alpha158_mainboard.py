@@ -542,6 +542,7 @@ def main():
     parser.add_argument("--from", dest="start_date", required=True)
     parser.add_argument("--to", dest="end_date", required=True)
     parser.add_argument("--universe-size", type=int, default=1000)
+    parser.add_argument("--top-n", type=int, default=100)
     parser.add_argument("--threads", type=int, default=4)
     parser.add_argument("--rebuild", action="store_true")
     args = parser.parse_args()
@@ -556,7 +557,11 @@ def main():
         save_panel(args.panel, panel)
     else:
         panel = load_panel(args.panel)
-    result = run_walkforward(panel, threads=args.threads)
+    result = run_walkforward(
+        panel,
+        threads=args.threads,
+        top_n=max(1, min(args.universe_size, args.top_n)),
+    )
     with open(args.output, "w", encoding="utf-8") as handle:
         json.dump(
             result,
