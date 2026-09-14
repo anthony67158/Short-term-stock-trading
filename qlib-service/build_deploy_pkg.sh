@@ -75,6 +75,8 @@ mkdir -p "$PKG/contracts"
 cp \
   "$HERE/contracts/opportunity-score-features.json" \
   "$HERE/contracts/opportunity-review-features.json" \
+  "$HERE/contracts/opportunity-review-features-v2.json" \
+  "$HERE/contracts/opportunity-review-features-v3.json" \
   "$PKG/contracts/"
 for f in \
   lgb_signal.txt \

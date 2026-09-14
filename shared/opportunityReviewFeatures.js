@@ -1,8 +1,15 @@
+import {
+  isOpportunityScoreInput,
+  OPPORTUNITY_SCORE_FEATURE_NAMES,
+} from './opportunityScoreContract.js'
+
 export const OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION =
   'opportunity-review-feature.v1'
 
 export const OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION =
   'opportunity-review-feature.v2'
+export const OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION =
+  'opportunity-review-feature.v3'
 export const OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION =
   'trigger-review-observation.v1'
 
@@ -43,6 +50,11 @@ export const OPPORTUNITY_REVIEW_V2_FEATURE_NAMES = Object.freeze([
   'initialPFillMissing',
   'initialPWinGivenFillMissing',
   'initialExpectedNetRMissing',
+])
+
+export const OPPORTUNITY_REVIEW_V3_FEATURE_NAMES = Object.freeze([
+  ...OPPORTUNITY_REVIEW_V2_FEATURE_NAMES,
+  ...OPPORTUNITY_SCORE_FEATURE_NAMES.map((name) => `initial_${name}`),
 ])
 
 function finite(value) {
@@ -242,6 +254,39 @@ export function buildOpportunityReviewFeatureInputV2({
       OPPORTUNITY_REVIEW_V2_FEATURE_NAMES.map((name) => [
         name,
         rounded(factors[name]),
+      ]),
+    ),
+  }
+}
+
+export function buildOpportunityReviewFeatureInputV3({
+  initialScoreInput,
+  ...input
+} = {}) {
+  const base = buildOpportunityReviewFeatureInputV2(input)
+  if (
+    !base
+    || !isOpportunityScoreInput(initialScoreInput)
+    || initialScoreInput.code !== base.code
+    || Number(initialScoreInput.asOf) > Number(base.asOf)
+  ) return null
+
+  const factors = {
+    ...base.factors,
+    ...Object.fromEntries(
+      OPPORTUNITY_SCORE_FEATURE_NAMES.map((name) => [
+        `initial_${name}`,
+        rounded(initialScoreInput.factors[name]),
+      ]),
+    ),
+  }
+  return {
+    ...base,
+    schemaVersion: OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION,
+    factors: Object.fromEntries(
+      OPPORTUNITY_REVIEW_V3_FEATURE_NAMES.map((name) => [
+        name,
+        factors[name],
       ]),
     ),
   }

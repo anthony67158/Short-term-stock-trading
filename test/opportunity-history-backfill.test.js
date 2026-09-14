@@ -200,11 +200,11 @@ test('历史结算复用生产费用和T加一结果合同', () => {
   assert.equal(outcome.context.historicalBackfill, true)
   assert.equal(
     outcome.reviewScoreInput.schemaVersion,
-    'opportunity-review-feature.v2',
+    'opportunity-review-feature.v3',
   )
   assert.match(outcome.reviewScoreInput.priceContractHash, /^[0-9a-f]{64}$/)
   assert.equal(outcome.labelSource, 'HISTORICAL_SIMULATION')
-  assert.equal(outcome.labelContractVersion, 'trigger-review-label.v2')
+  assert.equal(outcome.labelContractVersion, 'trigger-review-label.v3')
   assert.equal(outcome.exitContractVersion, 'trailing-exit.v1')
   assert.equal(
     outcome.reviewScoreInput.priceContract.entryPriceMilliCny,

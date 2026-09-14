@@ -8,7 +8,10 @@ import numpy as np
 
 from .contracts import SCORE_SCHEMA_VERSION, not_ready_prediction
 from .heads.position import position_values
-from .heads.review_contract import feature_vector
+from .heads.review_contract import (
+    REVIEW_PATH_FEATURE_COUNT,
+    feature_vector,
+)
 from .review_registry import (
     get_review_models,
     validate_review_metadata,
@@ -118,10 +121,17 @@ def _out_of_distribution(metadata, matrix):
     support = metadata["featureSupport"]
     lower = np.asarray(support["lower"], dtype=np.float64)
     upper = np.asarray(support["upper"], dtype=np.float64)
-    outside = np.mean(
-        (matrix < lower) | (matrix > upper),
+    outliers = (matrix < lower) | (matrix > upper)
+    threshold = float(support["maximumOutlierFraction"])
+    path_outside = np.mean(
+        outliers[:, :REVIEW_PATH_FEATURE_COUNT],
         axis=1,
-    ) > float(support["maximumOutlierFraction"])
+    ) > threshold
+    initial_outside = np.mean(
+        outliers[:, REVIEW_PATH_FEATURE_COUNT:],
+        axis=1,
+    ) > threshold
+    outside = path_outside | initial_outside
     missing_indices = np.asarray(
         support["missingFeatureIndices"],
         dtype=np.int64,

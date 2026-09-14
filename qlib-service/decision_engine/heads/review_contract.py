@@ -12,13 +12,38 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONTRACT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(HERE)),
     "contracts",
-    "opportunity-review-features-v2.json",
+    "opportunity-review-features-v3.json",
 )
 with open(CONTRACT_PATH, encoding="utf-8") as _handle:
     _CONTRACT = json.load(_handle)
 
 FEATURE_SCHEMA_VERSION = _CONTRACT["featureSchemaVersion"]
-FEATURE_NAMES = tuple(_CONTRACT["featureNames"])
+_CONTRACT_DIRECTORY = os.path.dirname(CONTRACT_PATH)
+with open(
+    os.path.join(
+        _CONTRACT_DIRECTORY,
+        _CONTRACT["baseFeatureContract"],
+    ),
+    encoding="utf-8",
+) as _handle:
+    _BASE_CONTRACT = json.load(_handle)
+with open(
+    os.path.join(
+        _CONTRACT_DIRECTORY,
+        _CONTRACT["initialFeatureContract"],
+    ),
+    encoding="utf-8",
+) as _handle:
+    _INITIAL_CONTRACT = json.load(_handle)
+_INITIAL_PREFIX = _CONTRACT["initialFeaturePrefix"]
+REVIEW_PATH_FEATURE_COUNT = len(_BASE_CONTRACT["featureNames"])
+FEATURE_NAMES = tuple([
+    *_BASE_CONTRACT["featureNames"],
+    *[
+        f"{_INITIAL_PREFIX}{name}"
+        for name in _INITIAL_CONTRACT["featureNames"]
+    ],
+])
 _CODE = re.compile(r"^\d{6}$")
 _VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 REVIEW_PRICE_CONTRACT_SCHEMA_VERSION = "review-price-contract.v1"

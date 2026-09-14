@@ -699,7 +699,7 @@ test('触发后路径特征只在复核事件中生成', async () => {
   assert.equal(initial.meta.reviewScoreInput, null)
   assert.equal(
     review.meta.reviewScoreInput.schemaVersion,
-    'opportunity-review-feature.v2',
+    'opportunity-review-feature.v3',
   )
   assert.match(review.meta.reviewScoreInput.priceContractHash, /^[0-9a-f]{64}$/)
   assert.equal(

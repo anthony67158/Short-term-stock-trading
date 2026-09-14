@@ -12,14 +12,14 @@ import {
   buildOpportunityScoreInput,
 } from '../../shared/opportunityScoreContract.js'
 import {
-  buildOpportunityReviewFeatureInputV2,
+  buildOpportunityReviewFeatureInputV3,
   OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
 } from '../../shared/opportunityReviewFeatures.js'
 import { reviewPriceContract } from '../../shared/reviewPriceContract.js'
 import { TRAILING_EXIT_VERSION } from '../../shared/trailingExit.js'
 
 const REVIEW_OBSERVATION_MS = 10 * 60 * 1000
-const REVIEW_LABEL_CONTRACT_VERSION = 'trigger-review-label.v2'
+const REVIEW_LABEL_CONTRACT_VERSION = 'trigger-review-label.v3'
 
 function routeKey(decision, index) {
   return String(
@@ -131,7 +131,7 @@ function barTimestamp(value) {
   return Number.isFinite(timestamp) ? timestamp : null
 }
 
-function reviewFeatureInput(event, outcome, bars) {
+function reviewFeatureInput(event, outcome, bars, initialScoreInput) {
   const triggeredAt = Number(outcome?.trigger?.at)
   if (!(triggeredAt > 0)) return null
   const observationCompleteAt = triggeredAt + REVIEW_OBSERVATION_MS
@@ -173,7 +173,7 @@ function reviewFeatureInput(event, outcome, bars) {
       OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
   }
   const bound = reviewPriceContract(priceInput)
-  const features = buildOpportunityReviewFeatureInputV2({
+  const features = buildOpportunityReviewFeatureInputV3({
     code: event.code,
     asOf: rows.at(-1)?.at,
     triggerPrice: outcome.trigger?.price,
@@ -182,6 +182,7 @@ function reviewFeatureInput(event, outcome, bars) {
       || event.decision?.priceType,
     rows,
     initialScore: event.opportunityScore,
+    initialScoreInput,
     priceContract: priceInput,
   })
   return features && bound ? {
@@ -235,7 +236,12 @@ export function settleHistoricalEvent({
     postTriggerObservationMs: REVIEW_OBSERVATION_MS,
     expectedEntryDate,
   })
-  const reviewScoreInput = reviewFeatureInput(event, resolved, bars)
+  const reviewScoreInput = reviewFeatureInput(
+    event,
+    resolved,
+    bars,
+    scoreInput,
+  )
   const outcome = alignReviewRiskBasis(resolved, reviewScoreInput)
   return {
     ...outcome,

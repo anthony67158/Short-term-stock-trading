@@ -5,11 +5,18 @@ import { readFileSync } from 'node:fs'
 import {
   buildOpportunityReviewFeatureInput,
   buildOpportunityReviewFeatureInputV2,
+  buildOpportunityReviewFeatureInputV3,
   OPPORTUNITY_REVIEW_FEATURE_NAMES,
   OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION,
   OPPORTUNITY_REVIEW_V2_FEATURE_NAMES,
   OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
+  OPPORTUNITY_REVIEW_V3_FEATURE_NAMES,
+  OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION,
 } from '../shared/opportunityReviewFeatures.js'
+import {
+  OPPORTUNITY_SCORE_FEATURE_NAMES,
+  OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
+} from '../shared/opportunityScoreContract.js'
 
 
 test('触发后复核特征只读取观察窗口路径', () => {
@@ -173,4 +180,100 @@ test('复核V2 JSON合同与JS清单一致', () => {
     OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
   )
   assert.deepEqual(manifest.featureNames, OPPORTUNITY_REVIEW_V2_FEATURE_NAMES)
+})
+
+test('复核V3绑定触发前候选特征且保持时点顺序', () => {
+  const asOf = 1_788_320_060_000
+  const initialScoreInput = {
+    schemaVersion: OPPORTUNITY_SCORE_FEATURE_SCHEMA_VERSION,
+    asOf: asOf - 60_000,
+    code: '600001',
+    formulaId: 'UNKNOWN',
+    factors: Object.fromEntries(
+      OPPORTUNITY_SCORE_FEATURE_NAMES.map(
+        (name, index) => [name, index + 1],
+      ),
+    ),
+  }
+  const value = buildOpportunityReviewFeatureInputV3({
+    code: '600001',
+    asOf,
+    triggerPrice: 10,
+    direction: 'BREAKOUT',
+    initialScoreInput,
+    priceContract: {
+      entryPrice: 10.2,
+      stopPrice: 9.8,
+      feeRateBps: 6.1,
+      slippageBps: 5,
+      lotSize: 100,
+      tPlusOne: true,
+    },
+    rows: [
+      { price: 10.1, high: 10.15, low: 10.02, volume: 100, vwap: 10.08 },
+      { price: 10.2, high: 10.25, low: 10.08, volume: 200, vwap: 10.12 },
+    ],
+  })
+
+  assert.equal(value.schemaVersion, OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION)
+  assert.deepEqual(Object.keys(value.factors), OPPORTUNITY_REVIEW_V3_FEATURE_NAMES)
+  assert.equal(value.factors.initial_cheapScore, 1)
+  assert.equal(
+    buildOpportunityReviewFeatureInputV3({
+      ...value,
+      code: '600001',
+      asOf,
+      triggerPrice: 10,
+      direction: 'BREAKOUT',
+      rows: [{ price: 10, high: 10.1, low: 9.9 }],
+      initialScoreInput: { ...initialScoreInput, asOf: asOf + 1 },
+      priceContract: {
+        entryPrice: 10.2,
+        stopPrice: 9.8,
+        feeRateBps: 6.1,
+        slippageBps: 5,
+        lotSize: 100,
+        tPlusOne: true,
+      },
+    }),
+    null,
+  )
+})
+
+test('复核V3组合合同与JS清单一致', () => {
+  const manifest = JSON.parse(readFileSync(
+    new URL(
+      '../qlib-service/contracts/opportunity-review-features-v3.json',
+      import.meta.url,
+    ),
+    'utf8',
+  ))
+  const base = JSON.parse(readFileSync(
+    new URL(
+      `../qlib-service/contracts/${manifest.baseFeatureContract}`,
+      import.meta.url,
+    ),
+    'utf8',
+  ))
+  const initial = JSON.parse(readFileSync(
+    new URL(
+      `../qlib-service/contracts/${manifest.initialFeatureContract}`,
+      import.meta.url,
+    ),
+    'utf8',
+  ))
+
+  assert.equal(
+    manifest.featureSchemaVersion,
+    OPPORTUNITY_REVIEW_V3_FEATURE_SCHEMA_VERSION,
+  )
+  assert.deepEqual(
+    [
+      ...base.featureNames,
+      ...initial.featureNames.map(
+        (name) => `${manifest.initialFeaturePrefix}${name}`,
+      ),
+    ],
+    OPPORTUNITY_REVIEW_V3_FEATURE_NAMES,
+  )
 })

@@ -18,7 +18,7 @@ import { buildMarketOpportunityContext } from '../shared/marketOpportunityContex
 import { scoreOpportunityPlaybooks } from '../shared/opportunityPlaybooks.js'
 import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatures.js'
 import {
-  buildOpportunityReviewFeatureInputV2,
+  buildOpportunityReviewFeatureInputV3,
   OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
 } from '../shared/opportunityReviewFeatures.js'
 import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
@@ -416,6 +416,7 @@ export async function evaluateDecision({
       strategyPatternCapabilities.display,
   })
   // One request per route prevents stock-code keyed clients from mixing three prices.
+  const scoreInputsByRoute = new Map()
   const evaluated = await Promise.all(plans.map(async (plan) => {
     const input = buildOpportunityScoreInput({
       batch: {
@@ -446,6 +447,7 @@ export async function evaluateDecision({
         sector: sector?.sector,
       },
     })
+    scoreInputsByRoute.set(plan.route, input)
     const scores = payload.evidenceIncomplete
       ? new Map()
       : await score([input]).catch(() => new Map())
@@ -555,7 +557,7 @@ export async function evaluateDecision({
       && rawReviewPriceContract
       && boundReviewPriceContract
     )
-      ? buildOpportunityReviewFeatureInputV2({
+      ? buildOpportunityReviewFeatureInputV3({
           code,
           asOf: now,
           formulaId: 'TRIGGER_REVIEW',
@@ -567,6 +569,9 @@ export async function evaluateDecision({
             ?? reviewEvent.plannedAction,
           rows: postTriggerRows(trendRows, reviewEvent.at),
           initialScore: reviewedPlan.opportunityScore,
+          initialScoreInput: scoreInputsByRoute.get(
+            reviewedPlan.route,
+          ),
           priceContract: rawReviewPriceContract,
         })
       : null
