@@ -46,8 +46,15 @@ import {
   fetchStrategyPatternSnapshot,
 } from './_strategy_pattern_snapshot.js'
 import {
+  fetchAlpha158Snapshot,
+} from './_alpha158_snapshot.js'
+import {
   resolveStrategyPatternCapabilities,
 } from '../shared/strategyPatternCapabilities.js'
+
+import {
+  alpha158SignalFor,
+} from '../shared/alpha158Signal.js'
 
 function finite(value) {
   if (value == null || value === '' || value === '-') return null
@@ -57,7 +64,9 @@ function finite(value) {
 
 function validStock(quote = {}, expectedTradeDate = beijingDayKey()) {
   return (
-    /^\d{6}$/.test(String(quote.code || ''))
+    /^(000|001|002|003|600|601|603|605)\d{3}$/.test(
+      String(quote.code || ''),
+    )
     && !/ST|退/i.test(String(quote.name || ''))
     && quote.tradeDate === expectedTradeDate
     && finite(quote.price) > 0
@@ -225,10 +234,21 @@ function usablePatternSnapshot(snapshot, expectedTradeDate) {
   ) ? snapshot : null
 }
 
-function withRecallMetadata(items, mode, patternSnapshot = null) {
+function withRecallMetadata(
+  items,
+  mode,
+  patternSnapshot = null,
+  alpha158Snapshot = null,
+  expectedTradeDate = '',
+) {
   const values = items.map((item) => ({
     ...item,
     pattern: snapshotPattern(patternSnapshot, item.quote.code),
+    alpha158Signal: alpha158SignalFor(
+      alpha158Snapshot,
+      item.quote.code,
+      { expectedDate: expectedTradeDate },
+    ),
     recall: {
       primarySource: 'UNKNOWN',
       sources: [],
@@ -242,6 +262,7 @@ function withRecallMetadata(items, mode, patternSnapshot = null) {
       patternScore: 0,
       patternAsOfDate: patternSnapshot?.asOfDate || null,
       patternAdded: false,
+      alpha158Added: false,
     },
   }))
   assignPercentiles(values, 'momentumPct', (item) =>
@@ -306,6 +327,8 @@ export function selectAdaptiveDeepCandidates(
     limit = 96,
     patternLimit = 16,
     patternSnapshot = null,
+    alpha158Limit = 12,
+    alpha158Snapshot = null,
   } = {},
 ) {
   const usablePatterns = usablePatternSnapshot(
@@ -324,6 +347,8 @@ export function selectAdaptiveDeepCandidates(
     eligible,
     mode,
     usablePatterns,
+    alpha158Snapshot,
+    expectedTradeDate,
   )
   const quota = Math.max(1, Math.floor(limit / 4))
   const momentum = rankedEligible.slice().sort((left, right) =>
@@ -400,7 +425,37 @@ export function selectAdaptiveDeepCandidates(
             },
           }))
     : []
-  return [...base, ...patternExtras]
+  const included = new Set([
+    ...base,
+    ...patternExtras,
+  ].map((item) => item.quote.code))
+  const alpha158Extras = alpha158Snapshot?.state === 'ACTIVE'
+    ? rankedEligible
+        .filter((item) =>
+          !included.has(item.quote.code)
+          && item.alpha158Signal?.state === 'ACTIVE'
+        )
+        .sort((left, right) =>
+          Number(right.alpha158Signal?.percentile || 0)
+            - Number(left.alpha158Signal?.percentile || 0)
+          || String(left.quote.code).localeCompare(
+            String(right.quote.code),
+          )
+        )
+        .slice(0, Math.max(0, Number(alpha158Limit) || 0))
+        .map((item) => ({
+          ...item,
+          recall: {
+            ...item.recall,
+            sources: [...new Set([
+              ...item.recall.sources,
+              'ALPHA158',
+            ])],
+            alpha158Added: true,
+          },
+        }))
+    : []
+  return [...base, ...patternExtras, ...alpha158Extras]
 }
 
 function uniqueReasons(values = []) {
@@ -416,6 +471,7 @@ function candidateEvent(
   quote,
   cheapScore,
   recall = {},
+  alpha158Signal = null,
   patternModelFeatures = true,
 ) {
   return {
@@ -425,6 +481,7 @@ function candidateEvent(
     quote,
     cheapScore,
     recall,
+    alpha158Signal,
     formulaEvaluations: [],
     shadowFeatures: {},
     strategyPatternModelFeatures:
@@ -489,6 +546,7 @@ function publicCandidate(item, rank) {
     rank,
     score: item.score,
     recall: item.recall || null,
+    alpha158Signal: item.alpha158Signal || null,
     formulaId: item.decision.formulaId,
     validationState: 'DECISION_PENDING',
     action: item.decision.action,
@@ -536,6 +594,7 @@ export async function scanFormulaSelectionCandidates({
   fetchFund = fetchResilientStockFund,
   fetchTags = fetchStockTagProfile,
   fetchPatternSnapshot = fetchStrategyPatternSnapshot,
+  fetchAlphaSnapshot = fetchAlpha158Snapshot,
   strategyPatternCapabilities =
     resolveStrategyPatternCapabilities(process.env),
   enableStrategyPatterns,
@@ -558,11 +617,12 @@ export async function scanFormulaSelectionCandidates({
     percent: 12,
     message: '正在读取完整A股行情',
   })
-  const [universe, rawPatternSnapshot] = await Promise.all([
+  const [universe, rawPatternSnapshot, alpha158Snapshot] = await Promise.all([
     fetchUniverse({ now }),
     patternCapabilities.recall
       ? fetchPatternSnapshot({ now }).catch(() => null)
       : Promise.resolve(null),
+    fetchAlphaSnapshot({ now }).catch(() => null),
   ])
   const allQuotes = assertCompleteFormulaUniverse(universe)
   const latestQuoteDate = allQuotes
@@ -587,6 +647,8 @@ export async function scanFormulaSelectionCandidates({
     })),
     normalizedMode,
     patternSnapshot,
+    alpha158Snapshot,
+    expectedDate,
   )
   const prefiltered = selectAdaptiveDeepCandidates(allQuotes, {
     mode: normalizedMode,
@@ -594,6 +656,8 @@ export async function scanFormulaSelectionCandidates({
     limit: 96,
     patternLimit: 16,
     patternSnapshot,
+    alpha158Limit: 12,
+    alpha158Snapshot,
   })
   const candidateEvents = new Map(
     eligibleWithRecall.map((item) => [
@@ -602,6 +666,7 @@ export async function scanFormulaSelectionCandidates({
         item.quote,
         item.cheapScore,
         item.recall,
+        item.alpha158Signal,
         patternCapabilities.modelFeatures,
       ),
     ]),
@@ -835,6 +900,11 @@ export async function scanFormulaSelectionCandidates({
           quote,
           cheapScore,
           recall,
+          alpha158Signal: alpha158SignalFor(
+            alpha158Snapshot,
+            quote.code,
+            { expectedDate },
+          ),
           fund,
           tags,
           sectorOpportunity,
@@ -922,6 +992,15 @@ export async function scanFormulaSelectionCandidates({
             asOfDate: patternSnapshot.asOfDate,
             stocks: patternSnapshot.summary?.stocks
               ?? patternSnapshot.stocks.size,
+          }
+        : null,
+      alpha158Snapshot: alpha158Snapshot
+        ? {
+            state: alpha158Snapshot.state,
+            asOfDate: alpha158Snapshot.asOfDate,
+            modelVersion: alpha158Snapshot.modelVersion,
+            reliabilityWeight: alpha158Snapshot.reliabilityWeight,
+            stocks: alpha158Snapshot.stocks.size,
           }
         : null,
       strategyPatternCapabilities: {

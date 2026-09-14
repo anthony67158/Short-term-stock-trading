@@ -18,6 +18,7 @@ else
     "$HERE/app.py" \
     "$HERE/factors_lib.py" \
     "$HERE/model_lib.py" \
+    "$HERE/alpha158_snapshot.py" \
     "$HERE/opportunity_market_archive.py" \
     "$HERE/opportunity_pattern_snapshot.py" \
     "$HERE/archive_public_market_day.py" \

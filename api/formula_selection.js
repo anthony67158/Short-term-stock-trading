@@ -115,7 +115,10 @@ function decisionRankingScore(candidate) {
   if (!directDecisionScore(score) || !(Number(score.expectedNetR) > 0)) {
     return -Infinity
   }
-  const ranking = Number(score.rankingScore)
+  const ranking = Number(
+    candidate?.jointRanking?.jointScore
+    ?? score.rankingScore,
+  )
   return Number.isFinite(ranking) ? ranking : -Infinity
 }
 
@@ -400,6 +403,8 @@ export function runFormulaSelection({
         const scoredEvent = {
           ...event,
           decision,
+          alpha158Signal: candidate.alpha158Signal || event.alpha158Signal,
+          jointRanking: candidate.jointRanking || null,
           stageReached: displayedRanks.has(event.code) ? 'DISPLAYED' : 'EVIDENCE',
           displayedRank: displayedRanks.get(event.code) ?? null,
         }

@@ -23,6 +23,9 @@ import {
   resolveStrategyPatternCapabilities,
   strategyPatternCapabilityKey,
 } from '../shared/strategyPatternCapabilities.js'
+import {
+  normalizeAlpha158Snapshot,
+} from '../shared/alpha158Signal.js'
 
 function candles() {
   return Array.from({ length: 40 }, (_, index) => {
@@ -80,6 +83,14 @@ test('盘中和收盘预筛使用不同边界且排除风险名称', () => {
   assert.equal(
     passesFormulaRealtimePrefilter(
       quote({ name: 'ST测试' }),
+      'intraday',
+      '2026-08-28',
+    ),
+    false,
+  )
+  assert.equal(
+    passesFormulaRealtimePrefilter(
+      quote({ code: '300001' }),
       'intraday',
       '2026-08-28',
     ),
@@ -164,6 +175,65 @@ test('全市场形态快照在原深查池之外增加独立候选', () => {
   assert.equal(enhanced.at(-1).recall.patternId, 'PLATFORM_BREAKOUT')
   assert.equal(enhanced.at(-1).recall.primarySource, 'EXPLORATION')
   assert.equal(enhanced.at(-1).recall.exploration, true)
+})
+
+test('Alpha158只以连续信号增加主板召回，不删除原候选', () => {
+  const rows = Array.from({ length: 30 }, (_, index) =>
+    quote({
+      code: String(600001 + index),
+      tradeDate: '2026-09-08',
+      pct: 1,
+      amount: 100_000_000,
+      turnover: 2,
+      mainRatio: 1,
+    })
+  )
+  const baseline = selectAdaptiveDeepCandidates(rows, {
+    expectedTradeDate: '2026-09-08',
+    limit: 8,
+    patternLimit: 0,
+    alpha158Limit: 0,
+  })
+  const baselineCodes = new Set(
+    baseline.map((item) => item.quote.code),
+  )
+  const extra = rows.find((item) => !baselineCodes.has(item.code))
+  const alpha158Snapshot = normalizeAlpha158Snapshot({
+    schemaVersion: 'alpha158-ranking-snapshot.v1',
+    state: 'ACTIVE',
+    productionEligible: true,
+    asOfDate: '20260907',
+    generatedAt: Date.now(),
+    modelVersion: 'alpha158.test',
+    reliabilityWeight: 0.2,
+    metrics: {
+      recentRankIc: 0.03,
+      overallRankIc: 0.02,
+    },
+    stocks: {
+      [extra.code]: {
+        rawScore: 0.2,
+        percentile: 0.99,
+        rank: 1,
+      },
+    },
+  })
+  const enhanced = selectAdaptiveDeepCandidates(rows, {
+    expectedTradeDate: '2026-09-08',
+    limit: 8,
+    patternLimit: 0,
+    alpha158Limit: 1,
+    alpha158Snapshot,
+  })
+
+  assert.deepEqual(
+    enhanced.slice(0, baseline.length).map((item) => item.quote.code),
+    baseline.map((item) => item.quote.code),
+  )
+  assert.equal(enhanced.length, 9)
+  assert.equal(enhanced.at(-1).quote.code, extra.code)
+  assert.equal(enhanced.at(-1).recall.alpha158Added, true)
+  assert.equal(enhanced.at(-1).alpha158Signal.state, 'ACTIVE')
 })
 
 test('公式价位不会向界面泄露上游HTTP 501', () => {

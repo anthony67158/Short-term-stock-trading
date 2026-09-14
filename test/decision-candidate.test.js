@@ -76,6 +76,7 @@ function directScore(input, overrides = {}) {
     pWinGivenFill: 0.6,
     expectedNetR: 0.3,
     netRLowerBound: 0.1,
+    rankingScore: 0.5,
     expectedShortfall10: -0.8,
     calibration: { sampleCount: 1000 },
     ...overrides,
@@ -106,6 +107,34 @@ test('今日作战候选使用生产决策模型比较价格路径并保留同�
   assert.equal(result.opportunityScore.priceContract.entryPrice, 9.9)
   assert.equal(result.adaptive.estimate.source, 'DECISION_DIRECT')
   assert.equal(result.decisionScoring.scoredRoutes, 2)
+})
+
+test('今日作战保留V3和Alpha158连续分并输出联合排序', async () => {
+  const [result] = await scoreCandidatesWithDecisionModel([
+    candidate({
+      alpha158Signal: {
+        schemaVersion: 'alpha158-signal.v1',
+        state: 'ACTIVE',
+        modelVersion: 'alpha158.test',
+        percentile: 0.9,
+        reliabilityWeight: 0.2,
+      },
+    }),
+  ], {
+    now: NOW,
+    mode: 'INTRADAY',
+    marketGate: { allowed: true, riskTier: 'STANDARD' },
+    scoreOpportunities: async (inputs) => new Map(inputs.map((input) => [
+      input.code,
+      directScore(input),
+    ])),
+  })
+
+  assert.equal(result.opportunityScore.rankingScore, 0.5)
+  assert.equal(result.alpha158Signal.percentile, 0.9)
+  assert.equal(result.jointRanking.state, 'BLENDED')
+  assert.equal(result.jointRanking.alpha158Weight, 0.2)
+  assert.equal(result.jointRanking.jointScore, 0.58)
 })
 
 test('今日作战拒绝影子分数且不生成研究先验概率', async () => {

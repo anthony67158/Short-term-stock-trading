@@ -171,6 +171,26 @@ class DecisionAppTest(unittest.TestCase):
 
         self.assertEqual(response, expected)
 
+    def test_alpha158_snapshot_endpoint_returns_verified_snapshot(self):
+        expected = {
+            "schemaVersion": "alpha158-ranking-snapshot.v1",
+            "state": "RESEARCH",
+            "asOfDate": "20260910",
+            "stocks": {"600001": {"percentile": 0.88}},
+        }
+        with patch.object(
+            app,
+            "_oss_bucket",
+            return_value=object(),
+        ), patch.object(
+            app,
+            "load_alpha158_snapshot",
+            return_value=expected,
+        ):
+            response = app.alpha158_snapshot(x_api_key="")
+
+        self.assertEqual(response, expected)
+
     def test_existing_stock_predict_contract_stays_36_dimensional(self):
         from factors_lib import FEATURE_NAMES as stock_features
 

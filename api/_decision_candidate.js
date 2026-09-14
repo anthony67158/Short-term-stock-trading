@@ -17,6 +17,9 @@ import {
 import {
   beijingMinutes,
 } from '../shared/tradingCalendar.js'
+import {
+  buildJointOpportunityRanking,
+} from '../shared/alpha158Signal.js'
 import { fetchDecisionScores } from './_action_value_client.js'
 
 const ROUTES = new Set(['IMMEDIATE', 'PULLBACK', 'BREAKOUT'])
@@ -217,6 +220,10 @@ function scoredPlan(candidate, plan, score, marketContext) {
   return {
     ...plan,
     opportunityScore,
+    jointRanking: buildJointOpportunityRanking({
+      opportunityScore,
+      alpha158Signal: candidate.alpha158Signal,
+    }),
     adaptive,
   }
 }
@@ -305,6 +312,10 @@ export async function scoreCandidatesWithDecisionModel(
         cautions: adaptive.cautions,
         adaptive,
         opportunityScore: null,
+        jointRanking: buildJointOpportunityRanking({
+          opportunityScore: null,
+          alpha158Signal: candidate.alpha158Signal,
+        }),
         decisionScoring: {
           usagePolicy: 'DIRECT',
           scoredRoutes: 0,
@@ -323,6 +334,8 @@ export async function scoreCandidatesWithDecisionModel(
       patternContext: selected.patternContext || null,
       riskReward: selected.riskReward,
       opportunityScore: selected.opportunityScore,
+      alpha158Signal: candidate.alpha158Signal || null,
+      jointRanking: selected.jointRanking,
       adaptive: selected.adaptive,
       state: selected.adaptive.tier === 'ATTACK'
         ? 'READY'

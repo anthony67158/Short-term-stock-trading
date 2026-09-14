@@ -146,6 +146,38 @@ function recallProjection(value = {}) {
     patternScore: finite(source.patternScore),
     patternAsOfDate: text(source.patternAsOfDate, 10) || null,
     patternAdded: source.patternAdded === true,
+    alpha158Added: source.alpha158Added === true,
+  }
+}
+
+function alpha158Projection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  return {
+    schemaVersion: text(source.schemaVersion, 40) || null,
+    state: text(source.state, 20) || 'UNAVAILABLE',
+    reason: text(source.reason, 60) || null,
+    modelVersion: text(source.modelVersion, 100) || null,
+    asOfDate: text(source.asOfDate, 8) || null,
+    rawScore: finite(source.rawScore),
+    percentile: finite(source.percentile),
+    rank: Math.max(0, Math.trunc(finite(source.rank) || 0)) || null,
+    reliabilityWeight: finite(source.reliabilityWeight) || 0,
+    recentRankIc: finite(source.recentRankIc),
+  }
+}
+
+function jointRankingProjection(value = {}) {
+  const source = value && typeof value === 'object' ? value : {}
+  return {
+    schemaVersion: text(source.schemaVersion, 40) || null,
+    state: text(source.state, 20) || 'UNAVAILABLE',
+    reason: text(source.reason, 60) || null,
+    v3Score: finite(source.v3Score),
+    alpha158Score: finite(source.alpha158Score),
+    alpha158Weight: finite(source.alpha158Weight) || 0,
+    jointScore: finite(source.jointScore),
+    alpha158ModelVersion:
+      text(source.alpha158ModelVersion, 100) || null,
   }
 }
 
@@ -182,6 +214,8 @@ function eventProjection(value, context) {
     quote: quoteProjection(value?.quote),
     cheapScore: finite(value?.cheapScore),
     recall: recallProjection(value?.recall),
+    alpha158Signal: alpha158Projection(value?.alpha158Signal),
+    jointRanking: jointRankingProjection(value?.jointRanking),
     shadowFeatures: shadowProjection(value?.shadowFeatures),
     strategyPatternModelFeatures:
       value?.strategyPatternModelFeatures !== false,

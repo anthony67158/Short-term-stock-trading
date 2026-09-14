@@ -34,6 +34,26 @@ function event(overrides = {}) {
       liquidityComposite: 72,
       signalOrderFlowContinuation: 1,
     },
+    alpha158Signal: {
+      schemaVersion: 'alpha158-signal.v1',
+      state: 'ACTIVE',
+      modelVersion: 'alpha158.test',
+      asOfDate: '20260901',
+      rawScore: 0.12,
+      percentile: 0.9,
+      rank: 10,
+      reliabilityWeight: 0.2,
+      recentRankIc: 0.03,
+    },
+    jointRanking: {
+      schemaVersion: 'joint-opportunity-rank.v1',
+      state: 'BLENDED',
+      v3Score: 0.6,
+      alpha158Score: 0.9,
+      alpha158Weight: 0.2,
+      jointScore: 0.66,
+      alpha158ModelVersion: 'alpha158.test',
+    },
     decision: {
       action: 'WATCH_BUY',
       formulaId: 'INTRADAY_VWAP_PULLBACK',
@@ -102,6 +122,9 @@ test('机会雷达账本为每只候选生成稳定决策ID和规则版本', () 
     batch.events[0].shadowFeatures.signalOrderFlowContinuation,
     1,
   )
+  assert.equal(batch.events[0].alpha158Signal.percentile, 0.9)
+  assert.equal(batch.events[0].jointRanking.jointScore, 0.66)
+  assert.equal(batch.events[0].jointRanking.alpha158Weight, 0.2)
   assert.equal(batch.marketGate.riskTier, 'STANDARD')
   assert.equal(batch.marketGate.regimeLabel, '趋势偏强')
   assert.deepEqual(batch.summary, {
