@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-14 已完成）。
+状态：IN PROGRESS（Tasks 1-15 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -269,20 +269,20 @@
 
 **Estimated scope:** M
 
-### Task 15：接入真实账户账本和撮合
+### Task 15：接入真实账户账本和撮合（已完成）
 
 **Description:** 将同源动作接入T+1、费用、滑点、资金占用、涨跌停、跳空与跟踪退出模拟。
 
 **Acceptance criteria:**
-- [ ] 未完成订单占用现金，未成交卖出不释放现金。
-- [ ] 日终现金、持仓、费用和权益按分复算。
-- [ ] 2倍滑点和下一开盘退出压力情景可重复运行。
+- [x] 未完成订单占用现金，未成交卖出不释放现金。
+- [x] 日终现金、持仓、费用和权益按分复算。
+- [x] 2倍滑点和下一开盘退出压力情景可重复运行。
 
 **Verification:** `node --test test/decision-account-backtest.test.js && npm run harness:execution && npm run harness:portfolio`
 
 **Dependencies:** Task 14
 
-**Files likely touched:** `backtest/decision/accountEngine.mjs`, `backtest/decision/ledgerAudit.mjs`, `test/decision-account-backtest.test.js`
+**Files touched:** `backtest/decision/accountEngine.mjs`, `backtest/decision/ledgerAudit.mjs`, `test/decision-account-backtest.test.js`
 
 **Estimated scope:** M
 
