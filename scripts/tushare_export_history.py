@@ -21,7 +21,10 @@ if str(SERVICE_ROOT) not in sys.path:
     sys.path.insert(0, str(SERVICE_ROOT))
 
 from tushare_client import TushareClient  # noqa: E402
-from stock_mcp_client import StockMcpClient  # noqa: E402
+from stock_mcp_client import (  # noqa: E402
+    StockMcpClient,
+    StockMcpUpstreamLimitError,
+)
 
 
 DATE = re.compile(r"^\d{8}$")
@@ -510,10 +513,16 @@ def _store_minute_rows(
 
 def _download_mcp_rows(codes, dates, retries, workers):
     local = threading.local()
+    limit_lock = threading.Lock()
+    limit_until = [0.0]
 
     def fetch(code):
         error = None
         for attempt in range(retries):
+            with limit_lock:
+                wait_seconds = max(0.0, limit_until[0] - time.monotonic())
+            if wait_seconds:
+                time.sleep(wait_seconds)
             try:
                 client = getattr(local, "client", None)
                 if client is None:
@@ -531,11 +540,18 @@ def _download_mcp_rows(codes, dates, retries, workers):
                         f"MCP分钟响应触及8000行上限: {code}"
                     )
                 return code, rows
+            except StockMcpUpstreamLimitError as exc:
+                error = exc
+                with limit_lock:
+                    limit_until[0] = max(
+                        limit_until[0],
+                        time.monotonic() + 60,
+                    )
             except Exception as exc:  # Retry transport and protocol failures.
                 error = exc
                 local.client = None
-                if attempt + 1 < retries:
-                    time.sleep(min(2 ** attempt, 10))
+            if attempt + 1 < retries:
+                time.sleep(min(2 ** attempt, 10))
         raise RuntimeError(f"MCP分钟下载失败: {code}") from error
 
     with concurrent.futures.ThreadPoolExecutor(

@@ -278,6 +278,39 @@ class TushareHistoryExportTest(unittest.TestCase):
         self.assertEqual(attempts["600000.SH"], 2)
         self.assertEqual(attempts["600001.SH"], 1)
 
+    def test_mcp_ip_limit_keeps_session_and_backs_off(self):
+        calls = []
+
+        class FakeClient:
+            def __init__(self):
+                calls.append("init")
+
+            def stock_minutes(self, symbol, _start, _end):
+                calls.append(symbol)
+                if calls.count(symbol) == 1:
+                    raise self.module.StockMcpUpstreamLimitError("limited")
+                return [{"ts_code": symbol}]
+
+        FakeClient.module = self.module
+        with patch.object(
+            self.module,
+            "StockMcpClient",
+            FakeClient,
+        ), patch.object(
+            self.module.time,
+            "sleep",
+        ) as sleep:
+            rows = list(self.module._download_mcp_rows(
+                ["600000"],
+                ["20260910", "20260911"],
+                retries=2,
+                workers=1,
+            ))
+
+        self.assertEqual(rows[0][0], "600000")
+        self.assertEqual(calls.count("init"), 1)
+        self.assertGreaterEqual(sleep.call_count, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

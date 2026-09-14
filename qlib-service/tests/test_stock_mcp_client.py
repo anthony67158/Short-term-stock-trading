@@ -11,6 +11,7 @@ if SERVICE_ROOT not in sys.path:
 
 from stock_mcp_client import (  # noqa: E402
     StockMcpProtocolError,
+    StockMcpUpstreamLimitError,
     normalize_stock_minute_result,
     validate_stock_mcp_url,
 )
@@ -100,6 +101,28 @@ class StockMcpClientTest(unittest.TestCase):
                 ]),
                 "600519.SH",
             )
+
+    def test_classifies_upstream_ip_limit_without_exposing_raw_message(self):
+        payload = {
+            "result": {
+                "isError": True,
+                "content": [{
+                    "type": "text",
+                    "text": json.dumps({
+                        "code": 500,
+                        "msg": "ip超限，请不到在多个ip同时使用",
+                    }),
+                }],
+            },
+        }
+
+        with self.assertRaisesRegex(
+            StockMcpUpstreamLimitError,
+            r"IP.*限制",
+        ) as raised:
+            normalize_stock_minute_result(payload, "600519.SH")
+
+        self.assertNotIn("多个ip", str(raised.exception))
 
     def test_url_validation_rejects_credential_leak_vectors(self):
         endpoint = validate_stock_mcp_url(

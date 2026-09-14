@@ -26,6 +26,10 @@ class StockMcpProtocolError(RuntimeError):
     pass
 
 
+class StockMcpUpstreamLimitError(StockMcpProtocolError):
+    pass
+
+
 def validate_stock_mcp_url(value):
     endpoint = urllib.parse.urlsplit(str(value or "").strip())
     if endpoint.scheme != "https":
@@ -69,7 +73,7 @@ def normalize_stock_minute_result(payload, expected_symbol):
     if not isinstance(payload, dict) or payload.get("error"):
         raise StockMcpProtocolError("MCP 工具调用失败")
     result = payload.get("result")
-    if not isinstance(result, dict) or result.get("isError"):
+    if not isinstance(result, dict):
         raise StockMcpProtocolError("MCP 分钟工具返回错误")
     content = result.get("content")
     text = next(
@@ -88,7 +92,14 @@ def normalize_stock_minute_result(payload, expected_symbol):
         tool_result = json.loads(text)
     except json.JSONDecodeError as exc:
         raise StockMcpProtocolError("MCP 分钟工具结果不是有效 JSON") from exc
-    if not isinstance(tool_result, dict) or tool_result.get("code") != 0:
+    if not isinstance(tool_result, dict):
+        raise StockMcpProtocolError("MCP 分钟工具结果结构无效")
+    if result.get("isError"):
+        message = str(tool_result.get("msg") or "")
+        if "ip超限" in message:
+            raise StockMcpUpstreamLimitError("MCP 上游 IP 限制")
+        raise StockMcpProtocolError("MCP 分钟工具返回错误")
+    if tool_result.get("code") != 0:
         raise StockMcpProtocolError("MCP 分钟工具业务调用失败")
     data = tool_result.get("data")
     fields = data.get("fields") if isinstance(data, dict) else None
