@@ -1,6 +1,11 @@
 import importlib.util
+import gzip
+import json
 import os
+import tempfile
 import unittest
+from argparse import Namespace
+from unittest.mock import patch
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +75,67 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
             end = dates.index(chunk["signalTo"])
             signals.extend(dates[start:end + 1])
         self.assertEqual(signals, dates[20:-5])
+
+    def test_cached_replay_still_builds_missing_v4_chunk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chunk = os.path.join(directory, "chunk-01")
+            os.makedirs(chunk)
+            with open(
+                os.path.join(chunk, "opportunity-outcomes-combined.json"),
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                handle.write("x" * 2048)
+            args = Namespace(
+                output=directory,
+                alpha_snapshot=os.path.join(directory, "alpha.json.gz"),
+            )
+            with patch.object(runner, "_build_v4_chunk") as build:
+                runner._run_chunk(args, {"index": 1})
+
+            build.assert_called_once()
+
+    def test_merge_uses_v4_chunk_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            decisions = []
+            for index in (1, 2):
+                chunk = os.path.join(directory, f"chunk-{index:02d}")
+                os.makedirs(chunk)
+                value = {
+                    "outcomes": [{
+                        "decisionId": f"formula:{index}",
+                        "code": "600001",
+                    }],
+                }
+                with gzip.open(
+                    os.path.join(chunk, "opportunity-outcomes-v4.json.gz"),
+                    "wt",
+                    encoding="utf-8",
+                ) as handle:
+                    json.dump(value, handle)
+                decisions.extend(value["outcomes"])
+            plan = {
+                "chunks": [
+                    {
+                        "index": 1,
+                        "signalFrom": "20260101",
+                        "signalTo": "20260131",
+                    },
+                    {
+                        "index": 2,
+                        "signalFrom": "20260201",
+                        "signalTo": "20260228",
+                    },
+                ],
+            }
+            runner._merge_chunks(Namespace(output=directory), plan)
+            with open(
+                os.path.join(directory, "opportunity-outcomes-v4-5y.json"),
+                encoding="utf-8",
+            ) as handle:
+                merged = json.load(handle)
+
+            self.assertEqual(merged["outcomes"], decisions)
 
 
 if __name__ == "__main__":

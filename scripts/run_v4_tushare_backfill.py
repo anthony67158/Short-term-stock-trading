@@ -209,11 +209,14 @@ def _run_chunk(args, chunk):
         f"chunk-{chunk['index']:02d}"
     )
     outcome = directory / "opportunity-outcomes-combined.json"
+    v4_outcome = directory / "opportunity-outcomes-v4.json.gz"
     if outcome.is_file() and outcome.stat().st_size > 1024:
+        if not v4_outcome.is_file():
+            _build_v4_chunk(args, directory)
         print(json.dumps({
             "stage": "CHUNK_CACHED",
             **chunk,
-            "output": str(outcome),
+            "output": str(v4_outcome),
         }), flush=True)
         return
 
@@ -242,16 +245,35 @@ def _run_chunk(args, chunk):
     )
     if not outcome.is_file():
         raise RuntimeError(f"回放未生成结果: {outcome}")
+    _build_v4_chunk(args, directory)
     print(json.dumps({
         "stage": "CHUNK_DONE",
         **chunk,
-        "output": str(outcome),
+        "output": str(v4_outcome),
     }), flush=True)
+
+
+def _build_v4_chunk(args, directory):
+    alpha_snapshot = Path(args.alpha_snapshot).expanduser().resolve()
+    if not alpha_snapshot.is_file():
+        raise RuntimeError(f"缺少无前视Alpha快照: {alpha_snapshot}")
+    _run([
+        sys.executable,
+        str(ROOT / "scripts" / "build_v4_review_outcomes.py"),
+        "--outcomes",
+        str(directory / "opportunity-outcomes-combined.json"),
+        "--alpha-snapshot",
+        str(alpha_snapshot),
+        "--output",
+        str(directory / "opportunity-outcomes-v4.json.gz"),
+        "--report",
+        str(directory / "v4-report.json"),
+    ], directory / "v4-build.log")
 
 
 def _merge_chunks(args, plan):
     output_root = Path(args.output).expanduser().resolve()
-    destination = output_root / "opportunity-outcomes-5y.json"
+    destination = output_root / "opportunity-outcomes-v4-5y.json"
     temporary = destination.with_suffix(".json.part")
     seen = set()
     total = 0
@@ -274,8 +296,8 @@ def _merge_chunks(args, plan):
         for chunk in plan["chunks"]:
             source = output_root / (
                 f"chunk-{chunk['index']:02d}"
-            ) / "opportunity-outcomes-combined.json"
-            payload = json.loads(source.read_text(encoding="utf-8"))
+            ) / "opportunity-outcomes-v4.json.gz"
+            payload = _read_gzip(source)
             for outcome in payload.get("outcomes") or []:
                 decision_id = str(outcome.get("decisionId") or "")
                 if not decision_id or decision_id in seen:
@@ -321,6 +343,14 @@ def parse_args():
     parser.add_argument("--universe-size", type=int, default=1000)
     parser.add_argument("--max-per-min", type=int, default=120)
     parser.add_argument("--minimum-coverage", type=float, default=0.85)
+    parser.add_argument(
+        "--alpha-snapshot",
+        default=str(
+            Path.home()
+            / ".mainboard-5y"
+            / "alpha158-snapshot-causal.json.gz"
+        ),
+    )
     parser.add_argument("--prepare-only", action="store_true")
     parser.add_argument("--from-chunk", type=int, default=1)
     args = parser.parse_args()
