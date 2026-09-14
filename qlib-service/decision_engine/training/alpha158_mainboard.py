@@ -394,6 +394,16 @@ def _signal_metrics(scores, labels, dates):
     }
 
 
+def _cross_section_percentiles(scores):
+    values = np.asarray(scores, dtype=np.float64)
+    if len(values) == 1:
+        return np.asarray([0.5], dtype=np.float64)
+    order = np.argsort(values, kind="stable")
+    ranks = np.empty(len(values), dtype=np.float64)
+    ranks[order] = np.arange(len(values), dtype=np.float64)
+    return ranks / max(1, len(values) - 1)
+
+
 def _folds(panel, splits=3):
     dates = np.unique(panel["dates"])
     blocks = np.array_split(dates, splits + 1)
@@ -519,6 +529,30 @@ def _latest_ranking(panel, *, threads, top_n):
         ),
         dtype=np.float64,
     )
+    latest_percentiles = _cross_section_percentiles(scores)
+    signal_dates = np.asarray(panel["signal_dates"]).astype(str)
+    previous_dates = signal_dates[signal_dates < latest_date]
+    lag_date = (
+        str(previous_dates[-5])
+        if len(previous_dates) >= 5
+        else None
+    )
+    lag_percentiles = {}
+    if lag_date is not None:
+        lag_indices = np.flatnonzero(panel["dates"] == lag_date)
+        if len(lag_indices):
+            lag_scores = np.asarray(
+                model.predict(
+                    panel["X"][lag_indices],
+                    num_iteration=model.best_iteration,
+                ),
+                dtype=np.float64,
+            )
+            lag_pct = _cross_section_percentiles(lag_scores)
+            lag_percentiles = {
+                str(panel["codes"][row]): float(lag_pct[index])
+                for index, row in enumerate(lag_indices)
+            }
     order = np.lexsort((latest_codes, -scores))
     limit = min(len(order), max(1, int(top_n)))
     return {
@@ -538,6 +572,15 @@ def _latest_ranking(panel, *, threads, top_n):
                 "code": str(latest_codes[index]),
                 "rank": rank,
                 "score": round(float(scores[index]), 8),
+                "scoreMomentum5": (
+                    round(
+                        float(latest_percentiles[index])
+                        - lag_percentiles[str(latest_codes[index])],
+                        6,
+                    )
+                    if str(latest_codes[index]) in lag_percentiles
+                    else None
+                ),
             }
             for rank, index in enumerate(order[:limit], start=1)
         ],

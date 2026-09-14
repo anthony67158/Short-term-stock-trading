@@ -60,6 +60,7 @@ def walkforward(*, recent_rank_ic=0.03, overall_rank_ic=0.02):
                     "code": f"600{index:03d}",
                     "rank": index + 1,
                     "score": 1 - index / 1000,
+                    "scoreMomentum5": 0.2 - index / 10_000,
                 }
                 for index in range(500)
             ],
@@ -90,6 +91,10 @@ class Alpha158SnapshotTest(unittest.TestCase):
         self.assertGreater(snapshot["reliabilityWeight"], 0)
         self.assertLessEqual(snapshot["reliabilityWeight"], 0.25)
         self.assertEqual(snapshot["stocks"]["600000"]["percentile"], 1)
+        self.assertEqual(
+            snapshot["stocks"]["600000"]["scoreMomentum5"],
+            0.2,
+        )
 
     def test_negative_recent_rank_ic_keeps_snapshot_in_research(self):
         snapshot = build_alpha158_snapshot(

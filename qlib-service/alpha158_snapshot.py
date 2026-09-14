@@ -180,6 +180,7 @@ def build_alpha158_snapshot(payload, *, generated_at=None):
                 6,
             ),
             "rank": rank,
+            "scoreMomentum5": _number(row.get("scoreMomentum5")),
         }
     timestamp = int(generated_at or time.time() * 1000)
     return {
@@ -240,6 +241,10 @@ def validate_alpha158_snapshot(value):
             or percentile is None
             or not 0 <= percentile <= 1
             or int(_number((row or {}).get("rank")) or 0) < 1
+            or (
+                (row or {}).get("scoreMomentum5") is not None
+                and _number((row or {}).get("scoreMomentum5")) is None
+            )
         ):
             raise ValueError("Alpha158股票排名无效")
     return value
