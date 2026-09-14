@@ -79,6 +79,29 @@ def outcome(index):
 
 
 class BuildV4ReviewDatasetTest(unittest.TestCase):
+    def test_multi_root_overlap_only_accepts_identical_events(self):
+        seen = {}
+        value = {"decisionId": "formula:one", "value": 1}
+
+        first, first_duplicates = builder._deduplicate_outcomes(
+            [value],
+            seen,
+        )
+        second, second_duplicates = builder._deduplicate_outcomes(
+            [dict(value)],
+            seen,
+        )
+
+        self.assertEqual(first, [value])
+        self.assertEqual(first_duplicates, 0)
+        self.assertEqual(second, [])
+        self.assertEqual(second_duplicates, 1)
+        with self.assertRaisesRegex(ValueError, "冲突事件"):
+            builder._deduplicate_outcomes(
+                [{**value, "value": 2}],
+                seen,
+            )
+
     def test_builds_audited_npz_from_chunk_archives(self):
         with tempfile.TemporaryDirectory() as directory:
             chunks = []
@@ -118,6 +141,8 @@ class BuildV4ReviewDatasetTest(unittest.TestCase):
             dataset = load_opportunity_review_dataset(output)
 
             self.assertEqual(audit["sourceChunks"], 2)
+            self.assertEqual(audit["sourceRoots"], 1)
+            self.assertEqual(audit["duplicateEventsSkipped"], 0)
             self.assertEqual(audit["featureCount"], len(FEATURE_NAMES_V4))
             self.assertEqual(audit["events"], 2)
             self.assertEqual(audit["conditionalSamples"], 2)
