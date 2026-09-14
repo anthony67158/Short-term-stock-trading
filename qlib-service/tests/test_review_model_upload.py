@@ -23,6 +23,7 @@ from decision_engine.review_registry import (
 from upload_review_model import (
     publish_review_release,
     record_confirmation_attempt,
+    validate_release_decision,
 )
 from download_review_release import download_active_review_release
 
@@ -155,6 +156,21 @@ def release_decision(model_version):
     }
 
 
+def migration_release_decision(model_version):
+    return {
+        **release_decision(model_version),
+        "schemaVersion": "review-schema-migration.v1",
+        "migration": {
+            "schemaVersion": "review-feature-migration.v1",
+            "source": "opportunity-review-feature.v3",
+            "target": "opportunity-review-feature.v4",
+            "sameEventComparison": True,
+            "v3Samples": 500,
+            "v4Samples": 500,
+        },
+    }
+
+
 class ReviewModelUploadTests(unittest.TestCase):
     def _write_release(self, directory, *, eligible=True):
         for slot, filename in REVIEW_ARTIFACT_FILENAMES.items():
@@ -211,6 +227,24 @@ class ReviewModelUploadTests(unittest.TestCase):
                 bucket.headers[item["key"]]["x-oss-forbid-overwrite"],
                 "true",
             )
+
+    def test_accepts_strict_same_event_v3_to_v4_migration_decision(self):
+        model_version = metadata()["modelVersion"]
+
+        result = validate_release_decision(
+            migration_release_decision(model_version),
+            model_version,
+        )
+
+        self.assertEqual(result["action"], "PUBLISH")
+
+    def test_rejects_migration_decision_without_equal_sample_counts(self):
+        model_version = metadata()["modelVersion"]
+        decision = migration_release_decision(model_version)
+        decision["migration"]["v4Samples"] = 499
+
+        with self.assertRaisesRegex(ValueError, "有效冠军挑战者发布裁决"):
+            validate_release_decision(decision, model_version)
 
     def test_record_only_then_publish_is_idempotent_for_frozen_candidate(self):
         bucket = FakeBucket()

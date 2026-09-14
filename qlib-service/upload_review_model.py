@@ -14,6 +14,9 @@ from decision_engine.review_registry import (
     validate_review_metadata,
 )
 from decision_engine.heads.review_contract import FEATURE_SCHEMA_VERSION
+from decision_engine.heads.review_contract_v4 import (
+    FEATURE_SCHEMA_VERSION_V4,
+)
 from model_lib import _oss_bucket
 
 
@@ -55,10 +58,22 @@ def validate_release_decision(value, run_id):
         if isinstance(value, dict)
         else None
     )
+    schema_version = (
+        value.get("schemaVersion")
+        if isinstance(value, dict)
+        else None
+    )
+    migration = (
+        value.get("migration")
+        if schema_version == "review-schema-migration.v1"
+        else None
+    )
     if (
         not isinstance(value, dict)
-        or value.get("schemaVersion")
-        != "review-champion-challenger.v1"
+        or schema_version not in {
+            "review-champion-challenger.v1",
+            "review-schema-migration.v1",
+        }
         or value.get("action") != "PUBLISH"
         or value.get("eligible") is not True
         or not str(value.get("championVersion") or "")
@@ -74,6 +89,17 @@ def validate_release_decision(value, run_id):
         or int(evidence.get("conditionalSamples") or 0) < 200
         or int(evidence.get("fillSamples") or 0) < 500
         or int(evidence.get("opportunitySamples") or 0) < 500
+        or (
+            schema_version == "review-schema-migration.v1"
+            and (
+                not isinstance(migration, dict)
+                or migration.get("source") != FEATURE_SCHEMA_VERSION
+                or migration.get("target") != FEATURE_SCHEMA_VERSION_V4
+                or migration.get("sameEventComparison") is not True
+                or int(migration.get("v3Samples") or 0) < 500
+                or migration.get("v3Samples") != migration.get("v4Samples")
+            )
+        )
     ):
         raise ValueError("触价复核模型缺少有效冠军挑战者发布裁决")
     return value
