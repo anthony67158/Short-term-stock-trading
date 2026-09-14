@@ -79,6 +79,8 @@ cp \
   "$HERE/contracts/opportunity-review-features.json" \
   "$HERE/contracts/opportunity-review-features-v2.json" \
   "$HERE/contracts/opportunity-review-features-v3.json" \
+  "$HERE/contracts/opportunity-review-features-v4.json" \
+  "$HERE/contracts/opportunity-alpha158-signal.json" \
   "$PKG/contracts/"
 for f in \
   lgb_signal.txt \
