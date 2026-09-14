@@ -53,10 +53,21 @@ def _prediction_arrays(models, metadata, matrix):
     ):
         raise ValueError("触价复核模型集成成员不匹配")
     probabilities = []
+    fill_probabilities = []
     expected_values = []
     lower_values = []
     for model_set, config in zip(members, configs):
+        active_fill = np.asarray(
+            config["activeFillFeatures"],
+            dtype=np.int64,
+        )
         active = np.asarray(config["activeFeatures"], dtype=np.int64)
+        fill_probability = apply_probability_calibrator(
+            _sigmoid(
+                model_set["pFill"].predict(matrix[:, active_fill])
+            ),
+            config["pFillCalibration"],
+        )
         selected = matrix[:, active]
         raw_probability = _sigmoid(
             model_set["pWinGivenFill"].predict(selected)
@@ -78,11 +89,13 @@ def _prediction_arrays(models, metadata, matrix):
             model_set["netRLower10"].predict(selected)
             + float(config.get("q10CalibrationOffset") or 0)
         )
+        fill_probabilities.append(fill_probability)
         probabilities.append(probability)
         expected_values.append(expected)
         lower_values.append(lower)
     expected = np.mean(expected_values, axis=0)
     return {
+        "pFill": np.mean(fill_probabilities, axis=0),
         "pWinGivenFill": np.mean(probabilities, axis=0),
         "expectedNetR": expected,
         "netRLowerBound": np.minimum(
@@ -130,10 +143,12 @@ def predict_review_items(payload, *, models=None, metadata=None):
     for index, item in enumerate(items):
         expected = float(arrays["expectedNetR"][index])
         lower = float(arrays["netRLowerBound"][index])
+        p_fill = float(arrays["pFill"][index])
         p_win = float(arrays["pWinGivenFill"][index])
         if not all(math.isfinite(value) for value in (
             expected,
             lower,
+            p_fill,
             p_win,
             expected_shortfall,
         )):
@@ -141,7 +156,8 @@ def predict_review_items(payload, *, models=None, metadata=None):
                 not_ready_prediction(item, "REVIEW_MODEL_INVALID")
             )
             continue
-        position = position_values(expected, lower, 1.0)
+        expected_opportunity = p_fill * expected
+        position = position_values(expected, lower, p_fill)
         predictions.append({
             "schemaVersion": SCORE_SCHEMA_VERSION,
             "state": "READY",
@@ -151,9 +167,11 @@ def predict_review_items(payload, *, models=None, metadata=None):
             "code": item["code"],
             "formulaId": item["formulaId"],
             "priceContractHash": item["priceContractHash"],
-            "pFill": 1.0,
+            "pFill": round(p_fill, 6),
             "pWinGivenFill": round(p_win, 6),
             "expectedNetR": round(expected, 6),
+            "expectedNetRGivenFill": round(expected, 6),
+            "expectedOpportunityR": round(expected_opportunity, 6),
             "netRLowerBound": round(lower, 6),
             "expectedShortfall10": round(expected_shortfall, 6),
             "rankingScore": None,
@@ -161,6 +179,9 @@ def predict_review_items(payload, *, models=None, metadata=None):
                 "method": "trigger-review-seed-ensemble",
                 "sampleCount": int(
                     metadata.get("calibrationSampleCount") or 0
+                ),
+                "pFillSampleCount": int(
+                    metadata.get("fillCalibrationSampleCount") or 0
                 ),
                 "bucket": "TRIGGER_REVIEW",
                 "pWinLevel": "GLOBAL",
@@ -190,11 +211,15 @@ def predict_review_items(payload, *, models=None, metadata=None):
                 "schemaVersion": "decision-task-values.v1",
                 "selection": {
                     "rankingScore": None,
-                    "expectedOpportunityR": round(expected, 6),
+                    "expectedOpportunityR":
+                        round(expected_opportunity, 6),
                 },
                 "entry": {
                     "expectedNetR": round(expected, 6),
-                    "pFill": 1.0,
+                    "expectedNetRGivenFill": round(expected, 6),
+                    "expectedOpportunityR":
+                        round(expected_opportunity, 6),
+                    "pFill": round(p_fill, 6),
                 },
                 "portfolio": {
                     key: (
@@ -204,7 +229,7 @@ def predict_review_items(payload, *, models=None, metadata=None):
                     )
                     for key, value in position.items()
                 },
-                "execution": {"pFill": 1.0},
+                "execution": {"pFill": round(p_fill, 6)},
                 "risk": {
                     "q10R": round(lower, 6),
                     "cvarR": round(expected_shortfall, 6),

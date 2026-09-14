@@ -56,6 +56,13 @@ def metadata(**overrides):
     member = {
         "seed": 42,
         "activeFeatures": list(range(len(FEATURE_NAMES))),
+        "activeFillFeatures": list(range(len(FEATURE_NAMES))),
+        "pFillCalibration": {
+            "method": "isotonic",
+            "x": [0.0, 0.5, 1.0],
+            "y": [0.4, 0.4, 0.4],
+            "sampleCount": 120,
+        },
         "pWinCalibration": {
             "method": "isotonic",
             "x": [0.0, 0.5, 1.0],
@@ -82,6 +89,7 @@ def metadata(**overrides):
         "ensembleSize": 2,
         "ensembleMembers": [member, {**member, "seed": 7}],
         "calibrationSampleCount": 200,
+        "fillCalibrationSampleCount": 240,
         "risk": {"expectedShortfall10": -1.2},
         "productionEligible": True,
         "baselineSelected": True,
@@ -91,6 +99,7 @@ def metadata(**overrides):
 
 def models():
     member = {
+        "pFill": FakeModel(0.0),
         "pWinGivenFill": FakeModel(0.0),
         "winPayoffR": FakeModel(1.5),
         "lossPayoffR": FakeModel(-0.5),
@@ -109,14 +118,17 @@ class ReviewInferenceTests(unittest.TestCase):
 
         self.assertEqual(result["state"], "READY")
         self.assertEqual(result["usagePolicy"], "DIRECT")
-        self.assertEqual(result["pFill"], 1.0)
+        self.assertEqual(result["pFill"], 0.4)
         self.assertEqual(
             result["priceContractHash"],
             request_item()["priceContractHash"],
         )
         self.assertAlmostEqual(result["pWinGivenFill"], 0.6)
         self.assertAlmostEqual(result["expectedNetR"], 0.7)
+        self.assertAlmostEqual(result["expectedNetRGivenFill"], 0.7)
+        self.assertAlmostEqual(result["expectedOpportunityR"], 0.28)
         self.assertAlmostEqual(result["netRLowerBound"], 0.1)
+        self.assertEqual(result["taskValues"]["execution"]["pFill"], 0.4)
         self.assertEqual(
             result["taskValues"]["review"]["source"],
             "TRIGGER_REVIEW_MODEL",
@@ -160,6 +172,19 @@ class ReviewInferenceTests(unittest.TestCase):
             )[0]
             self.assertEqual(result["state"], "NOT_READY")
             self.assertEqual(result["reason"], "REVIEW_MODEL_INVALID")
+
+    def test_review_model_without_fill_head_fails_closed(self):
+        incomplete_models = models()
+        incomplete_models["ensemble"][0].pop("pFill")
+
+        result = predict_review_items(
+            {"items": [request_item()]},
+            models=incomplete_models,
+            metadata=metadata(),
+        )[0]
+
+        self.assertEqual(result["state"], "NOT_READY")
+        self.assertEqual(result["reason"], "REVIEW_MODEL_INVALID")
 
     def test_review_request_rejects_price_contract_hash_drift(self):
         invalid = request_item()

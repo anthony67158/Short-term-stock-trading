@@ -45,6 +45,12 @@ def metadata(*, eligible=True):
     member = {
         "seed": 42,
         "activeFeatures": list(range(len(FEATURE_NAMES))),
+        "activeFillFeatures": list(range(len(FEATURE_NAMES))),
+        "pFillCalibration": {
+            "method": "isotonic",
+            "x": [0.0, 1.0],
+            "y": [0.3, 0.7],
+        },
         "pWinCalibration": {
             "method": "isotonic",
             "x": [0.0, 1.0],
@@ -70,6 +76,7 @@ def metadata(*, eligible=True):
         },
         "ensembleSize": 2,
         "ensembleMembers": [member, {**member, "seed": 7}],
+        "fillCalibrationSampleCount": 120,
         "productionEligible": eligible,
         "baselineSelected": False,
     }

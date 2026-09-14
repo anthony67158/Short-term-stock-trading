@@ -59,11 +59,23 @@ def _catboost_payload(model):
             return json.load(handle)
 
 
-def _fit_member(dataset, development, calibration, seed, estimators, threads):
-    family = CatBoostFamily(estimators, threads, seed)
+def _fit_member(
+    dataset,
+    development,
+    calibration,
+    fill_development,
+    fill_calibration,
+    seed,
+    estimators,
+    threads,
+):
     mask = active_feature_mask(dataset["X"][development])
+    fill_mask = active_feature_mask(
+        dataset["X_all"][fill_development]
+    )
     active = np.flatnonzero(mask)
-    if not len(active):
+    active_fill = np.flatnonzero(fill_mask)
+    if not len(active) or not len(active_fill):
         raise ValueError("触价复核训练集没有有效特征")
     X_development = dataset["X"][development][:, mask]
     X_calibration = dataset["X"][calibration][:, mask]
@@ -71,7 +83,15 @@ def _fit_member(dataset, development, calibration, seed, estimators, threads):
     negative = development[dataset["y_net_r"][development] <= 0]
     if not len(positive) or not len(negative):
         raise ValueError("触价复核训练集缺少正负收益样本")
+    if len(set(dataset["y_fill"][fill_development].tolist())) < 2:
+        raise ValueError("触价复核成交训练集缺少正负样本")
 
+    family = CatBoostFamily(estimators, threads, seed)
+    fill_model = family.classifier()
+    fill_model.fit(
+        dataset["X_all"][fill_development][:, fill_mask],
+        dataset["y_fill"][fill_development],
+    )
     win_model = family.classifier()
     win_model.fit(X_development, dataset["y_win"][development])
     win_payoff = family.regressor()
@@ -86,6 +106,13 @@ def _fit_member(dataset, development, calibration, seed, estimators, threads):
     )
     quantile.fit(X_development, quantile_labels)
 
+    fill_calibration_artifact = fit_probability_calibrator(
+        dataset["y_fill"][fill_calibration],
+        _probability(
+            fill_model,
+            dataset["X_all"][fill_calibration][:, fill_mask],
+        ),
+    )
     calibration_artifact = fit_probability_calibrator(
         dataset["y_win"][calibration],
         _probability(win_model, X_calibration),
@@ -102,10 +129,13 @@ def _fit_member(dataset, development, calibration, seed, estimators, threads):
         "config": {
             "seed": int(seed),
             "activeFeatures": active.astype(int).tolist(),
+            "activeFillFeatures": active_fill.astype(int).tolist(),
+            "pFillCalibration": fill_calibration_artifact,
             "pWinCalibration": calibration_artifact,
             "q10CalibrationOffset": round(q10_offset, 6),
         },
         "models": {
+            "pFill": fill_model,
             "pWinGivenFill": win_model,
             "winPayoffR": win_payoff,
             "lossPayoffR": loss_payoff,
@@ -115,11 +145,22 @@ def _fit_member(dataset, development, calibration, seed, estimators, threads):
 
 
 def _member_predictions(member, matrix):
+    active_fill = np.asarray(
+        member["config"]["activeFillFeatures"],
+        dtype=np.int64,
+    )
     active = np.asarray(
         member["config"]["activeFeatures"],
         dtype=np.int64,
     )
     selected = matrix[:, active]
+    p_fill = apply_probability_calibrator(
+        _probability(
+            member["models"]["pFill"],
+            matrix[:, active_fill],
+        ),
+        member["config"]["pFillCalibration"],
+    )
     p_win = apply_probability_calibrator(
         _probability(
             member["models"]["pWinGivenFill"],
@@ -137,10 +178,33 @@ def _member_predictions(member, matrix):
         + float(member["config"]["q10CalibrationOffset"])
     )
     return {
+        "pFill": p_fill,
         "pWinGivenFill": p_win,
         "expectedNetR": expected,
         "netRLowerBound": np.minimum(q10, expected),
     }
+
+
+def _evaluate_fill(dataset, development, holdout, predictions):
+    p_fill = np.mean([
+        value["pFill"] for value in predictions
+    ], axis=0)
+    metrics = binary_metrics(dataset["y_fill"][holdout], p_fill)
+    baseline = constant_probability_metrics(
+        dataset["y_fill"][development],
+        dataset["y_fill"][holdout],
+    )
+    brier_skill = round(
+        1 - metrics["brier"] / baseline["brier"],
+        6,
+    )
+    return {
+        "pFillBrier": metrics["brier"],
+        "pFillBrierSkill": brier_skill,
+        "pFillCalibration": metrics["reliability"],
+    }, (
+        [] if brier_skill > 0 else ["pFill Brier未优于常数基线"]
+    )
 
 
 def _evaluate(dataset, development, holdout, predictions):
@@ -226,7 +290,12 @@ def train_review_ensemble(
     threads=4,
 ):
     dataset = load_dataset(input_path)
-    if len(dataset["X"]) < 500 or len(set(dataset["dates"])) < 30:
+    if (
+        len(dataset["X"]) < 500
+        or len(dataset["X_all"]) < 500
+        or len(set(dataset["dates"])) < 30
+        or len(set(dataset["dates_all"])) < 30
+    ):
         raise ValueError("触价复核训练数据不足")
     (
         development,
@@ -244,11 +313,29 @@ def train_review_ensemble(
         confirmation_fraction=0.15,
         embargo_dates=5,
     )
+    (
+        fill_development,
+        fill_calibration,
+        fill_selection,
+        fill_confirmation,
+        fill_split,
+    ) = four_way_interval_split(
+        dataset["dates_all"],
+        dataset["label_start_ms_all"],
+        dataset["label_end_ms_all"],
+        dataset["event_group_ids_all"],
+        calibration_fraction=0.15,
+        selection_fraction=0.15,
+        confirmation_fraction=0.15,
+        embargo_dates=5,
+    )
     members = [
         _fit_member(
             dataset,
             development,
             calibration,
+            fill_development,
+            fill_calibration,
             seed,
             estimators,
             threads,
@@ -265,6 +352,17 @@ def train_review_ensemble(
         selection,
         selection_predictions,
     )
+    fill_selection_predictions = [
+        _member_predictions(member, dataset["X_all"][fill_selection])
+        for member in members
+    ]
+    fill_selection_metrics, fill_selection_blockers = _evaluate_fill(
+        dataset,
+        fill_development,
+        fill_selection,
+        fill_selection_predictions,
+    )
+    selection_metrics.update(fill_selection_metrics)
     confirmation_predictions = [
         _member_predictions(member, dataset["X"][confirmation])
         for member in members
@@ -275,9 +373,28 @@ def train_review_ensemble(
         confirmation,
         confirmation_predictions,
     )
+    fill_confirmation_predictions = [
+        _member_predictions(member, dataset["X_all"][fill_confirmation])
+        for member in members
+    ]
+    (
+        fill_confirmation_metrics,
+        fill_confirmation_blockers,
+    ) = _evaluate_fill(
+        dataset,
+        fill_development,
+        fill_confirmation,
+        fill_confirmation_predictions,
+    )
+    confirmation_metrics.update(fill_confirmation_metrics)
     blockers = [
         *[f"候选选择段: {value}" for value in selection_blockers],
+        *[f"候选选择段: {value}" for value in fill_selection_blockers],
         *[f"最终确认段: {value}" for value in confirmation_blockers],
+        *[
+            f"最终确认段: {value}"
+            for value in fill_confirmation_blockers
+        ],
     ]
     model_version = (
         f"decision-review.{int(time.time())}.ensemble{len(members)}"
@@ -307,6 +424,7 @@ def train_review_ensemble(
             member["config"] for member in members
         ],
         "calibrationSampleCount": int(len(calibration)),
+        "fillCalibrationSampleCount": int(len(fill_calibration)),
         "productionEligible": not blockers,
         "baselineSelected": False,
         "rankingPolicy": {
@@ -320,6 +438,7 @@ def train_review_ensemble(
         },
         "validation": {
             "split": split,
+            "fillSplit": fill_split,
             "selectionMetrics": selection_metrics,
             "confirmationMetrics": confirmation_metrics,
             "blockers": blockers,

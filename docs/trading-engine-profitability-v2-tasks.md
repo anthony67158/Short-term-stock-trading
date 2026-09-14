@@ -1,6 +1,6 @@
 # Tasks: 交易价值模型与可验证执行架构 V2
 
-状态：IN PROGRESS（Tasks 1-8 已完成）。
+状态：IN PROGRESS（Tasks 1-9 已完成）。
 依赖：[规格](./trading-engine-profitability-v2-spec.md)与[实施计划](./trading-engine-profitability-v2-plan.md)。
 
 ## Phase 1：合同与价格绑定
@@ -158,14 +158,14 @@
 
 ## Phase 3：模型与选择门禁
 
-### Task 9：训练成交概率头
+### Task 9：训练成交概率头（已完成）
 
 **Description:** 使用完整事件样本训练并校准真实成交概率，替换固定`pFill=1`。
 
 **Acceptance criteria:**
-- [ ] 输出校准后的`pFill`和Brier/校准曲线指标。
-- [ ] 涨跌停、无下一成交K线和超时事件参与负样本。
-- [ ] 无成交标签时训练失败，不回退常数1。
+- [x] 输出校准后的`pFill`和Brier/校准曲线指标。
+- [x] 涨跌停、无下一成交K线和超时事件参与负样本。
+- [x] 无成交标签时训练失败，不回退常数1。
 
 **Verification:** `PYTHONPATH=qlib-service python3 -m unittest qlib-service.tests.test_decision_review_training`
 

@@ -77,6 +77,11 @@ def validate_review_metadata(metadata, model_version=None):
         or metadata.get("riskProfileVersion")
         != REVIEW_RISK_PROFILE_VERSION
         or not str(metadata.get("modelVersion") or "")
+        or not isinstance(
+            metadata.get("fillCalibrationSampleCount"),
+            int,
+        )
+        or metadata["fillCalibrationSampleCount"] <= 0
         or not isinstance(observation, dict)
         or observation.get("schemaVersion")
         != REVIEW_OBSERVATION_POLICY_VERSION
@@ -94,6 +99,8 @@ def validate_review_metadata(metadata, model_version=None):
         or any(
             not isinstance(member, dict)
             or not isinstance(member.get("activeFeatures"), list)
+            or not isinstance(member.get("activeFillFeatures"), list)
+            or not isinstance(member.get("pFillCalibration"), dict)
             or not isinstance(member.get("pWinCalibration"), dict)
             or not isinstance(member.get("q10CalibrationOffset"), (int, float))
             for member in members
@@ -102,6 +109,8 @@ def validate_review_metadata(metadata, model_version=None):
         raise ValueError("触价复核模型集成元数据无效")
     for member in members:
         active = member["activeFeatures"]
+        active_fill = member["activeFillFeatures"]
+        fill_calibration = member["pFillCalibration"]
         calibration = member["pWinCalibration"]
         if (
             not active
@@ -112,6 +121,16 @@ def validate_review_metadata(metadata, model_version=None):
                 or index >= len(FEATURE_NAMES)
                 for index in active
             )
+            or not active_fill
+            or len(active_fill) != len(set(active_fill))
+            or any(
+                not isinstance(index, int)
+                or index < 0
+                or index >= len(FEATURE_NAMES)
+                for index in active_fill
+            )
+            or fill_calibration.get("method")
+            not in {"sigmoid", "isotonic"}
             or calibration.get("method") not in {"sigmoid", "isotonic"}
         ):
             raise ValueError("触价复核模型成员配置无效")
@@ -183,6 +202,7 @@ def load_review_release(artifact_path, metadata_path):
     ):
         raise ValueError("触价复核模型集成文件无效")
     required = {
+        "pFill",
         "pWinGivenFill",
         "winPayoffR",
         "lossPayoffR",
