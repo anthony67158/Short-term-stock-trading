@@ -92,10 +92,10 @@
 
 ## Checkpoint A：合同闭环
 
-- [ ] Tasks 1-5全部通过。
-- [ ] JS/Python金样一致。
-- [ ] 旧模型失败关闭且不影响账本硬止损。
-- [ ] `npm run harness:lifecycle`通过。
+- [x] Tasks 1-5全部通过。
+- [x] JS/Python金样一致。
+- [x] 旧模型失败关闭且不影响账本硬止损。
+- [x] `npm run harness:lifecycle`通过。
 
 ## Phase 2：事件、标签与时间隔离
 
