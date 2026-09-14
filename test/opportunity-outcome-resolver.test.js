@@ -519,3 +519,43 @@ test('收盘信号缺少紧邻下一交易日行情时不得延后成交', () =>
   assert.equal(result.fillStatus, 'UNKNOWN')
   assert.equal(result.entry, null)
 })
+
+test('持有区间跨除权参考价断点时不生成伪收益标签', () => {
+  const result = resolveOpportunityOutcome({
+    event: event({
+      quote: {
+        price: 82.5,
+        preClose: 84.99,
+      },
+      decision: {
+        ...event().decision,
+        primaryPrice: 82,
+        stopPrice: 80,
+        targetPrice: 88,
+      },
+    }),
+    bars: [
+      bar('2026-09-01', {
+        open: 85.08,
+        high: 85.18,
+        low: 76.6,
+        close: 82.5,
+        preClose: 84.99,
+      }),
+      bar('2026-09-02', {
+        tradeTime: '09:35:00',
+        open: 56,
+        high: 57.75,
+        low: 55.4,
+        close: 55.9,
+        preClose: 57.64,
+      }),
+    ],
+    evaluatedAt: Date.parse('2026-09-02T08:00:00.000Z'),
+  })
+
+  assert.equal(result.maturity, 'MATURED')
+  assert.equal(result.outcome, 'DATA_INCOMPLETE')
+  assert.equal(result.fillStatus, 'UNKNOWN')
+  assert.equal(result.observations.corporateActionDetected, true)
+})

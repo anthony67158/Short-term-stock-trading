@@ -80,6 +80,7 @@ function normalizeBars(values, event, evaluatedAt) {
         close: finite(bar?.close ?? bar?.price),
         volume: finite(bar?.volume),
         preClose: finite(bar?.preClose),
+        corporateAction: false,
         granularity: String(bar?.granularity || 'INTRADAY'),
         entryEligible: bar?.entryEligible !== false,
       }
@@ -122,6 +123,11 @@ function normalizeBars(values, event, evaluatedAt) {
             ? finite(event?.quote?.preClose)
             : previousSessionClose
         )
+      row.corporateAction = (
+        previousSessionClose > 0
+        && sessionPreClose > 0
+        && Math.abs(sessionPreClose - previousSessionClose) > 0.005
+      )
     }
     row.preClose = row.preClose ?? sessionPreClose
     lastClose = row.close
@@ -415,6 +421,18 @@ export function resolveOpportunityOutcome({
       .filter((bar) => bar.granularity === 'DAILY_FALLBACK')
       .map((bar) => bar.date),
   ).size
+  const signalDate = dateKey(event.tradeDate)
+  if (rows.some((bar) => (
+    bar.corporateAction
+    && signalDate
+    && bar.date > signalDate
+  ))) {
+    base.observations.corporateActionDetected = true
+    return terminalWithoutFill(base, {
+      outcome: 'DATA_INCOMPLETE',
+      fillStatus: 'UNKNOWN',
+    })
+  }
   const window = entryWindow(
     event,
     rows,
