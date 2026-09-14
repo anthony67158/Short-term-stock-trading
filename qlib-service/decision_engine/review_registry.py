@@ -267,7 +267,10 @@ def validate_review_metadata(metadata, model_version=None):
     return metadata
 
 
-def validate_review_manifest(manifest):
+def validate_review_manifest(
+    manifest,
+    prefix=REVIEW_MODEL_PREFIX,
+):
     if (
         not isinstance(manifest, dict)
         or manifest.get("schemaVersion")
@@ -300,9 +303,10 @@ def validate_review_manifest(manifest):
         REVIEW_ARTIFACT_FILENAMES
     ):
         raise ValueError("触价复核模型文件清单不完整")
-    expected_prefix = (
-        f"{REVIEW_MODEL_PREFIX.rstrip('/')}/runs/{run_id}/"
-    )
+    normalized_prefix = str(
+        prefix or REVIEW_MODEL_PREFIX
+    ).strip("/")
+    expected_prefix = f"{normalized_prefix}/runs/{run_id}/"
     for slot, filename in REVIEW_ARTIFACT_FILENAMES.items():
         item = files.get(slot) or {}
         key = str(item.get("key") or "")

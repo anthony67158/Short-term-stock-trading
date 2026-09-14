@@ -24,6 +24,7 @@ from upload_review_model import (
     publish_review_release,
     record_confirmation_attempt,
 )
+from download_review_release import download_active_review_release
 
 
 class FakeBucket:
@@ -264,6 +265,52 @@ class ReviewModelUploadTests(unittest.TestCase):
             "opportunitymodel/review/manifest.json",
             bucket.objects,
         )
+
+    def test_downloads_and_verifies_active_review_release(self):
+        bucket = FakeBucket()
+        with tempfile.TemporaryDirectory() as source:
+            self._write_release(source)
+            manifest = publish_review_release(
+                bucket,
+                source,
+                prefix="custom/review/",
+                activated_at=123,
+            )
+            with tempfile.TemporaryDirectory() as destination:
+                result = download_active_review_release(
+                    bucket,
+                    destination,
+                    prefix="custom/review/",
+                )
+
+                self.assertEqual(result["runId"], manifest["runId"])
+                for filename in REVIEW_ARTIFACT_FILENAMES.values():
+                    self.assertTrue(os.path.isfile(os.path.join(
+                        destination,
+                        filename,
+                    )))
+
+    def test_review_download_rejects_hash_mismatch(self):
+        bucket = FakeBucket()
+        with tempfile.TemporaryDirectory() as source:
+            self._write_release(source)
+            manifest = publish_review_release(
+                bucket,
+                source,
+                activated_at=123,
+            )
+            artifact_key = manifest["files"]["ensemble"]["key"]
+            bucket.objects[artifact_key] = b"corrupt"
+            with tempfile.TemporaryDirectory() as destination:
+                with self.assertRaisesRegex(ValueError, "摘要不匹配"):
+                    download_active_review_release(
+                        bucket,
+                        destination,
+                    )
+                self.assertFalse(os.path.exists(os.path.join(
+                    destination,
+                    REVIEW_ARTIFACT_FILENAMES["ensemble"],
+                )))
 
 
 if __name__ == "__main__":
