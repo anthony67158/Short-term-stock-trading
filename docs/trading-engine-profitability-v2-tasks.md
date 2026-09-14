@@ -56,14 +56,14 @@
 
 **Estimated scope:** M
 
-### Task 4：绑定服务端评分请求和结果
+### Task 4：绑定服务端评分请求和结果（已完成）
 
 **Description:** 先构造最终价格计划，再生成特征并调用量化服务；返回哈希不一致时拒绝使用分数。
 
 **Acceptance criteria:**
-- [ ] 请求携带V2版本、价格合同和哈希。
-- [ ] 结果只绑定原请求合同，错版或错哈希返回不可执行状态。
-- [ ] 切换股票或重算价格不会复用旧评分。
+- [x] 请求携带V2版本、价格合同和哈希。
+- [x] 结果只绑定原请求合同，错版或错哈希返回不可执行状态。
+- [x] 切换股票或重算价格不会复用旧评分。
 
 **Verification:** `node --test test/action-value-client.test.js test/decision-engine-contract.test.js`
 

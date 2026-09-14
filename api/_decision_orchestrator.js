@@ -10,11 +10,19 @@ import { internalApiOrigin } from './_internal_origin.js'
 import { accountFrom, buildHoldPayload, computePortfolio } from './_portfolio.js'
 import { buildAccountRiskContext, accountRiskCodes } from '../shared/accountRiskBudget.js'
 import { buildAdaptivePricePlans } from '../shared/adaptivePricePlans.js'
+import {
+  A_SHARE_STANDARD_FEE_POLICY,
+  tradeFees,
+} from '../shared/ashareStrategyExecution.js'
 import { buildMarketOpportunityContext } from '../shared/marketOpportunityContext.js'
 import { scoreOpportunityPlaybooks } from '../shared/opportunityPlaybooks.js'
 import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatures.js'
-import { buildOpportunityReviewFeatureInput } from '../shared/opportunityReviewFeatures.js'
+import {
+  buildOpportunityReviewFeatureInputV2,
+  OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
+} from '../shared/opportunityReviewFeatures.js'
 import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
+import { reviewPriceContract } from '../shared/reviewPriceContract.js'
 import { summarizeStrategyPatterns } from '../shared/strategyPatternFeatures.js'
 import {
   resolveStrategyPatternCapabilities,
@@ -31,7 +39,10 @@ import { deriveMarketRegime } from '../shared/marketRegime.js'
 import { buildStockFundNote } from '../shared/retailFundFlow.js'
 import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
 import { attachMonitoringPlan } from '../shared/monitoringPlan.js'
-import { trailingStopForHold } from '../shared/trailingExit.js'
+import {
+  TRAILING_EXIT_VERSION,
+  trailingStopForHold,
+} from '../shared/trailingExit.js'
 import { isTriggeredReviewEvent } from '../shared/triggeredReviewDecision.js'
 import { allocationMarketFrom } from '../shared/targetPositionModel.js'
 
@@ -79,6 +90,38 @@ function finite(value) {
   if (value == null || value === '') return null
   const number = Number(value)
   return Number.isFinite(number) ? number : null
+}
+
+function reviewTradeContract(plan, code) {
+  const entryPrice = finite(plan?.entryPlan?.price)
+  const stopPrice = finite(plan?.exitPlan?.hardStopPrice)
+  if (!(entryPrice > stopPrice) || !(stopPrice > 0)) return null
+  const lotSize = /^68[89]/.test(String(code || '')) ? 200 : 100
+  const entryGross = entryPrice * lotSize
+  const exitGross = stopPrice * lotSize
+  let feeRateBps
+  try {
+    const totalFees = (
+      tradeFees('BUY', entryGross, A_SHARE_STANDARD_FEE_POLICY).total
+      + tradeFees('SELL', exitGross, A_SHARE_STANDARD_FEE_POLICY).total
+    )
+    feeRateBps = totalFees / entryGross * 10_000
+  } catch {
+    return null
+  }
+  return {
+    entryPrice,
+    stopPrice,
+    feeRateBps,
+    slippageBps: 5,
+    lotSize,
+    tPlusOne: true,
+    exitPolicyVersion:
+      plan?.exitPlan?.trailingStop?.schemaVersion
+      || TRAILING_EXIT_VERSION,
+    observationPolicyVersion:
+      OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
+  }
 }
 
 function normalizedTradeDate(value) {
@@ -496,8 +539,18 @@ export async function evaluateDecision({
         ),
       }
       : triggeredPlan
-    reviewScoreInput = reviewedPlan
-      ? buildOpportunityReviewFeatureInput({
+    const rawReviewPriceContract = reviewedPlan
+      ? reviewTradeContract(reviewedPlan, code)
+      : null
+    const boundReviewPriceContract = rawReviewPriceContract
+      ? reviewPriceContract(rawReviewPriceContract)
+      : null
+    const reviewFeatures = (
+      reviewedPlan
+      && rawReviewPriceContract
+      && boundReviewPriceContract
+    )
+      ? buildOpportunityReviewFeatureInputV2({
           code,
           asOf: now,
           formulaId: 'TRIGGER_REVIEW',
@@ -509,7 +562,15 @@ export async function evaluateDecision({
             ?? reviewEvent.plannedAction,
           rows: postTriggerRows(trendRows, reviewEvent.at),
           initialScore: reviewedPlan.opportunityScore,
+          priceContract: rawReviewPriceContract,
         })
+      : null
+    reviewScoreInput = reviewFeatures
+      ? {
+          ...reviewFeatures,
+          priceContract: boundReviewPriceContract.canonical,
+          priceContractHash: boundReviewPriceContract.hash,
+        }
       : null
     const fallbackInput = reviewScoreInput || {
       code,
@@ -519,11 +580,19 @@ export async function evaluateDecision({
     const reviewedScores = reviewScoreInput
       ? await reviewScore([reviewScoreInput]).catch(() => new Map())
       : new Map()
+    const rawReviewedScore = reviewedScores.get(code)
+    const boundReviewedScore = (
+      rawReviewedScore
+      && rawReviewedScore.priceContractHash
+        === reviewScoreInput?.priceContractHash
+    ) ? rawReviewedScore : null
     const opportunityScore = {
-      ...(reviewedScores.get(code) || unavailableOpportunityScore(
+      ...(boundReviewedScore || unavailableOpportunityScore(
         fallbackInput,
         reviewScoreInput
-          ? 'REVIEW_MODEL_UNAVAILABLE'
+          ? rawReviewedScore
+            ? 'REVIEW_PRICE_CONTRACT_MISMATCH'
+            : 'REVIEW_MODEL_UNAVAILABLE'
           : 'REVIEW_FEATURES_INCOMPLETE',
       )),
       serverVerified: true,

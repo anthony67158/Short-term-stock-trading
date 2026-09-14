@@ -7,8 +7,8 @@ import {
   fetchDecisionScores,
 } from '../api/_action_value_client.js'
 import {
-  OPPORTUNITY_REVIEW_FEATURE_NAMES,
-  OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION,
+  OPPORTUNITY_REVIEW_V2_FEATURE_NAMES,
+  OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
 } from '../shared/opportunityReviewFeatures.js'
 import {
   OPPORTUNITY_SCORE_FEATURE_NAMES,
@@ -159,12 +159,14 @@ test('超时或非法响应只降级影子评分而不抛出', async () => {
 test('触价后动作价值使用独立复核端点和标准评分合同', async () => {
   let request = null
   const reviewInput = {
-    schemaVersion: OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION,
+    schemaVersion: OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
     asOf: 1_788_320_000_000,
     code: '600001',
     formulaId: 'TRIGGER_REVIEW',
+    priceContractHash:
+      'f9ad80382299d84f729524a924796ee3ac7a18081f1f0e1618db7affe670fab9',
     factors: Object.fromEntries(
-      OPPORTUNITY_REVIEW_FEATURE_NAMES.map((name) => [name, 0]),
+      OPPORTUNITY_REVIEW_V2_FEATURE_NAMES.map((name) => [name, 0]),
     ),
   }
   const scores = await fetchDecisionReviewScores([reviewInput], {
@@ -186,6 +188,7 @@ test('触价后动作价值使用独立复核端点和标准评分合同', async
               asOf: reviewInput.asOf,
               code: reviewInput.code,
               formulaId: reviewInput.formulaId,
+              priceContractHash: reviewInput.priceContractHash,
               pFill: 1,
               pWinGivenFill: 0.6,
               expectedNetR: 0.3,
@@ -213,4 +216,59 @@ test('触价后动作价值使用独立复核端点和标准评分合同', async
   )
   assert.equal(scores.get('600001').state, 'READY')
   assert.equal(scores.get('600001').pFill, 1)
+  assert.equal(
+    scores.get('600001').priceContractHash,
+    reviewInput.priceContractHash,
+  )
+  assert.equal(
+    JSON.parse(request.options.body).items[0].priceContractHash,
+    reviewInput.priceContractHash,
+  )
+})
+
+test('触价复核响应价格合同哈希不一致时失败关闭', async () => {
+  const reviewInput = {
+    schemaVersion: OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
+    asOf: 1_788_320_000_000,
+    code: '600001',
+    formulaId: 'TRIGGER_REVIEW',
+    priceContractHash: 'a'.repeat(64),
+    factors: Object.fromEntries(
+      OPPORTUNITY_REVIEW_V2_FEATURE_NAMES.map((name) => [name, 0]),
+    ),
+  }
+  const scores = await fetchDecisionReviewScores([reviewInput], {
+    env: { QUANT_URL: 'https://quant.example.com' },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return {
+          ok: true,
+          predictions: [{
+            schemaVersion: OPPORTUNITY_SCORE_SCHEMA_VERSION,
+            state: 'READY',
+            modelVersion: 'decision-review.test',
+            asOf: reviewInput.asOf,
+            code: reviewInput.code,
+            formulaId: reviewInput.formulaId,
+            priceContractHash: 'b'.repeat(64),
+            pFill: 1,
+            pWinGivenFill: 0.6,
+            expectedNetR: 0.3,
+            netRLowerBound: 0.1,
+            expectedShortfall10: -1,
+            usagePolicy: 'DIRECT',
+            productionEligible: true,
+            baselineSelected: true,
+            shadowOnly: false,
+            outOfDistribution: false,
+            calibration: { method: 'test', sampleCount: 100 },
+          }],
+        }
+      },
+    }),
+  })
+
+  assert.equal(scores.get('600001').state, 'NOT_READY')
+  assert.equal(scores.get('600001').reason, 'INVALID_RESPONSE')
 })

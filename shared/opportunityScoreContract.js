@@ -421,6 +421,10 @@ export function unavailableOpportunityScore(input = {}, reason) {
     inputContextVersion:
       input.inputContextVersion
       || OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
+    priceContractHash:
+      /^[0-9a-f]{64}$/.test(String(input.priceContractHash || ''))
+        ? String(input.priceContractHash)
+        : null,
   }
 }
 
@@ -557,6 +561,19 @@ export function normalizeOpportunityScoreResponse(
   }
   const modelVersion = String(response.modelVersion || '')
   if (!modelVersion) throw new Error('机会评分模型版本无效')
+  const expectedPriceContractHash = String(
+    expected.priceContractHash || '',
+  )
+  const responsePriceContractHash = String(
+    response.priceContractHash || '',
+  )
+  if (
+    expectedPriceContractHash
+    && (
+      !/^[0-9a-f]{64}$/.test(expectedPriceContractHash)
+      || responsePriceContractHash !== expectedPriceContractHash
+    )
+  ) throw new Error('机会评分价格合同不匹配')
   const sampleCount = Math.max(
     0,
     Math.trunc(finite(response.calibration?.sampleCount) || 0),
@@ -605,5 +622,6 @@ export function normalizeOpportunityScoreResponse(
     inputContextVersion:
       expected.inputContextVersion
       || OPPORTUNITY_SCORE_INPUT_CONTEXT_VERSION,
+    priceContractHash: expectedPriceContractHash || null,
   }
 }

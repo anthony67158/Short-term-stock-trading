@@ -317,6 +317,7 @@ function scenario(overrides = {}) {
     new Map([[input.code, {
       ...plan.opportunityScore,
       formulaId: input.formulaId,
+      priceContractHash: input.priceContractHash,
       expectedNetR: 0.8,
     }]]))
   return {
@@ -682,7 +683,19 @@ test('触发后路径特征只在复核事件中生成', async () => {
   assert.equal(initial.meta.reviewScoreInput, null)
   assert.equal(
     review.meta.reviewScoreInput.schemaVersion,
-    'opportunity-review-feature.v1',
+    'opportunity-review-feature.v2',
+  )
+  assert.match(review.meta.reviewScoreInput.priceContractHash, /^[0-9a-f]{64}$/)
+  assert.equal(
+    review.meta.reviewScoreInput.priceContract.priceRiskMilliCny,
+    Math.round((
+      review.result.selectedDecisionPlan.entryPlan.price
+      - review.result.selectedDecisionPlan.exitPlan.hardStopPrice
+    ) * 1000),
+  )
+  assert.equal(
+    review.result.selectedDecisionPlan.opportunityScore.priceContractHash,
+    review.meta.reviewScoreInput.priceContractHash,
   )
   assert.equal(
     review.meta.reviewScoreInput.factors.direction_BREAKOUT,
@@ -714,6 +727,36 @@ test('触价后复核模型不可用时不回退初始买入结论', async () =>
   assert.equal(
     result.result.reviewEvaluation.reason,
     'REVIEW_MODEL_UNAVAILABLE',
+  )
+})
+
+test('触价复核分数不能绑定到不同价格合同', async () => {
+  const result = await evaluateDecision(scenario({
+    trends: Array.from({ length: 12 }, (_, index) => ({
+      time: `10:${String(10 + index).padStart(2, '0')}`,
+      price: 10 + index * 0.01,
+      avg: 10,
+      volume: 100 + index * 10,
+    })),
+    reviewEvent: {
+      kind: 'price-review',
+      at: now,
+      threshold: 10,
+      direction: 'gte',
+      plannedAction: 'BUY',
+    },
+    reviewScore: async ([input]) => new Map([[input.code, {
+      ...plan.opportunityScore,
+      formulaId: input.formulaId,
+      priceContractHash: 'f'.repeat(64),
+      expectedNetR: 0.8,
+    }]]),
+  }))
+
+  assert.notEqual(result.result.decisionPlan.action, 'BUY')
+  assert.equal(
+    result.result.reviewEvaluation.reason,
+    'REVIEW_PRICE_CONTRACT_MISMATCH',
   )
 })
 
@@ -949,6 +992,7 @@ test('退出前复核用最新模型结果撤销反弹后的旧清仓或确认�
     reviewScore: async ([input]) => new Map([[input.code, {
       ...plan.opportunityScore,
       formulaId: input.formulaId,
+      priceContractHash: input.priceContractHash,
       expectedNetR: -0.2,
     }]]),
   }))

@@ -3,6 +3,8 @@ export const OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION =
 
 export const OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION =
   'opportunity-review-feature.v2'
+export const OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION =
+  'trigger-review-observation.v1'
 
 export const OPPORTUNITY_REVIEW_FEATURE_NAMES = Object.freeze([
   'observationBars',
