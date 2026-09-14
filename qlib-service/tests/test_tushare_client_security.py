@@ -34,11 +34,16 @@ class TushareClientSecurityTest(unittest.TestCase):
             client.validate_gateway_url("https://ts2.gyzcloud.top/api"),
             "https://ts2.gyzcloud.top/api",
         )
+        self.assertEqual(
+            client.validate_gateway_url("https://tx.xiaodefa.top/"),
+            "https://tx.xiaodefa.top/",
+        )
 
         for url in (
             "http://ts.gyzcloud.top/api",
             "https://example.com/api",
             "https://ts.gyzcloud.top/other",
+            "https://tx.xiaodefa.top/api",
             "https://user:pass@ts.gyzcloud.top/api",
             "https://ts.gyzcloud.top/api?token=secret",
         ):
@@ -83,6 +88,23 @@ class TushareClientSecurityTest(unittest.TestCase):
         instance._post_once = post_once
         with patch.object(client.time, "sleep"):
             self.assertEqual(instance.call("stock_basic"), ([], []))
+
+        instance._rl.defer.assert_called_once_with(305)
+
+    def test_upstream_ip_limit_uses_the_shared_cooldown(self):
+        client = load_client()
+        instance = client.TushareClient(token="test-only-token", retries=2)
+        instance._rl.acquire = Mock()
+        instance._rl.defer = Mock()
+        instance._post_once = Mock(side_effect=[
+            ({
+                "code": 500,
+                "msg": "ip超限，请不到在多个ip同时使用",
+            }, instance.url),
+            ({"code": 0, "data": {"items": [], "fields": []}}, instance.url),
+        ])
+
+        self.assertEqual(instance.call("stk_mins"), ([], []))
 
         instance._rl.defer.assert_called_once_with(305)
 

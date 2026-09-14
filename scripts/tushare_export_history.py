@@ -12,6 +12,7 @@ import sqlite3
 import sys
 import threading
 import time
+import urllib.parse
 from pathlib import Path
 
 
@@ -24,6 +25,7 @@ from tushare_client import TushareClient  # noqa: E402
 from stock_mcp_client import (  # noqa: E402
     StockMcpClient,
     StockMcpUpstreamLimitError,
+    validate_stock_mcp_url,
 )
 
 
@@ -586,6 +588,24 @@ def _download_mcp_rows(codes, dates, retries, workers):
             yield fetch(code)
 
 
+def _stock_http_config():
+    raw_endpoint = os.environ.get("STOCK_MCP_URL", "")
+    endpoint = validate_stock_mcp_url(raw_endpoint)
+    token = urllib.parse.parse_qs(
+        endpoint.query,
+        keep_blank_values=True,
+        strict_parsing=True,
+    )["token"][0]
+    root = urllib.parse.urlunsplit((
+        endpoint.scheme,
+        endpoint.netloc,
+        "/",
+        "",
+        "",
+    ))
+    return token, root
+
+
 def export_minutes(args):
     manifest = load_manifest(args.manifest)
     if args.dry_run:
@@ -618,8 +638,14 @@ def export_minutes(args):
             else:
                 pending.append(code)
 
-        if args.minute_source == "tushare":
+        if args.minute_source in ("tushare", "http"):
+            token = None
+            endpoint = None
+            if args.minute_source == "http":
+                token, endpoint = _stock_http_config()
             client = TushareClient(
+                token=token,
+                url=endpoint,
                 max_per_min=args.max_per_min,
                 retries=args.retries,
             )
@@ -742,7 +768,15 @@ def export_minutes(args):
                     else "STOCK_MCP_STK_MINS"
                 )
                 if args.minute_source == "mcp"
-                else "TUSHARE_STK_MINS"
+                else (
+                    "TUSHARE_CACHE_PLUS_STOCK_HTTP_STK_MINS"
+                    if args.minute_source == "http" and cached
+                    else (
+                        "STOCK_HTTP_STK_MINS"
+                        if args.minute_source == "http"
+                        else "TUSHARE_STK_MINS"
+                    )
+                )
             ),
             "frequency": "5min",
             "dates": len(manifest),
@@ -794,8 +828,8 @@ def parse_args(argv=None):
     parser.add_argument("--retries", type=int, default=4)
     parser.add_argument(
         "--minute-source",
-        choices=("tushare", "mcp"),
-        default="mcp",
+        choices=("tushare", "mcp", "http"),
+        default="http",
     )
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--minimum-coverage", type=float, default=0.85)

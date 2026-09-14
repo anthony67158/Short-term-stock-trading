@@ -538,8 +538,8 @@ def parse_args():
     )
     parser.add_argument(
         "--minute-source",
-        choices=("tushare", "mcp"),
-        default="mcp",
+        choices=("tushare", "mcp", "http"),
+        default="http",
     )
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--minimum-coverage", type=float, default=0.85)
@@ -571,7 +571,7 @@ def parse_args():
     if not args.prepare_only:
         required_env = (
             "STOCK_MCP_URL"
-            if args.minute_source == "mcp"
+            if args.minute_source in ("mcp", "http")
             else "TUSHARE_TOKEN"
         )
         if not os.environ.get(required_env):

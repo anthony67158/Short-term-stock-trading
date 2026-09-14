@@ -253,6 +253,17 @@ class TushareHistoryExportTest(unittest.TestCase):
                 "--dry-run",
             ])
 
+    def test_http_source_derives_root_endpoint_and_token_from_mcp_url(self):
+        with patch.dict(os.environ, {
+            "STOCK_MCP_URL": (
+                "https://tx.xiaodefa.top/mcp?token=test-only-token"
+            ),
+        }):
+            token, endpoint = self.module._stock_http_config()
+
+        self.assertEqual(token, "test-only-token")
+        self.assertEqual(endpoint, "https://tx.xiaodefa.top/")
+
     def test_mcp_download_defers_one_failed_code_without_blocking_others(self):
         attempts = {}
 

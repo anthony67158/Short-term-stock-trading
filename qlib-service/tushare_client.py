@@ -28,7 +28,11 @@ import urllib.request
 
 DEFAULT_URL = os.environ.get("TUSHARE_URL", "https://ts.gyzcloud.top/api")
 # 网关接口与限速说明：https://ts.gyzcloud.top/docs
-ALLOWED_GATEWAY_HOSTS = frozenset({"ts.gyzcloud.top", "ts2.gyzcloud.top"})
+ALLOWED_GATEWAY_PATHS = {
+    "ts.gyzcloud.top": "/api",
+    "ts2.gyzcloud.top": "/api",
+    "tx.xiaodefa.top": "/",
+}
 SAFE_MAX_PER_MIN = 135
 DEFAULT_MAX_PER_MIN = 90
 RATE_LIMIT_COOLDOWN_SECONDS = 305
@@ -41,14 +45,14 @@ def validate_gateway_url(url):
     parsed = urllib.parse.urlparse(url.strip())
     if parsed.scheme != "https":
         raise ValueError("TUSHARE_URL 必须使用 HTTPS")
-    if parsed.hostname not in ALLOWED_GATEWAY_HOSTS:
+    if parsed.hostname not in ALLOWED_GATEWAY_PATHS:
         raise ValueError("TUSHARE_URL 主机不在允许列表")
     if parsed.port not in (None, 443):
         raise ValueError("TUSHARE_URL 不允许自定义端口")
     if parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("TUSHARE_URL 不得包含凭证、查询参数或片段")
-    if parsed.path != "/api" or parsed.params:
-        raise ValueError("TUSHARE_URL 路径必须为 /api")
+    if parsed.path != ALLOWED_GATEWAY_PATHS[parsed.hostname] or parsed.params:
+        raise ValueError("TUSHARE_URL 路径无效")
     return parsed.geturl()
 
 
@@ -139,6 +143,10 @@ class TushareClient:
                     d = obj.get("data") or {}
                     return (d.get("items") or []), (d.get("fields") or [])
                 msg = obj.get("msg") or ""
+                if "ip超限" in msg:
+                    self._rl.defer(RATE_LIMIT_COOLDOWN_SECONDS)
+                    last = RuntimeError(f"{api_name} 上游IP限制")
+                    continue
                 # 限频类错误 → 退避重试；其它业务错误直接抛
                 if "每分钟" in msg or "频率" in msg or "limit" in msg.lower():
                     time.sleep(2.0 * (i + 1))
