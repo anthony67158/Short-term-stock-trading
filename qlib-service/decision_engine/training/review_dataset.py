@@ -8,6 +8,25 @@ from ..heads.review_contract import FEATURE_NAMES, feature_vector
 
 
 DATASET_SCHEMA_VERSION = "opportunity-review-dataset.v2"
+MAIN_BOARD_CODE_PREFIXES = (
+    "000",
+    "001",
+    "002",
+    "003",
+    "600",
+    "601",
+    "603",
+    "605",
+)
+
+
+def is_main_board_code(value):
+    code = str(value or "")
+    return (
+        len(code) == 6
+        and code.isdigit()
+        and code.startswith(MAIN_BOARD_CODE_PREFIXES)
+    )
 
 
 def _event_group_id(outcome):
@@ -53,6 +72,9 @@ def build_opportunity_review_dataset(outcomes):
                 f"{str(outcome.get('route') or 'UNKNOWN')}"
             ),
             "eventGroupId": _event_group_id(outcome),
+            "mainBoardEligible": is_main_board_code(
+                outcome.get("code")
+            ),
             "hasReviewInput": isinstance(
                 outcome.get("reviewScoreInput"),
                 dict,
@@ -61,11 +83,18 @@ def build_opportunity_review_dataset(outcomes):
     events = []
     conditional = []
     excluded = 0
+    non_main_board_excluded = 0
     conditional_excluded = 0
     for outcome in source:
         if (
             not isinstance(outcome, dict)
-            or outcome.get("maturity") != "MATURED"
+            or not is_main_board_code(outcome.get("code"))
+        ):
+            excluded += 1
+            non_main_board_excluded += 1
+            continue
+        if (
+            outcome.get("maturity") != "MATURED"
             or outcome.get("fillStatus")
             not in {"FILLED", "TRIGGERED_UNFILLED"}
         ):
@@ -290,11 +319,16 @@ def build_opportunity_review_dataset(outcomes):
             "events": len(events),
             "samples": len(conditional),
             "opportunity_samples": len(opportunity),
+            "universe": {
+                "schema_version": "cn-main-board.v1",
+                "code_prefixes": list(MAIN_BOARD_CODE_PREFIXES),
+            },
             "dates": len({
                 str(item[1].get("tradeDate") or "")
                 for item in conditional
             }),
             "excluded": excluded,
+            "non_main_board_excluded": non_main_board_excluded,
             "conditional_excluded": conditional_excluded,
             "filled": sum(item[2] for item in events),
             "unfilled": sum(1 - item[2] for item in events),

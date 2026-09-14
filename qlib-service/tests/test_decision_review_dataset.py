@@ -253,6 +253,55 @@ class OpportunityReviewDatasetTest(unittest.TestCase):
         self.assertEqual(dataset["conditional_indices"].tolist(), [])
         self.assertEqual(dataset["y_net_r"].tolist(), [])
 
+    def test_training_dataset_excludes_non_main_board_codes(self):
+        def outcome(code):
+            return {
+                "maturity": "MATURED",
+                "fillStatus": "FILLED",
+                "tradeDate": "2026-09-01",
+                "code": code,
+                "decisionId": f"decision-{code}:pullback",
+                "parentDecisionId": f"decision-{code}",
+                "metrics": {"netR": 0.5},
+                "reviewScoreInput": {
+                    **review_input(),
+                    "code": code,
+                },
+                "entry": {"at": 1_788_320_120_000},
+                "exit": {"at": 1_788_406_400_000},
+                "labelSource": "HISTORICAL_SIMULATION",
+                "exitContractVersion": "trailing-exit.v1",
+            }
+
+        dataset = build_opportunity_review_dataset([
+            outcome("000001"),
+            outcome("605001"),
+            outcome("300001"),
+            outcome("688001"),
+            outcome("830001"),
+        ])
+
+        self.assertEqual(
+            dataset["codes"].tolist(),
+            ["000001", "605001"],
+        )
+        self.assertEqual(
+            dataset["codes_all"].tolist(),
+            ["000001", "605001"],
+        )
+        self.assertEqual(
+            dataset["codes_opportunity"].tolist(),
+            ["000001", "605001"],
+        )
+        self.assertEqual(
+            dataset["summary"]["non_main_board_excluded"],
+            3,
+        )
+        self.assertEqual(
+            dataset["summary"]["universe"]["schema_version"],
+            "cn-main-board.v1",
+        )
+
     def test_pending_event_never_enters_a_supervised_target(self):
         pending = {
             "decisionId": "decision-pending:immediate",
