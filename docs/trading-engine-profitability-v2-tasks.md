@@ -22,14 +22,14 @@
 
 **Estimated scope:** XS
 
-### Task 2：冻结复核特征V2合同
+### Task 2：冻结复核特征V2合同（已完成）
 
 **Description:** 扩充特征合同，加入价格风险、费用、交易规则和每个可选特征的缺失掩码。
 
 **Acceptance criteria:**
-- [ ] JSON合同包含版本、稳定顺序、单位和必需/可选说明。
-- [ ] 缺失值与真实0在编码后不同。
-- [ ] 不修改通用36维`/predict`合同。
+- [x] JSON合同包含版本、稳定顺序、单位和必需/可选说明。
+- [x] 缺失值与真实0在编码后不同。
+- [x] 不修改通用36维`/predict`合同。
 
 **Verification:** `node --test test/opportunity-review-features.test.js`
 

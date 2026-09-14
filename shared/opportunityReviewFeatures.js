@@ -1,6 +1,9 @@
 export const OPPORTUNITY_REVIEW_FEATURE_SCHEMA_VERSION =
   'opportunity-review-feature.v1'
 
+export const OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION =
+  'opportunity-review-feature.v2'
+
 export const OPPORTUNITY_REVIEW_FEATURE_NAMES = Object.freeze([
   'observationBars',
   'changeFromTriggerPct',
@@ -21,6 +24,23 @@ export const OPPORTUNITY_REVIEW_FEATURE_NAMES = Object.freeze([
   'direction_PULLBACK',
   'direction_EXIT',
   'direction_UNKNOWN',
+])
+
+export const OPPORTUNITY_REVIEW_V2_FEATURE_NAMES = Object.freeze([
+  ...OPPORTUNITY_REVIEW_FEATURE_NAMES,
+  'entryPrice',
+  'stopPrice',
+  'priceRiskPerShare',
+  'stopDistancePct',
+  'feeRateBps',
+  'slippageBps',
+  'lotSize',
+  'tPlusOne',
+  'volumeContinuationMissing',
+  'vwapMissing',
+  'initialPFillMissing',
+  'initialPWinGivenFillMissing',
+  'initialExpectedNetRMissing',
 ])
 
 function finite(value) {
@@ -155,6 +175,69 @@ export function buildOpportunityReviewFeatureInput({
     formulaId: String(formulaId || 'TRIGGER_REVIEW').slice(0, 60),
     factors: Object.fromEntries(
       OPPORTUNITY_REVIEW_FEATURE_NAMES.map((name) => [
+        name,
+        rounded(factors[name]),
+      ]),
+    ),
+  }
+}
+
+export function buildOpportunityReviewFeatureInputV2({
+  priceContract,
+  ...input
+} = {}) {
+  const base = buildOpportunityReviewFeatureInput(input)
+  const entryPrice = finite(priceContract?.entryPrice)
+  const stopPrice = finite(priceContract?.stopPrice)
+  const feeRateBps = finite(priceContract?.feeRateBps)
+  const slippageBps = finite(priceContract?.slippageBps)
+  const lotSize = finite(priceContract?.lotSize)
+  if (
+    !base
+    || !(entryPrice > 0)
+    || !(stopPrice > 0)
+    || !(entryPrice > stopPrice)
+    || !(feeRateBps >= 0)
+    || !(slippageBps >= 0)
+    || !Number.isInteger(lotSize)
+    || !(lotSize > 0)
+    || typeof priceContract?.tPlusOne !== 'boolean'
+  ) return null
+
+  const rows = Array.isArray(input.rows) ? input.rows : []
+  const volumeMissing = rows.some(
+    (item) => finite(item?.volume) == null,
+  )
+  const vwapMissing = rows.some(
+    (item) => !(finite(item?.vwap ?? item?.avg) > 0),
+  )
+  const initialPFillMissing = finite(input.initialScore?.pFill) == null
+  const initialPWinMissing =
+    finite(input.initialScore?.pWinGivenFill) == null
+  const initialExpectedMissing =
+    finite(input.initialScore?.expectedNetR) == null
+  const priceRiskPerShare = entryPrice - stopPrice
+  const factors = {
+    ...base.factors,
+    entryPrice,
+    stopPrice,
+    priceRiskPerShare,
+    stopDistancePct: priceRiskPerShare / entryPrice * 100,
+    feeRateBps,
+    slippageBps,
+    lotSize,
+    tPlusOne: priceContract.tPlusOne ? 1 : 0,
+    volumeContinuationMissing: volumeMissing ? 1 : 0,
+    vwapMissing: vwapMissing ? 1 : 0,
+    initialPFillMissing: initialPFillMissing ? 1 : 0,
+    initialPWinGivenFillMissing: initialPWinMissing ? 1 : 0,
+    initialExpectedNetRMissing: initialExpectedMissing ? 1 : 0,
+  }
+  return {
+    ...base,
+    schemaVersion: OPPORTUNITY_REVIEW_V2_FEATURE_SCHEMA_VERSION,
+    factors: Object.fromEntries(
+      OPPORTUNITY_REVIEW_V2_FEATURE_NAMES.map((name) => [
         name,
         rounded(factors[name]),
       ]),
