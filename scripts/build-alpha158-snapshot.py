@@ -72,11 +72,12 @@ def _momentum_by_code(percentiles, codes, dates, *, lag=5):
 
 
 def _rolling_rank_ic(scores, labels, dates, *, window):
-    """每个交易日的滚动 RankIC：过去 window 个交易日的日度 RankIC 均值。
+    """每个交易日的滚动 RankIC：此前 window 个交易日的日度 RankIC 均值。
 
     先算每个交易日截面的日度 RankIC(预测 vs 真实标签)，再对交易日序列做
-    尾部 window 均值，映射回每个样本所在日。纯函数、确定性；早期不足 window
-    时用已有日均值，全缺时为 0。
+    严格滞后一日的尾部 window 均值，映射回每个样本所在日。当天标签在决策时
+    尚未成熟，绝不能进入当天特征；早期不足 window 时用此前已有日均值，
+    无历史时为 0。
     """
     unique_dates = sorted(set(dates.tolist()))
     daily_ic = {}
@@ -94,8 +95,8 @@ def _rolling_rank_ic(scores, labels, dates, *, window):
     rolled = {}
     seq = [daily_ic[d] for d in unique_dates]
     for pos, d in enumerate(unique_dates):
-        lo = max(0, pos - window + 1)
-        vals = [v for v in seq[lo: pos + 1] if v == v]  # 过滤 nan
+        lo = max(0, pos - window)
+        vals = [v for v in seq[lo:pos] if v == v]  # 严格排除当天
         rolled[d] = float(np.mean(vals)) if vals else 0.0
     return np.array([rolled[d] for d in dates], dtype=np.float64)
 

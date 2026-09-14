@@ -60,19 +60,35 @@ class AlphaSnapshotPureFnTest(unittest.TestCase):
         self.assertAlmostEqual(mom[3], -0.1)
 
     def test_rolling_rank_ic_perfect_alignment_is_one(self):
-        # 每日预测与标签完全同序 → 日度RankIC=1，滚动均值=1
+        # 每日预测与标签完全同序；首日无历史为0，之后只看此前日期为1。
         dates = np.array(sum([[f"d{d}"] * 6 for d in range(5)], []))
         scores = np.tile(np.arange(6, dtype=float), 5)
         labels = np.tile(np.arange(6, dtype=float), 5)  # 同序
         ic = snap._rolling_rank_ic(scores, labels, dates, window=3)
-        self.assertTrue(np.allclose(ic, 1.0))
+        self.assertTrue(np.allclose(ic[:6], 0.0))
+        self.assertTrue(np.allclose(ic[6:], 1.0))
 
     def test_rolling_rank_ic_reverse_is_minus_one(self):
         dates = np.array(sum([[f"d{d}"] * 6 for d in range(3)], []))
         scores = np.tile(np.arange(6, dtype=float), 3)
         labels = np.tile(np.arange(6, dtype=float)[::-1], 3)  # 反序
         ic = snap._rolling_rank_ic(scores, labels, dates, window=2)
-        self.assertTrue(np.allclose(ic, -1.0))
+        self.assertTrue(np.allclose(ic[:6], 0.0))
+        self.assertTrue(np.allclose(ic[6:], -1.0))
+
+    def test_rolling_rank_ic_does_not_use_current_day_label(self):
+        dates = np.array(sum([[f"d{d}"] * 6 for d in range(3)], []))
+        scores = np.tile(np.arange(6, dtype=float), 3)
+        baseline = np.tile(np.arange(6, dtype=float), 3)
+        changed = baseline.copy()
+        changed[6:12] = changed[6:12][::-1]
+
+        left = snap._rolling_rank_ic(scores, baseline, dates, window=2)
+        right = snap._rolling_rank_ic(scores, changed, dates, window=2)
+
+        # d1 的标签变化只能从 d2 起生效，不能污染 d1 自身特征。
+        self.assertTrue(np.allclose(left[6:12], right[6:12]))
+        self.assertFalse(np.allclose(left[12:18], right[12:18]))
 
     def test_rolling_rank_ic_small_cross_section_is_zero(self):
         # 每日样本<5 → 日度IC为nan → 全缺回退0
