@@ -581,6 +581,8 @@ def parse_args():
     )
     parser.add_argument("--from-chunk", type=int, default=1)
     args = parser.parse_args()
+    if not 1 <= args.max_per_min <= 120:
+        parser.error("--max-per-min 必须在1到120之间")
     for field in ("data_from", "data_to"):
         value = getattr(args, field)
         if value is None:

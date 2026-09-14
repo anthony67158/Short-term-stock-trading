@@ -2,6 +2,7 @@ import importlib.util
 import gzip
 import json
 import os
+import sys
 import tempfile
 import unittest
 from argparse import Namespace
@@ -19,6 +20,15 @@ _SPEC.loader.exec_module(runner)
 
 
 class V4TushareBackfillPlanTest(unittest.TestCase):
+    def test_cli_rejects_rate_above_downloader_limit(self):
+        with patch.object(
+            sys,
+            "argv",
+            ["run_v4_tushare_backfill.py", "--max-per-min", "121"],
+        ):
+            with self.assertRaises(SystemExit):
+                runner.parse_args()
+
     def test_download_command_forwards_retry_budget(self):
         command = runner._download_command(
             Namespace(
