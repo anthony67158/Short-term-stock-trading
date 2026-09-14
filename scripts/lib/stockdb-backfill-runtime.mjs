@@ -393,6 +393,7 @@ export function settlePendingHistoricalEvents({
   pending,
   barsByCode,
   evaluatedAt,
+  tradingDates = [],
 } = {}) {
   const matured = []
   const remaining = []
@@ -401,6 +402,14 @@ export function settlePendingHistoricalEvents({
       ...item,
       bars: barsByCode.get(item.event.code) || [],
       evaluatedAt,
+      expectedEntryDate: (() => {
+        if (String(item.event.mode || '').toUpperCase() === 'INTRADAY') {
+          return item.event.tradeDate
+        }
+        const signal = String(item.event.tradeDate || '').replaceAll('-', '')
+        const index = tradingDates.indexOf(signal)
+        return index >= 0 ? tradingDates[index + 1] : null
+      })(),
     })
     if (outcome.maturity === 'MATURED') matured.push(outcome)
     else remaining.push(item)

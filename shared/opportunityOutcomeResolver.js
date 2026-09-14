@@ -209,7 +209,7 @@ function terminalWithoutFill(base, {
   }
 }
 
-function entryWindow(event, rows, evaluatedAt) {
+function entryWindow(event, rows, evaluatedAt, expectedEntryDate) {
   const mode = String(event?.mode || '').toUpperCase()
   const signalDate = dateKey(event?.tradeDate)
   const signalAt = finite(event?.asOf)
@@ -235,6 +235,21 @@ function entryWindow(event, rows, evaluatedAt) {
   }
   const future = rows.filter((bar) => bar.date > signalDate)
   const firstDate = future[0]?.date
+  const expected = dateKey(expectedEntryDate)
+  if (
+    expected
+    && (
+      (firstDate && firstDate !== expected)
+      || (!firstDate && beijingDateKey(evaluatedAt) >= expected)
+    )
+  ) {
+    return {
+      rows: [],
+      complete: true,
+      requiresTimestamp: false,
+      dataIncomplete: true,
+    }
+  }
   const firstSession = firstDate
     ? future.filter((bar) => bar.date === firstDate)
     : []
@@ -364,6 +379,7 @@ export function resolveOpportunityOutcome({
   slippageBps = 5,
   feePolicy = A_SHARE_STANDARD_FEE_POLICY,
   postTriggerObservationMs = 0,
+  expectedEntryDate = null,
 } = {}) {
   const timestamp = finite(evaluatedAt)
   if (!(timestamp > 0)) throw new Error('机会结果结算时间无效')
@@ -399,7 +415,12 @@ export function resolveOpportunityOutcome({
       .filter((bar) => bar.granularity === 'DAILY_FALLBACK')
       .map((bar) => bar.date),
   ).size
-  const window = entryWindow(event, rows, timestamp)
+  const window = entryWindow(
+    event,
+    rows,
+    timestamp,
+    expectedEntryDate,
+  )
   base.observations.entryWindowBars = window.rows.length
   if (window.dataIncomplete) {
     return terminalWithoutFill(base, {

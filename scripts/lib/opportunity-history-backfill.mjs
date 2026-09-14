@@ -222,6 +222,7 @@ export function settleHistoricalEvent({
   event,
   bars,
   evaluatedAt,
+  expectedEntryDate,
 } = {}) {
   const scoreInput = buildOpportunityScoreInput({ event, batch })
   const lotSize = /^68[89]/.test(String(event.code || '')) ? 200 : 100
@@ -232,6 +233,7 @@ export function settleHistoricalEvent({
     quantity: lotSize,
     lotSize,
     postTriggerObservationMs: REVIEW_OBSERVATION_MS,
+    expectedEntryDate,
   })
   const reviewScoreInput = reviewFeatureInput(event, resolved, bars)
   const outcome = alignReviewRiskBasis(resolved, reviewScoreInput)

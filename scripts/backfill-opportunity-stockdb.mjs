@@ -525,6 +525,7 @@ async function main() {
       pending,
       barsByCode,
       evaluatedAt: beijingSlotTimestamp(tradeDate, '1600'),
+      tradingDates: replayDates,
     })
     outcomes.push(...settled.matured)
     pending = settled.pending
