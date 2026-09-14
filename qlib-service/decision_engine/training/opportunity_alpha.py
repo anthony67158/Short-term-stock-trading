@@ -1,4 +1,4 @@
-"""Causal stock-day targets for an Alpha158 opportunity prior."""
+"""Causal best-action stock-day targets for an Alpha158 opportunity prior."""
 
 from __future__ import annotations
 
@@ -194,20 +194,24 @@ def aggregate_stock_day_targets(dataset, available_dates):
             for index in indices
             if fills[index]
         ]
-        candidates = filled_indices or indices
-        selected = max(
-            candidates,
-            key=lambda index: (
-                rewards[index],
-                stress_rewards[index],
-                -index,
-            ),
+        selected = (
+            max(
+                filled_indices,
+                key=lambda index: (
+                    rewards[index],
+                    stress_rewards[index],
+                    -index,
+                ),
+            )
+            if filled_indices
+            else None
         )
+        take_path = selected is not None and rewards[selected] > 0
         rows.append((
             feature_date,
             code,
-            rewards[selected],
-            stress_rewards[selected],
+            rewards[selected] if take_path else 0.0,
+            stress_rewards[selected] if take_path else 0.0,
             min(starts[indices]),
             max(ends[indices]),
             len(indices),

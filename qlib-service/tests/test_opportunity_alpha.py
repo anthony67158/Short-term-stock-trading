@@ -73,7 +73,7 @@ class OpportunityAlphaTargetTest(unittest.TestCase):
         self.assertEqual(result["path_counts"].tolist(), [3])
         self.assertEqual(result["filled_path_counts"].tolist(), [2])
 
-    def test_filled_loss_is_not_hidden_by_an_unfilled_path(self):
+    def test_no_trade_floor_beats_only_losing_filled_paths(self):
         dataset = {
             "X_opportunity": np.zeros((2, 1)),
             "dates_opportunity": np.asarray([
@@ -97,7 +97,7 @@ class OpportunityAlphaTargetTest(unittest.TestCase):
             ["20260105"],
         )
 
-        self.assertEqual(result["y_best_net_r"].tolist(), [-1.0])
+        self.assertEqual(result["y_best_net_r"].tolist(), [0.0])
         self.assertEqual(result["filled_path_counts"].tolist(), [1])
 
     def test_percentile_and_momentum_are_cross_sectional_and_per_stock(self):

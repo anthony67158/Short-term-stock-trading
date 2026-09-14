@@ -241,7 +241,7 @@ def build_snapshot(
         "schemaVersion": SNAPSHOT_SCHEMA_VERSION,
         "generatedAt": int(time.time() * 1000),
         "signalFeatureSchema": SIGNAL_FEATURE_SCHEMA,
-        "target": "BEST_REALIZED_REVIEW_PATH_NET_R",
+        "target": "BEST_REVIEW_ACTION_NET_R_WITH_NO_TRADE_FLOOR",
         "causalPolicy": "LABEL_END_BEFORE_SCORE_DAY",
         "warmupDays": warmup_days,
         "blockDays": block_days,
