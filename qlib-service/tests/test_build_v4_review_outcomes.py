@@ -100,6 +100,33 @@ class BuildV4ReviewOutcomesTest(unittest.TestCase):
             "PREVIOUS_TRADING_DAY",
         )
 
+    def test_complete_v3_review_input_is_extended_without_reordering(self):
+        source = outcome()
+        source["reviewScoreInput"]["schemaVersion"] = builder.V3_SCHEMA
+        source["reviewScoreInput"]["factors"] = {
+            **source["reviewScoreInput"]["factors"],
+            **{
+                f"initial_{name}": value
+                for name, value in source["scoreInput"]["factors"].items()
+            },
+        }
+
+        value, reason = builder.augment_outcome(
+            source,
+            {("20260910", "600001"): alpha("20260910")},
+            ["20260910"],
+        )
+
+        self.assertIsNone(reason)
+        self.assertEqual(
+            tuple(value["reviewScoreInput"]["factors"]),
+            builder.FEATURE_NAMES_V4,
+        )
+        self.assertEqual(
+            value["context"]["v4Bootstrap"]["baseFeatureSchema"],
+            builder.V3_SCHEMA,
+        )
+
     def test_missing_alpha_is_neutral_with_missing_masks(self):
         value, reason = builder.augment_outcome(
             outcome(),

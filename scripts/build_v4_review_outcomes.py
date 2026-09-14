@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_DIR = ROOT / "qlib-service" / "contracts"
 V4_SCHEMA = "opportunity-review-feature.v4"
 V2_SCHEMA = "opportunity-review-feature.v2"
+V3_SCHEMA = "opportunity-review-feature.v3"
 SCORE_SCHEMA = "opportunity-score-feature.v6"
 OUTPUT_SCHEMA = "opportunity-review-v4-bootstrap.v1"
 
@@ -43,6 +44,10 @@ FEATURE_NAMES_V4 = (
     *BASE_NAMES,
     *(f"initial_{name}" for name in INITIAL_NAMES),
     *(f"alpha_{name}" for name in ALPHA_NAMES),
+)
+FEATURE_NAMES_V3 = (
+    *BASE_NAMES,
+    *(f"initial_{name}" for name in INITIAL_NAMES),
 )
 
 
@@ -145,12 +150,18 @@ def augment_outcome(outcome, alpha_by_key, alpha_dates):
         return None, "NOT_MATURED"
     review = outcome.get("reviewScoreInput")
     initial = outcome.get("scoreInput")
-    if (
-        not isinstance(review, dict)
-        or review.get("schemaVersion") != V2_SCHEMA
-        or tuple((review.get("factors") or {}).keys()) != BASE_NAMES
-    ):
-        return None, "REVIEW_V2_INCOMPLETE"
+    if not isinstance(review, dict):
+        return None, "REVIEW_INPUT_MISSING"
+    review_schema = review.get("schemaVersion")
+    review_factors = review.get("factors") or {}
+    if review_schema == V2_SCHEMA:
+        if tuple(review_factors) != BASE_NAMES:
+            return None, "REVIEW_V2_INCOMPLETE"
+    elif review_schema == V3_SCHEMA:
+        if tuple(review_factors) != FEATURE_NAMES_V3:
+            return None, "REVIEW_V3_INCOMPLETE"
+    else:
+        return None, "REVIEW_SCHEMA_UNSUPPORTED"
     if (
         not isinstance(initial, dict)
         or initial.get("schemaVersion") != SCORE_SCHEMA
@@ -166,15 +177,26 @@ def augment_outcome(outcome, alpha_by_key, alpha_dates):
     code = str(outcome.get("code") or "")
     alpha_row = alpha_by_key.get((alpha_date, code)) if alpha_date else None
     alpha_values, alpha_available = _alpha_values(alpha_row)
-    factors = _ordered_factors(
-        review["factors"],
-        initial["factors"],
-        alpha_values,
-    )
+    if review_schema == V3_SCHEMA:
+        factors = {
+            **review_factors,
+            **{
+                f"alpha_{name}": alpha_values[name]
+                for name in ALPHA_NAMES
+            },
+        }
+        if tuple(factors) != FEATURE_NAMES_V4:
+            raise ValueError("V4特征顺序与合同不一致")
+    else:
+        factors = _ordered_factors(
+            review_factors,
+            initial["factors"],
+            alpha_values,
+        )
     context = dict(outcome.get("context") or {})
     context["v4Bootstrap"] = {
         "schemaVersion": OUTPUT_SCHEMA,
-        "baseFeatureSchema": V2_SCHEMA,
+        "baseFeatureSchema": review_schema,
         "initialFeatureSchema": SCORE_SCHEMA,
         "alphaFeatureSchema": "opportunity-alpha158-signal.v1",
         "alphaAsOfDate": alpha_date,
