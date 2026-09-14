@@ -5,6 +5,7 @@ from collections import Counter
 import numpy as np
 
 from ..heads.review_contract import FEATURE_NAMES, feature_vector
+from .opportunity_reward import cost_aware_opportunity_reward
 
 
 DATASET_SCHEMA_VERSION = "opportunity-review-dataset.v2"
@@ -176,7 +177,15 @@ def build_opportunity_review_dataset(outcomes):
         opportunity.append((
             event[0],
             event[1],
-            float(conditional_row[3]) if filled else 0.0,
+            (
+                cost_aware_opportunity_reward(
+                    conditional_row[1].get("metrics"),
+                    filled=True,
+                    base_r=float(conditional_row[3]),
+                )
+                if filled
+                else 0.0
+            ),
             event[3],
             conditional_row[5] if filled else event[4],
         ))
