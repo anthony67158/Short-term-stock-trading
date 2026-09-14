@@ -5,14 +5,14 @@
 
 ## Phase 1：合同与价格绑定
 
-### Task 1：记录ADR-006
+### Task 1：记录ADR-006（已完成）
 
 **Description:** 固化复核V2语义、风险档、四段时间用途和一次性最终确认规则。
 
 **Acceptance criteria:**
-- [ ] ADR明确`pFill`、条件收益、成交前机会价值、Q10和R分母。
-- [ ] ADR明确三种风险档及生产授权边界。
-- [ ] ADR明确最终确认集失败后不得在同段重选。
+- [x] ADR明确`pFill`、条件收益、成交前机会价值、Q10和R分母。
+- [x] ADR明确三种风险档及生产授权边界。
+- [x] ADR明确最终确认集失败后不得在同段重选。
 
 **Verification:** `git diff --check`
 
