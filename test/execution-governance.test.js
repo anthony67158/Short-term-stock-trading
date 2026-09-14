@@ -105,6 +105,13 @@ test('真实成交归因区分决策滑点、执行滑点、VWAP偏差和费用'
     referencePrice: 10,
     triggerPrice: 10.05,
     createdAt: now,
+    modelRanking: {
+      schemaVersion: 'model-ranking-evidence.v1',
+      v3RankingScore: 0.6,
+      alpha158Score: 0.9,
+      alpha158Weight: 0.2,
+      jointScore: 0.66,
+    },
   }, {
     fills: [
       {
@@ -135,6 +142,7 @@ test('真实成交归因区分决策滑点、执行滑点、VWAP偏差和费用'
   assert.equal(result.vwapDeviationBps, 39.76)
   assert.equal(result.totalFees, 10)
   assert.equal(result.recordDelayMs, 120000)
+  assert.equal(result.modelRanking.jointScore, 0.66)
 })
 
 test('真实价格路径计算持有时长MFE、MAE与盈利捕获率', () => {

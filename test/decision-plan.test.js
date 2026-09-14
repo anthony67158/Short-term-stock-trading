@@ -82,6 +82,57 @@ test('核定结果同步正文、复核终态及执行触发条件，不能保�
   assert.equal(advice.planQty, 20)
 })
 
+test('决策计划冻结V3与Alpha158联合排序证据', () => {
+  const opportunityScore = {
+    state: 'READY',
+    usagePolicy: 'DIRECT',
+    modelVersion: 'decision-v3',
+    rankingScore: 0.6,
+  }
+  const plan = compileDecisionPlan({
+    mode: 'buy_advice',
+    advice: {
+      action: '立即买入',
+      planQty: 2,
+      buyPrice: 10,
+      stopPrice: 9,
+      targetPrice: 12.1,
+    },
+    payload: {
+      ...payload,
+      opportunityScore,
+      decisionPricePlan: {
+        opportunityScore,
+        alpha158Signal: {
+          state: 'ACTIVE',
+          modelVersion: 'alpha158-v1',
+          percentile: 0.9,
+        },
+        jointRanking: {
+          v3Score: 0.6,
+          alpha158Score: 0.9,
+          alpha158Weight: 0.2,
+          jointScore: 0.66,
+          alpha158ModelVersion: 'alpha158-v1',
+        },
+      },
+    },
+    evidenceSnapshot: snapshot,
+    now,
+  })
+
+  assert.deepEqual(plan.modelRanking, {
+    schemaVersion: 'model-ranking-evidence.v1',
+    v3ModelVersion: 'decision-v3',
+    v3RankingScore: 0.6,
+    alpha158ModelVersion: 'alpha158-v1',
+    alpha158State: 'ACTIVE',
+    alpha158Score: 0.9,
+    alpha158Weight: 0.2,
+    jointScore: 0.66,
+  })
+})
+
 test('隔夜预案跨周末有效至下一交易日收盘，即时指令不跨午休', () => {
   const advice = { action: '立即买入', planQty: 2, buyPrice: 10,
     stopPrice: 9, targetPrice: 12.1 }

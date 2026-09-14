@@ -268,6 +268,9 @@ export function compileExecutionPlan({
           updatedAt: Number(now),
         }
       : null,
+    modelRanking: decisionPlan.modelRanking
+      ? structuredClone(decisionPlan.modelRanking)
+      : null,
     code: String(code || ''),
     name: String(name || code || ''),
     action,

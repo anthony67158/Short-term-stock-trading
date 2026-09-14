@@ -90,6 +90,33 @@ function text(value, maximum = 320) {
     .slice(0, maximum)
 }
 
+function modelRankingEvidence(payload = {}) {
+  const source = payload.decisionPricePlan || {}
+  const score = source.opportunityScore || payload.opportunityScore || {}
+  const joint = source.jointRanking || {}
+  const alpha = source.alpha158Signal || {}
+  return {
+    schemaVersion: 'model-ranking-evidence.v1',
+    v3ModelVersion: text(score.modelVersion, 100) || null,
+    v3RankingScore: round(
+      joint.v3Score ?? score.rankingScore,
+      6,
+    ),
+    alpha158ModelVersion:
+      text(joint.alpha158ModelVersion ?? alpha.modelVersion, 100) || null,
+    alpha158State: text(alpha.state, 20) || 'UNAVAILABLE',
+    alpha158Score: round(
+      joint.alpha158Score ?? alpha.percentile,
+      6,
+    ),
+    alpha158Weight: round(joint.alpha158Weight, 6) || 0,
+    jointScore: round(
+      joint.jointScore ?? score.rankingScore,
+      6,
+    ),
+  }
+}
+
 function adaptiveResearchPrior(actionPolicy = {}, tactical = {}) {
   if (actionPolicy.riskTier !== 'PROBE') return null
   const signalScore = Math.max(0, finite(actionPolicy.signalScore) || 0)
@@ -1013,6 +1040,7 @@ export function compileDecisionPlan({
     expectancyState: tradeExpectancy.state,
     expectancyModelVersion: tradeExpectancy.modelVersion,
     expectancyGate: tradeExpectancy.gate?.state,
+    modelRanking: modelRankingEvidence(payload),
     exitKind: text(advice.exitManagement?.kind, 40),
     priceLevels: priceContract.levels.map((level) => ({
       key: level.key,
@@ -1114,6 +1142,7 @@ export function compileDecisionPlan({
           }
         : null,
     opportunityLifecycle,
+    modelRanking: identity.modelRanking,
     manualConfirmationOnly: probeRequested,
     opportunity: payload.sectorOpportunity?.matched === true
       ? {

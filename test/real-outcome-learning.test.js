@@ -82,6 +82,12 @@ test('真实收益画像只统计已关联且完成验证的真实费后卖出',
         outcome: { pnl: 999, validationComplete: true },
       },
     ],
+    executionAttributions: [{
+      transactionIds: ['e1'],
+      modelRanking: {
+        alpha158Weight: 0.2,
+      },
+    }],
   }
 
   const profile = buildRealOutcomeLearning(data, { minimumSamples: 2 })
@@ -96,6 +102,10 @@ test('真实收益画像只统计已关联且完成验证的真实费后卖出',
   assert.equal(profile.groups.tacticalStates[0].key, 'READY')
   assert.equal(profile.groups.tacticalHorizons[0].key, 'INTRADAY')
   assert.equal(profile.groups.tacticalTriggerPaths[0].key, 'DIRECT')
+  assert.deepEqual(
+    profile.groups.rankingModes.map((item) => item.key).sort(),
+    ['V3_ALPHA158', 'V3_ONLY'],
+  )
   assert.equal(profile.excluded.unexecutedAdviceOutcomes, 1)
   assert.equal(profile.excluded.incompleteExecutions, 1)
   assert.equal(profile.excluded.unlinkedExecutions, 1)

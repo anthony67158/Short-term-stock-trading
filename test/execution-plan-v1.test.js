@@ -17,6 +17,13 @@ function decision(overrides = {}) {
     action: 'REDUCE',
     actionLabel: '减仓',
     actionability: 'READY',
+    modelRanking: {
+      schemaVersion: 'model-ranking-evidence.v1',
+      v3RankingScore: 0.6,
+      alpha158Score: 0.9,
+      alpha158Weight: 0.2,
+      jointScore: 0.66,
+    },
     opportunityLifecycle: {
       schemaVersion: 'opportunity-lifecycle.v1',
       code: '600000',
@@ -61,6 +68,7 @@ test('execution-plan.v1绑定决策、账户版本、证据和有效期', () => 
   assert.equal(plan.executionMode, 'MANUAL_ONLY')
   assert.equal(plan.brokerOrderAllowed, false)
   assert.equal(plan.requiresManualFill, true)
+  assert.equal(plan.modelRanking.jointScore, 0.66)
   assert.equal(plan.decisionId, 'decision.demo')
   assert.equal(plan.accountRevision, 7)
   assert.equal(plan.evidenceAsOf, new Date(now).toISOString())

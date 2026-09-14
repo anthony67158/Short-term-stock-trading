@@ -1,6 +1,7 @@
 import { fetchQuotes } from './quote.js'
 import { fetchResilientKline, fetchTrendsTx } from './stock_detail.js'
 import { fetchResilientStockFund } from './_stock_fund.js'
+import { fetchAlpha158Snapshot } from './_alpha158_snapshot.js'
 import { loadSectorOpportunity } from './_sector_opportunity.js'
 import {
   fetchDecisionReviewScores,
@@ -48,6 +49,10 @@ import {
 } from '../shared/trailingExit.js'
 import { isTriggeredReviewEvent } from '../shared/triggeredReviewDecision.js'
 import { allocationMarketFrom } from '../shared/targetPositionModel.js'
+import {
+  alpha158SignalFor,
+  buildJointOpportunityRanking,
+} from '../shared/alpha158Signal.js'
 
 async function bounded(promise, fallback, milliseconds = 7000) {
   let timer
@@ -278,6 +283,7 @@ export async function evaluateDecision({
   reviewScore = (inputs) =>
     fetchDecisionReviewScores(inputs, { timeoutMs: 8000 }),
   reviewEvent = null,
+  alpha158Snapshot: suppliedAlpha158Snapshot,
 }) {
   const quoteMap = Object.fromEntries(quotes.map((item) => [item.code, item]))
   const rawQuote = quoteMap[code]
@@ -302,6 +308,14 @@ export async function evaluateDecision({
   const evidenceTradeDate = quote.live
     ? quote.tradeDate
     : candles.at(-1)?.date || quote.tradeDate
+  const alpha158Snapshot = suppliedAlpha158Snapshot === undefined
+    ? await bounded(fetchAlpha158Snapshot({ now }), null, 1200)
+    : suppliedAlpha158Snapshot
+  const alpha158Signal = alpha158SignalFor(
+    alpha158Snapshot,
+    code,
+    { expectedDate: evidenceTradeDate },
+  )
   const validatedFund = currentFundEvidence(
     fund,
     evidenceTradeDate,
@@ -336,6 +350,7 @@ export async function evaluateDecision({
     strategyPatternPolicy: strategyPatternCapabilities.playbookBlend
       ? 'ACTIVE'
       : 'RESEARCH',
+    alpha158Signal,
   }
   const playbook = scoreOpportunityPlaybooks(candidate, context).selected
   let plans = buildAdaptivePricePlans({
@@ -469,6 +484,7 @@ export async function evaluateDecision({
             plan.entryPlan.price * input.factors.stopDistancePct / 100,
         },
       },
+      alpha158Signal,
     }
   }))
   // Budget every path on the same account snapshot before comparing them.
@@ -500,6 +516,10 @@ export async function evaluateDecision({
     })
     return {
       ...plan,
+      jointRanking: buildJointOpportunityRanking({
+        opportunityScore: plan.opportunityScore,
+        alpha158Signal: plan.alpha158Signal,
+      }),
       targetPosition: hypothetical.targetPosition,
     }
   }

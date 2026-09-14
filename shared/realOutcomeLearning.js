@@ -264,6 +264,11 @@ export function buildRealOutcomeLearning(
       tacticalTriggerPath: String(
         recommendation.tacticalTriggerPath || 'unknown',
       ),
+      rankingMode: (
+        Number(attribution?.modelRanking?.alpha158Weight) > 0
+          ? 'V3_ALPHA158'
+          : 'V3_ONLY'
+      ),
       holdingDurationMinutes: holdingDurationMinutes == null
         ? null
         : rounded(holdingDurationMinutes, 1),
@@ -337,6 +342,11 @@ export function buildRealOutcomeLearning(
       modeTacticalStates: grouped(
         records,
         (record) => `${record.mode}|${record.tacticalState}`,
+        threshold,
+      ),
+      rankingModes: grouped(
+        records,
+        (record) => record.rankingMode,
         threshold,
       ),
     },

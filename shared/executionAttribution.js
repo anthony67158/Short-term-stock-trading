@@ -187,6 +187,9 @@ export function attributeExecution(plan, {
     planId: String(plan.planId || ''),
     decisionId: String(plan.decisionId || ''),
     marketRegime: String(plan.marketRegime || ''),
+    modelRanking: plan.modelRanking
+      ? structuredClone(plan.modelRanking)
+      : null,
     code: String(plan.code || ''),
     action: String(plan.action || ''),
     executionMethod: String(plan.executionMethod?.type || ''),
@@ -255,11 +258,17 @@ export function aggregateExecutionAttribution(records = []) {
   )
   const groups = new Map()
   for (const record of eligible) {
+    const rankingMode = (
+      Number(record.modelRanking?.alpha158Weight) > 0
+        ? 'V3_ALPHA158'
+        : 'V3_ONLY'
+    )
     const key = [
       record.marketRegime || 'UNKNOWN',
       record.action || 'UNKNOWN',
       record.code || 'unknown',
       record.executionMethod || 'UNKNOWN',
+      rankingMode,
     ].join(':')
     const current = groups.get(key) || {
       key,
@@ -267,6 +276,7 @@ export function aggregateExecutionAttribution(records = []) {
       action: record.action || 'UNKNOWN',
       code: record.code || 'unknown',
       executionMethod: record.executionMethod || 'UNKNOWN',
+      rankingMode,
       samples: 0,
       netPnl: 0,
       totalFees: 0,
