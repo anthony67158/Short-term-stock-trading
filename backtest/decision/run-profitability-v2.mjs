@@ -255,22 +255,39 @@ function summarizeRunSet(profileId, runSet) {
       blockers.push(`${scenarioId}:LEDGER_AUDIT_FAILED`)
     }
     const profile = ACCOUNT_RISK_PROFILES[profileId]
+    const entrySinglePosition = finite(
+      run.riskEvidence?.maximumEntrySinglePositionPct,
+    )
+    const entryTotalPosition = finite(
+      run.riskEvidence?.maximumEntryTotalPositionPct,
+    )
+    const entryAvailableCash = finite(
+      run.riskEvidence?.minimumEntryAvailableCashPct,
+    )
     if (
-      scenarios[scenarioId].maximumSinglePositionPct
-      > profile.maximumSinglePositionPct
+      (
+        entrySinglePosition
+        ?? scenarios[scenarioId].maximumSinglePositionPct
+      ) > profile.maximumSinglePositionPct
     ) {
       blockers.push(
         `${scenarioId}:SINGLE_POSITION_LIMIT_EXCEEDED`,
       )
     }
     if (
-      scenarios[scenarioId].maximumPositionPct
+      (
+        entryTotalPosition
+        ?? scenarios[scenarioId].maximumPositionPct
+      )
       > profile.maximumPositionPct
     ) {
       blockers.push(`${scenarioId}:TOTAL_POSITION_LIMIT_EXCEEDED`)
     }
     if (
-      scenarios[scenarioId].minimumAvailableCashPct
+      (
+        entryAvailableCash
+        ?? scenarios[scenarioId].minimumAvailableCashPct
+      )
       < profile.minimumCashReservePct
     ) {
       blockers.push(`${scenarioId}:CASH_RESERVE_VIOLATED`)

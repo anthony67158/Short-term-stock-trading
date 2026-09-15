@@ -308,6 +308,9 @@ export function replayReviewAccount({
   let maximumSingleTradeRiskPct = 0
   let maximumOpenRiskPct = 0
   let maximumObservedOpenRiskPct = 0
+  let maximumEntrySinglePositionPct = 0
+  let maximumEntryTotalPositionPct = 0
+  let minimumEntryAvailableCashPct = 100
   const openRisk = new Map()
 
   for (const date of dates) {
@@ -413,6 +416,22 @@ export function replayReviewAccount({
         })
         continue
       }
+      const entryEquity = Math.max(1, equityOf(state, prices))
+      maximumEntrySinglePositionPct = Math.max(
+        maximumEntrySinglePositionPct,
+        planned.entry * quantityShares / entryEquity * 100,
+      )
+      maximumEntryTotalPositionPct = Math.max(
+        maximumEntryTotalPositionPct,
+        (
+          positionValue(state, prices)
+          + state.reservedCashCents / 100
+        ) / entryEquity * 100,
+      )
+      minimumEntryAvailableCashPct = Math.min(
+        minimumEntryAvailableCashPct,
+        state.availableCashCents / 100 / entryEquity * 100,
+      )
       accepted.add(row.decisionId)
       const riskPct = (
         (planned.entry - planned.stop)
@@ -487,6 +506,9 @@ export function replayReviewAccount({
       maximumSingleTradeRiskPct,
       maximumOpenRiskPct,
       maximumObservedOpenRiskPct,
+      maximumEntrySinglePositionPct,
+      maximumEntryTotalPositionPct,
+      minimumEntryAvailableCashPct,
     },
     acceptedCount: accepted.size,
     skipped,
