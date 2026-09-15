@@ -139,6 +139,13 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
         "source_urls": ("https://www.szse.cn/aboutus/trends/news/t20170517_518976.html",),
     },
     {
+        "instrument_id": "SZ.000511",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20170706",
+        "effective_to": "20180605",
+        "source_urls": ("https://www.szse.cn/aboutus/trends/news/t20180528_536721.html",),
+    },
+    {
         "instrument_id": "SH.600074",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20190524",
