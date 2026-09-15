@@ -12,7 +12,7 @@ class MarketDatasetError(ValueError):
     pass
 
 
-SCHEMA_VERSION = "market-dataset.v1"
+SCHEMA_VERSION = "market-dataset.v3"
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS instrument_aliases (
     effective_to TEXT,
     reason TEXT NOT NULL,
     source TEXT NOT NULL,
+    source_urls_json TEXT NOT NULL,
     available_at TEXT NOT NULL,
     source_row_sha256 TEXT NOT NULL
 ) STRICT;
@@ -95,6 +96,18 @@ CREATE TABLE IF NOT EXISTS suspensions (
     source_row_sha256 TEXT NOT NULL,
     PRIMARY KEY (instrument_id, trade_date, suspend_type, suspend_timing)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS listing_status_periods (
+    instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
+    status TEXT NOT NULL CHECK (status IN ('SUSPENDED_LISTING')),
+    effective_from TEXT NOT NULL,
+    effective_to TEXT NOT NULL,
+    source TEXT NOT NULL,
+    source_urls_json TEXT NOT NULL,
+    evidence_observed_at TEXT NOT NULL,
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, status, effective_from),
+    CHECK (effective_to > effective_from)
+) STRICT;
 CREATE TABLE IF NOT EXISTS name_changes (
     instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
     source_code TEXT NOT NULL,
@@ -134,6 +147,7 @@ CREATE TABLE IF NOT EXISTS sync_checkpoints (
     first_seen_at TEXT NOT NULL,
     available_at TEXT NOT NULL,
     availability_method TEXT NOT NULL,
+    details_json TEXT NOT NULL,
     completed_at TEXT NOT NULL,
     PRIMARY KEY (stream, partition_key)
 ) STRICT;
@@ -141,9 +155,7 @@ CREATE TABLE IF NOT EXISTS sync_checkpoints (
 
 
 def canonical_sha256(value: dict | list) -> str:
-    payload = json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode()
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -262,6 +274,7 @@ class MarketDataset:
                         "effective_to": row.get("effectiveTo"),
                         "reason": row["reason"],
                         "source": row["source"],
+                        "source_urls_json": row.get("sourceUrlsJson", "[]"),
                         "available_at": row["availableAt"],
                         "source_row_sha256": row["sourceRowSha256"],
                     },
@@ -310,11 +323,13 @@ class MarketDataset:
         rows: list[dict],
         *,
         key_fields: tuple[str, ...],
+        ignored_on_replay: tuple[str, ...] = (),
     ) -> int:
         allowed = {
             "trade_calendar",
             "adjustment_factors",
             "suspensions",
+            "listing_status_periods",
             "name_changes",
             "minute_bars",
         }
@@ -325,7 +340,12 @@ class MarketDataset:
             for row in rows:
                 keys = {field: row[field] for field in key_fields}
                 values = {field: value for field, value in row.items() if field not in keys}
-                inserted += self._insert_exact(table, keys, values)
+                inserted += self._insert_exact(
+                    table,
+                    keys,
+                    values,
+                    ignored_on_replay=ignored_on_replay,
+                )
             self.db.commit()
         except Exception:
             self.db.rollback()
@@ -341,6 +361,39 @@ class MarketDataset:
         )
         return [row["instrument_id"] for row in rows]
 
+    def instrument_lifecycles(self) -> dict[str, dict[str, str | None]]:
+        rows = self.db.execute(
+            "SELECT instrument_id, board, list_date, source_list_date, delist_date "
+            "FROM instruments ORDER BY instrument_id"
+        )
+        return {
+            row["instrument_id"]: {
+                "board": row["board"],
+                "list_date": row["list_date"],
+                "source_list_date": row["source_list_date"],
+                "delist_date": row["delist_date"],
+            }
+            for row in rows
+        }
+
+    def source_code_for_date(self, instrument_id: str, trade_date: str) -> str:
+        alias = self.db.execute(
+            "SELECT source_code FROM instrument_aliases "
+            "WHERE instrument_id = ? AND effective_from <= ? "
+            "AND (effective_to IS NULL OR effective_to >= ?) "
+            "ORDER BY effective_from DESC",
+            (instrument_id, trade_date, trade_date),
+        ).fetchone()
+        if alias:
+            return alias["source_code"]
+        instrument = self.db.execute(
+            "SELECT source_code FROM instruments WHERE instrument_id = ?",
+            (instrument_id,),
+        ).fetchone()
+        if not instrument:
+            raise MarketDatasetError("UNKNOWN_INSTRUMENT")
+        return instrument["source_code"]
+
     def suspension_explanations(self, trade_date: str) -> dict[str, list[str]]:
         rows = self.db.execute(
             "SELECT instrument_id, suspend_type, suspend_timing FROM suspensions "
@@ -354,6 +407,18 @@ class MarketDataset:
             )
         return result
 
+    def listing_status_explanations(self, trade_date: str) -> dict[str, list[str]]:
+        rows = self.db.execute(
+            "SELECT instrument_id, status FROM listing_status_periods "
+            "WHERE effective_from <= ? AND effective_to > ? "
+            "ORDER BY instrument_id, status",
+            (trade_date, trade_date),
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            result.setdefault(row["instrument_id"], []).append(row["status"])
+        return result
+
     def checkpoint(
         self,
         stream: str,
@@ -364,22 +429,25 @@ class MarketDataset:
         first_seen_at: str | None = None,
         available_at: str | None = None,
         availability_method: str = "DIRECT_OBSERVATION",
+        details: dict | None = None,
     ) -> bool:
         observed_at = first_seen_at or _utc_now()
         values = {
             "row_count": len(rows),
             "payload_sha256": canonical_sha256(rows),
-            "source": source or self.db.execute(
-                "SELECT source FROM dataset_metadata"
-            ).fetchone()[0],
+            "source": source
+            or self.db.execute("SELECT source FROM dataset_metadata").fetchone()[0],
             "first_seen_at": observed_at,
             "available_at": available_at or observed_at,
             "availability_method": availability_method,
+            "details_json": json.dumps(
+                details or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            ),
             "completed_at": _utc_now(),
         }
         try:
             current = self.db.execute(
-                "SELECT row_count, payload_sha256 FROM sync_checkpoints "
+                "SELECT row_count, payload_sha256, details_json FROM sync_checkpoints "
                 "WHERE stream = ? AND partition_key = ?",
                 (stream, partition_key),
             ).fetchone()
@@ -387,11 +455,12 @@ class MarketDataset:
                 if (
                     current["row_count"] != values["row_count"]
                     or current["payload_sha256"] != values["payload_sha256"]
+                    or current["details_json"] != values["details_json"]
                 ):
                     raise MarketDatasetError("CHECKPOINT_CONFLICT")
                 return False
             self.db.execute(
-                "INSERT INTO sync_checkpoints VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO sync_checkpoints VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (stream, partition_key, *values.values()),
             )
             self.db.commit()
@@ -401,10 +470,13 @@ class MarketDataset:
         return True
 
     def has_checkpoint(self, stream: str, partition_key: str) -> bool:
-        return self.db.execute(
-            "SELECT 1 FROM sync_checkpoints WHERE stream = ? AND partition_key = ?",
-            (stream, partition_key),
-        ).fetchone() is not None
+        return (
+            self.db.execute(
+                "SELECT 1 FROM sync_checkpoints WHERE stream = ? AND partition_key = ?",
+                (stream, partition_key),
+            ).fetchone()
+            is not None
+        )
 
     def seal(self) -> dict:
         self._assert_writable()
@@ -417,6 +489,7 @@ class MarketDataset:
             "daily_bars",
             "adjustment_factors",
             "suspensions",
+            "listing_status_periods",
             "name_changes",
             "minute_bars",
             "sync_checkpoints",

@@ -19,9 +19,7 @@ ALLOWED_ENDPOINTS = {
 }
 DAILY_FIELDS = "ts_code,trade_date,open,high,low,close,pre_close,vol,amount"
 MINUTE_FIELDS = "ts_code,trade_time,open,close,high,low,vol,amount"
-STOCK_BASIC_FIELDS = (
-    "ts_code,symbol,name,market,exchange,list_status,list_date,delist_date"
-)
+STOCK_BASIC_FIELDS = "ts_code,symbol,name,market,exchange,list_status,list_date,delist_date"
 BSE_MAPPING_FIELDS = "name,o_code,n_code,list_date"
 TS_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$")
 BSE_CODE_CHANGE_DATE = "20251009"
@@ -53,9 +51,12 @@ def instrument_parts(value: str) -> tuple[str, str, str]:
         raise HistoricalMarketError("INVALID_INSTRUMENT")
     code, exchange = match.groups()
     valid = (
-        exchange == "SH" and code.startswith("6")
-        or exchange == "SZ" and code.startswith(("0", "3"))
-        or exchange == "BJ" and code.startswith(("4", "8", "920"))
+        exchange == "SH"
+        and code.startswith("6")
+        or exchange == "SZ"
+        and code.startswith(("0", "3"))
+        or exchange == "BJ"
+        and code.startswith(("4", "8", "920"))
     )
     if not valid:
         raise HistoricalMarketError("INVALID_INSTRUMENT_MARKET")
@@ -176,9 +177,7 @@ def normalize_instrument(row: dict, aliases: dict[str, str], available_at: str) 
 
 
 def _row_sha256(row: dict) -> str:
-    payload = json.dumps(
-        row, ensure_ascii=False, sort_keys=True, separators=(",", ":")
-    ).encode()
+    payload = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -267,7 +266,7 @@ def normalize_trade_calendar(row: dict, available_at: str) -> dict:
     exchange = str(row.get("exchange") or "")
     if exchange not in {"SSE", "SZSE"}:
         raise HistoricalMarketError("INVALID_CALENDAR_EXCHANGE")
-    is_open = str(row.get("is_open") or "")
+    is_open = str(row.get("is_open")) if row.get("is_open") is not None else ""
     if is_open not in {"0", "1"}:
         raise HistoricalMarketError("INVALID_CALENDAR_STATE")
     return {

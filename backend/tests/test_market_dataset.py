@@ -66,8 +66,12 @@ def test_dataset_resumes_exact_rows_and_rejects_conflicts_atomically(tmp_path):
     with MarketDataset(root, dataset_id="full-a-share-2016", source="TUSHARE_COMPATIBLE") as ds:
         assert ds.write_instruments([instrument()]) == 1
         assert ds.write_instruments([instrument()]) == 0
-        assert ds.write_daily_bars([daily()], source="TUSHARE_COMPATIBLE",
-                                   available_at="2026-09-15T16:00:00+08:00") == 1
+        assert (
+            ds.write_daily_bars(
+                [daily()], source="TUSHARE_COMPATIBLE", available_at="2026-09-15T16:00:00+08:00"
+            )
+            == 1
+        )
         with pytest.raises(MarketDatasetError, match="DATASET_CONFLICT"):
             ds.write_daily_bars(
                 [daily(tradeDate="20260916"), daily(close="10.11")],
@@ -79,8 +83,12 @@ def test_dataset_resumes_exact_rows_and_rejects_conflicts_atomically(tmp_path):
         assert db.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0] == 1
 
     with MarketDataset(root, dataset_id="full-a-share-2016", source="TUSHARE_COMPATIBLE") as ds:
-        assert ds.write_daily_bars([daily()], source="TUSHARE_COMPATIBLE",
-                                   available_at="2026-09-15T16:00:00+08:00") == 0
+        assert (
+            ds.write_daily_bars(
+                [daily()], source="TUSHARE_COMPATIBLE", available_at="2026-09-15T16:00:00+08:00"
+            )
+            == 0
+        )
         assert ds.checkpoint("daily", "20260915", [daily()])
         assert ds.has_checkpoint("daily", "20260915")
         assert not ds.checkpoint("daily", "20260915", [daily()])
@@ -105,10 +113,18 @@ def test_reference_replay_preserves_first_observation_time(tmp_path):
 def test_sealed_dataset_has_verifiable_database_hash_and_is_immutable(tmp_path):
     root = tmp_path / "dataset"
     with MarketDataset(root, dataset_id="full-a-share-2016", source="TUSHARE_COMPATIBLE") as ds:
-        ds.write_instruments([instrument(
-            instrumentId="BJ.920729", sourceCode="839729.BJ", exchange="BJ",
-            board="BEIJING", name="Synthetic BSE", listDate="20200727",
-        )])
+        ds.write_instruments(
+            [
+                instrument(
+                    instrumentId="BJ.920729",
+                    sourceCode="839729.BJ",
+                    exchange="BJ",
+                    board="BEIJING",
+                    name="Synthetic BSE",
+                    listDate="20200727",
+                )
+            ]
+        )
         ds.write_aliases([alias()])
         manifest = ds.seal()
         with pytest.raises(MarketDatasetError, match="DATASET_ALREADY_SEALED"):
@@ -136,13 +152,21 @@ def test_point_in_time_universe_and_suspension_explanations(tmp_path):
     rows = [
         instrument(),
         instrument(
-            instrumentId="SH.600001", sourceCode="600001.SH", exchange="SH",
-            name="Delisted Synthetic", listDate="20100101", delistDate="20200131",
+            instrumentId="SH.600001",
+            sourceCode="600001.SH",
+            exchange="SH",
+            name="Delisted Synthetic",
+            listDate="20100101",
+            delistDate="20200131",
             listStatus="D",
         ),
         instrument(
-            instrumentId="SZ.300001", sourceCode="300001.SZ", exchange="SZ",
-            board="CHINEXT", name="Future Synthetic", listDate="20210101",
+            instrumentId="SZ.300001",
+            sourceCode="300001.SZ",
+            exchange="SZ",
+            board="CHINEXT",
+            name="Future Synthetic",
+            listDate="20210101",
         ),
     ]
     suspension = {
@@ -155,6 +179,16 @@ def test_point_in_time_universe_and_suspension_explanations(tmp_path):
         "available_at": "2020-01-02T09:00:00+08:00",
         "source_row_sha256": canonical_sha256({"synthetic": "suspension"}),
     }
+    listing_status = {
+        "instrument_id": "SH.600001",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20191201",
+        "effective_to": "20200110",
+        "source": "OFFICIAL_EXCHANGE",
+        "source_urls_json": '["https://example.invalid/official"]',
+        "evidence_observed_at": "2026-09-16T00:00:00+00:00",
+        "source_row_sha256": canonical_sha256({"synthetic": "listing-status"}),
+    }
     with MarketDataset(root, dataset_id="point-in-time", source="TUSHARE_COMPATIBLE") as ds:
         ds.write_instruments(rows)
         ds.write_facts(
@@ -162,9 +196,16 @@ def test_point_in_time_universe_and_suspension_explanations(tmp_path):
             [suspension],
             key_fields=("instrument_id", "trade_date", "suspend_type", "suspend_timing"),
         )
+        ds.write_facts(
+            "listing_status_periods",
+            [listing_status],
+            key_fields=("instrument_id", "status", "effective_from"),
+        )
         assert ds.eligible_instruments("20200102") == ["SH.600001", "SZ.000001"]
         assert ds.eligible_instruments("20210201") == ["SZ.000001", "SZ.300001"]
         assert ds.suspension_explanations("20200102") == {"SH.600001": ["S:DAY"]}
+        assert ds.listing_status_explanations("20200102") == {"SH.600001": ["SUSPENDED_LISTING"]}
+        assert ds.listing_status_explanations("20200110") == {}
 
 
 def test_fact_writer_rejects_unknown_tables(tmp_path):
