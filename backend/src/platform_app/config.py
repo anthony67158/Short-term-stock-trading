@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     agent_enabled: bool = False
     agent_daily_call_limit: int = Field(default=20, ge=1, le=100)
     agent_global_daily_call_limit: int = Field(default=100, ge=1, le=1000)
+    market_data_base_url: str = "https://ts.gyzcloud.top/api"
+    market_data_api_key: SecretStr = SecretStr("")
+    market_data_timeout_seconds: int = Field(default=40, ge=5, le=90)
+    market_data_enabled: bool = False
     cookie_secure: bool = False
 
     @field_validator("agent_base_url")
@@ -32,6 +36,30 @@ class Settings(BaseSettings):
         parsed = urlsplit(value)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("Agent endpoint requires HTTPS without inline credentials")
+        return value
+
+    @field_validator("market_data_base_url")
+    @classmethod
+    def secure_market_data_origin(cls, value):
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(value)
+        allowed = {
+            ("api.tushare.pro", ""),
+            ("ts.gyzcloud.top", "/api"),
+            ("ts2.gyzcloud.top", "/api"),
+            ("tx.xiaodefa.top", "/"),
+        }
+        if (
+            parsed.scheme != "https"
+            or (parsed.hostname, parsed.path) not in allowed
+            or parsed.port not in (None, 443)
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Market data endpoint is not an allowed HTTPS API")
         return value
 
 
