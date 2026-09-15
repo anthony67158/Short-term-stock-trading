@@ -13,7 +13,8 @@ from platform_app.modules.portfolio.execution_contracts import (
     ExecutionInput, ExecutionPage, ExecutionView, PositionPage, PositionView,
 )
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionCommand, ExecutionCorrection, LotConsumption, PositionLot,
+    CashEntry, Execution, ExecutionCommand, ExecutionCorrection, ExecutionPlan,
+    LotConsumption, PositionLot,
 )
 from platform_app.modules.portfolio.service import (
     PortfolioError, cash_total, fingerprint, owned_account,
@@ -25,7 +26,7 @@ LIMIT = Decimal("1000000000000000000")
 def record_execution(
     user_id: str, account_id: str, body: ExecutionInput, key: str, *, db_session=None,
 ) -> ExecutionView:
-    facts = body.model_dump_json(exclude={"expected_version"})
+    facts = body.model_dump_json(exclude={"expected_version"}, exclude_none=True)
     fact_hash = hashlib.sha256(facts.encode()).hexdigest()
     with nullcontext(db_session) if db_session is not None else sessions().begin() as db:
         account = owned_account(db, user_id, account_id, lock=True)
@@ -55,6 +56,12 @@ def record_execution(
             raise PortfolioError("FUTURE_EXECUTION", "不能将尚未发生的成交记为事实", 422)
         if not db.get(Instrument, body.instrument_id):
             raise PortfolioError("INSTRUMENT_NOT_FOUND", "证券尚未建立档案，请先核对代码", 422)
+        if body.plan_id:
+            plan = db.get(ExecutionPlan, body.plan_id)
+            if not plan or plan.account_id != account_id:
+                raise PortfolioError("PLAN_NOT_FOUND", "计划不存在或无权访问", 404)
+            if plan.instrument_id != body.instrument_id or plan.side != body.side:
+                raise PortfolioError("PLAN_FACT_MISMATCH", "成交股票或方向与关联计划不一致", 422)
         last = db.scalar(select(CashEntry).where(
             CashEntry.account_id == account_id, CashEntry.kind != "REVERSAL")
                          .order_by(CashEntry.account_version.desc()).limit(1))
@@ -106,6 +113,7 @@ def record_execution(
             gross_amount=gross, total_fees=fees, fees=body.fees.model_dump(mode="json"),
             cash_delta=delta, executed_at=body.executed_at, source=body.source,
             account_version=account.version,
+            plan_id=body.plan_id,
             realized_pnl=delta - sum((item.basis for item in consumed), Decimal(0))
             if body.side == "SELL" else None,
         )
@@ -137,6 +145,9 @@ def record_execution(
                     sell_execution_id=execution.id, buy_execution_id=item.execution_id,
                     quantity=item.quantity, basis=item.basis,
                 ))
+        db.flush()
+        from platform_app.modules.portfolio.plans import refresh_reservations
+        refresh_reservations(db, account, body.plan_id)
         db.add(Outbox(
             owner_id=user_id, event_type="portfolio.changed", aggregate_id=account_id,
             payload={"schemaVersion": "1", "accountId": account_id,

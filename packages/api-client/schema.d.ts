@@ -246,6 +246,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Plans */
+        get: operations["list_plans_api_v1_accounts__account_id__plans_get"];
+        put?: never;
+        /** Create Plan */
+        post: operations["create_plan_api_v1_accounts__account_id__plans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/plans/{plan_id}/cancellations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Plan */
+        post: operations["cancel_plan_api_v1_accounts__account_id__plans__plan_id__cancellations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/calendar": {
         parameters: {
             query?: never;
@@ -928,6 +963,16 @@ export interface components {
             data: components["schemas"]["JobView"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[PlanPage] */
+        Envelope_PlanPage_: {
+            data: components["schemas"]["PlanPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[PlanView] */
+        Envelope_PlanView_: {
+            data: components["schemas"]["PlanView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[PositionPage] */
         Envelope_PositionPage_: {
             data: components["schemas"]["PositionPage"];
@@ -1056,6 +1101,8 @@ export interface components {
             source: string;
             /** Expectedversion */
             expectedVersion: number;
+            /** Planid */
+            planId?: string | null;
         };
         /** ExecutionPage */
         ExecutionPage: {
@@ -1106,6 +1153,8 @@ export interface components {
             accountVersion: number;
             /** Correctionid */
             correctionId?: string | null;
+            /** Planid */
+            planId?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1280,6 +1329,114 @@ export interface components {
             asOf?: string;
             /** Revision */
             revision?: number | null;
+        };
+        /** PlanCancel */
+        PlanCancel: {
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Reason */
+            reason: string;
+        };
+        /** PlanInput */
+        PlanInput: {
+            /** Instrumentid */
+            instrumentId: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "BUY" | "SELL";
+            /** Quantityshares */
+            quantityShares: number;
+            /** Limitprice */
+            limitPrice: string;
+            /** Feebudget */
+            feeBudget: string;
+            /**
+             * Expiresat
+             * Format: date-time
+             */
+            expiresAt: string;
+            /** Reason */
+            reason: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** PlanPage */
+        PlanPage: {
+            /** Plans */
+            plans: components["schemas"]["PlanView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+            /** Accountversion */
+            accountVersion: number;
+            /** Reservedcash */
+            reservedCash: string;
+            /** Spendablecash */
+            spendableCash: string;
+        };
+        /** PlanView */
+        PlanView: {
+            /** Id */
+            id: string;
+            /** Instrumentid */
+            instrumentId: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "BUY" | "SELL";
+            /** Quantityshares */
+            quantityShares: number;
+            /** Limitprice */
+            limitPrice: string;
+            /** Feebudget */
+            feeBudget: string;
+            /** Recordedshares */
+            recordedShares: number;
+            /** Reservedcash */
+            reservedCash: string;
+            /** Reservedshares */
+            reservedShares: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "CONFIRMED" | "PARTIALLY_RECORDED" | "COMPLETED" | "CANCELLED" | "EXPIRED" | "INVALIDATED";
+            /** Revision */
+            revision: number;
+            /** Reason */
+            reason: string;
+            /**
+             * Expiresat
+             * Format: date-time
+             */
+            expiresAt: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Source
+             * @default USER
+             * @constant
+             */
+            source: "USER";
+            /**
+             * Scope
+             * @default MANUAL_LEDGER_PLAN
+             * @constant
+             */
+            scope: "MANUAL_LEDGER_PLAN";
+            /**
+             * Executioneligibility
+             * @default NOT_ASSESSED
+             * @constant
+             */
+            executionEligibility: "NOT_ASSESSED";
         };
         /** PositionPage */
         PositionPage: {
@@ -2050,6 +2207,115 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ImportView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_plans_api_v1_accounts__account_id__plans_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_PlanPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_plan_api_v1_accounts__account_id__plans_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_PlanView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_plan_api_v1_accounts__account_id__plans__plan_id__cancellations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+                plan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanCancel"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_PlanView_"];
                 };
             };
             /** @description Validation Error */

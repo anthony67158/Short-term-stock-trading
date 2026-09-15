@@ -10,8 +10,9 @@ from platform_app.adapters.database import sessions
 from platform_app.contracts.base import Contract, Money, utcnow
 from platform_app.kernel.trading import trading_date
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionCorrection, LotConsumption, PositionLot,
+    CashEntry, Execution, ExecutionCorrection, ExecutionPlan, LotConsumption, PlanEvent, PositionLot,
 )
+from platform_app.modules.portfolio.plan_contracts import PlanView
 from platform_app.modules.portfolio.service import PortfolioError, owned_account
 
 
@@ -55,6 +56,12 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             ExecutionCorrection.account_id == account_id)))
         by_correction = {row.id: row for row in corrections}
         reversed_ids = {row.execution_id for row in corrections}
+        plan_events = list(db.scalars(select(PlanEvent).where(
+            PlanEvent.account_id == account_id).order_by(
+                PlanEvent.account_version, PlanEvent.revision).limit(50_001)))
+        if len(plan_events) > 50_000:
+            raise PortfolioError("REPLAY_LIMIT", "计划记录超过即时核对上限", 422)
+        plans = list(db.scalars(select(ExecutionPlan).where(ExecutionPlan.account_id == account_id)))
         issues: list[Discrepancy] = []
         count = 0
 
@@ -137,8 +144,7 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         reversed_links = set()
         previous_time = None
         active_cash = Decimal(0)
-        for version, row in enumerate(cash_rows, start=2):
-            check(row.id, "accountVersion", version, row.account_version)
+        for row in cash_rows:
             if row.kind != "REVERSAL":
                 if previous_time and row.effective_at < previous_time:
                     check(row.id, "chronological", True, False)
@@ -184,7 +190,51 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             check(missing_id, "reversalEntryExists", True, False)
         for missing_id in execution_deltas.keys() - linked:
             check(missing_id, "cashEntryExists", True, False)
-        check(account_id, "accountVersion", len(cash_rows) + 1, account.version)
+        version_owners = {row.account_version: row.id for row in cash_rows}
+        latest_events, revisions = {}, defaultdict(int)
+        for event in plan_events:
+            revisions[event.plan_id] += 1
+            check(event.id, "planRevision", revisions[event.plan_id], event.revision)
+            if event.kind in ("CREATE", "CANCEL"):
+                check(event.id, "uniqueVersion", False, event.account_version in version_owners)
+                version_owners[event.account_version] = event.id
+            else:
+                check(event.id, "factVersionExists", True, event.account_version in version_owners)
+            latest_events[event.plan_id] = event
+        for expected, actual in enumerate(sorted(version_owners), start=2):
+            check(account_id, "versionSequence", expected, actual)
+        check(account_id, "accountVersion", len(version_owners) + 1, account.version)
+        current_cash_reservation = Decimal(0)
+        current_share_reservations = defaultdict(int)
+        now = utcnow()
+        for plan in plans:
+            event = latest_events.get(plan.id)
+            check(plan.id, "planEventExists", True, event is not None)
+            if event:
+                check(plan.id, "planProjection", PlanView.model_validate(event.result),
+                      PlanView.model_validate(plan))
+            linked_trades = [trade for trade in executions
+                             if trade.plan_id == plan.id and trade.id not in reversed_ids]
+            shares = sum(trade.quantity_shares for trade in linked_trades)
+            check(plan.id, "recordedShares", shares, plan.recorded_shares)
+            remaining = max(0, plan.quantity_shares - shares)
+            fees = sum((trade.total_fees for trade in linked_trades), Decimal(0))
+            active = plan.status in ("CONFIRMED", "PARTIALLY_RECORDED")
+            reserved_cash = rounded(remaining * plan.limit_price) + max(
+                Decimal(0), plan.fee_budget - fees) if remaining and active and (
+                    plan.side == "BUY") else Decimal(0)
+            check(plan.id, "reservedCash", reserved_cash, plan.reserved_cash)
+            check(plan.id, "reservedShares",
+                  remaining if active and plan.side == "SELL" else 0, plan.reserved_shares)
+            if active and plan.expires_at > now:
+                current_cash_reservation += reserved_cash
+                if plan.side == "SELL":
+                    current_share_reservations[plan.instrument_id] += remaining
+        check(account_id, "cashReservationCovered", True, current_cash_reservation <= actual_cash)
+        for instrument_id, quantity in current_share_reservations.items():
+            available = sum(lot["quantity"] for lot in expected_lots.values()
+                            if lot["instrument"] == instrument_id and lot["date"] < trading_date(now))
+            check(instrument_id, "shareReservationCovered", True, quantity <= available)
         check(account_id, "cashBalance", replay_cash, actual_cash)
         check(account_id, "correctedCashBalance", active_cash, actual_cash)
         return ReconciliationView(

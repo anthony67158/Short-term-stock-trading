@@ -8,6 +8,7 @@ import { Button, Empty, Input } from "../../components/Controls";
 import { Executions } from "./Executions";
 import { Reconciliation } from "./Reconciliation";
 import { ExecutionImport } from "./ExecutionImport";
+import { Plans } from "./Plans";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
@@ -130,9 +131,11 @@ function AccountLedger({ accountId }: { accountId: string }) {
       setEditing(false); setSaved(true);
       await cache.invalidateQueries({ queryKey: ["balance", accountId] });
       await cache.invalidateQueries({ queryKey: ["cash", accountId] });
+      await cache.invalidateQueries({ queryKey: ["plans", accountId] });
       await cache.invalidateQueries({ queryKey: ["accounts"] });
     }} />}
     <Executions account={account} />
+    <Plans account={account} />
     <ExecutionImport account={account} />
     <section className="ledger-section"><h2>资金流水</h2>
       {history.isPending ? <p role="status">正在读取资金流水…</p> : history.isError ? <div role="alert"><p>{errorMessage(history.error)}</p><Button onClick={() => history.refetch()}>重新读取</Button></div>

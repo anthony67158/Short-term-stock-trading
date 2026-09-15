@@ -19,7 +19,7 @@ class PortfolioError(ValueError):
 
 
 def fingerprint(body: Contract) -> str:
-    return hashlib.sha256(body.model_dump_json().encode()).hexdigest()
+    return hashlib.sha256(body.model_dump_json(exclude_none=True).encode()).hexdigest()
 
 
 def owned_account(db, user_id: str, account_id: str, *, lock: bool = False) -> Account:
@@ -112,6 +112,8 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
         )
         db.add(entry)
         db.flush()
+        from platform_app.modules.portfolio.plans import refresh_reservations
+        refresh_reservations(db, account)
         db.add(Outbox(
             owner_id=user_id, event_type="portfolio.changed", aggregate_id=account_id,
             payload={"schemaVersion": "1", "accountId": account_id,

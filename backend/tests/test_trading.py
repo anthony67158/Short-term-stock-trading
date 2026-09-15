@@ -27,7 +27,8 @@ def test_board_quantity_and_verified_dates():
     ]:
         with pytest.raises(ValueError):
             validate_order_quantity(rule, side, qty, available)
-    for day in [date(2026, 7, 5), date(2026, 9, 16)]:
+    assert quantity_rule("SH", "MAIN", date(2026, 9, 16)).verified_through == date(2026, 9, 16)
+    for day in [date(2026, 7, 5), date(2026, 9, 17)]:
         with pytest.raises(ValueError):
             quantity_rule("SH", "MAIN", day)
 

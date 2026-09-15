@@ -15,7 +15,7 @@ from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.market.models import Watch
 from platform_app.modules.portfolio.models import (
     Account, CashEntry, Execution, ExecutionCommand, ExecutionCorrection, ExecutionImport,
-    LotConsumption, PositionLot,
+    ExecutionPlan, LotConsumption, PlanEvent, PositionLot,
 )
 from platform_app.modules.research.models import Assessment, Evidence
 
@@ -45,6 +45,8 @@ else:
         db.execute(delete(ExecutionCorrection).where(ExecutionCorrection.account_id.in_(account_ids)))
         db.execute(delete(Execution).where(Execution.account_id.in_(account_ids)))
         db.execute(delete(ExecutionImport).where(ExecutionImport.account_id.in_(account_ids)))
+        db.execute(delete(PlanEvent).where(PlanEvent.account_id.in_(account_ids)))
+        db.execute(delete(ExecutionPlan).where(ExecutionPlan.account_id.in_(account_ids)))
         db.execute(delete(Account).where(Account.owner_id == user.id))
         db.execute(delete(Outbox).where(Outbox.owner_id == user.id))
         db.execute(delete(Watch).where(Watch.owner_id == user.id))

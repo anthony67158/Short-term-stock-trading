@@ -32,7 +32,7 @@ export function CorrectionEditor({ account, trade, close }: { account: Account; 
       return result.data.data;
     },
     onSuccess: async () => {
-      for (const query of ["balance", "cash", "positions", "executions", "corrections"])
+      for (const query of ["balance", "cash", "positions", "executions", "corrections", "plans"])
         await cache.invalidateQueries({ queryKey: [query, account.id] });
     },
   });

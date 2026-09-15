@@ -101,6 +101,7 @@ class Execution(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     source: Mapped[str] = mapped_column(String(300))
     account_version: Mapped[int] = mapped_column(Integer)
+    plan_id: Mapped[str | None] = mapped_column(ForeignKey("execution_plans.id"), index=True)
 
 
 class PositionLot(Base):
@@ -179,3 +180,49 @@ class ExecutionImport(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     committed_version: Mapped[int | None] = mapped_column(Integer)
+
+
+class ExecutionPlan(Base):
+    __tablename__ = "execution_plans"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('CONFIRMED','PARTIALLY_RECORDED','COMPLETED',"
+            "'CANCELLED','EXPIRED','INVALIDATED')", name="status"),
+        CheckConstraint("side IN ('BUY','SELL')", name="side"),
+        CheckConstraint("quantity_shares > 0 AND recorded_shares >= 0", name="quantity"),
+        CheckConstraint("reserved_cash >= 0 AND reserved_shares >= 0", name="reservation"),
+    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
+    instrument_id: Mapped[str] = mapped_column(ForeignKey("instruments.id"))
+    side: Mapped[str] = mapped_column(String(4))
+    quantity_shares: Mapped[int] = mapped_column(Integer)
+    limit_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))
+    fee_budget: Mapped[Decimal] = mapped_column(Numeric(20, 2))
+    recorded_shares: Mapped[int] = mapped_column(Integer, default=0)
+    reserved_cash: Mapped[Decimal] = mapped_column(Numeric(20, 2), default=Decimal(0))
+    reserved_shares: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(24))
+    revision: Mapped[int] = mapped_column(Integer, default=1)
+    reason: Mapped[str] = mapped_column(String(300))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PlanEvent(Base):
+    __tablename__ = "plan_events"
+    __table_args__ = (
+        UniqueConstraint("account_id", "command_key", name="uq_plan_events_command"),
+        UniqueConstraint("plan_id", "revision", name="uq_plan_events_revision"),
+    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
+    plan_id: Mapped[str] = mapped_column(ForeignKey("execution_plans.id"), index=True)
+    account_version: Mapped[int] = mapped_column(Integer)
+    revision: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(24))
+    command_key: Mapped[str] = mapped_column(String(256))
+    reason: Mapped[str] = mapped_column(String(300))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    result: Mapped[dict] = mapped_column(JSONB)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

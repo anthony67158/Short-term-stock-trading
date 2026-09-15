@@ -132,7 +132,7 @@ def correct_execution(
         db.flush()
         db.add(CashEntry(
             account_id=account_id, source_key=correction.id, request_hash=fingerprint(body),
-            kind="REVERSAL", amount=preview.reversal_amount, source=body.reason,
+            kind="REVERSAL", amount=preview.reversal_amount, source=body.reason[:300],
             effective_at=correction.recorded_at, account_version=account.version,
             correction_id=correction.id,
         ))
@@ -153,6 +153,9 @@ def correct_execution(
             ))
         for row in trades:
             row.realized_pnl = pnl[row.id]  # Projection only; quantities/prices/fees stay immutable.
+        db.flush()
+        from platform_app.modules.portfolio.plans import refresh_reservations
+        refresh_reservations(db, account, db.get(Execution, execution_id).plan_id)
         db.add(Outbox(
             owner_id=user_id, event_type="portfolio.changed", aggregate_id=account_id,
             payload={"schemaVersion": "1", "accountId": account_id,

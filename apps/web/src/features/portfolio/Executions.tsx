@@ -32,6 +32,7 @@ function ExecutionEditor({ account, saved, cancel }: { account: Account; saved: 
       quantityShares: Number(value("quantity")), price: value("price"),
       executedAt: new Date(value("time")).toISOString(), sourceKey: value("reference"),
       source: value("source"), expectedVersion: account.version,
+      planId: value("plan") || null,
       fees: { commission: value("commission"), stampTax: value("stamp"), transferFee: value("transfer"), otherFee: value("other"), basis: "ACTUAL" },
     });
   }
@@ -50,6 +51,7 @@ function ExecutionEditor({ account, saved, cancel }: { account: Account; saved: 
       <Input id="execution-other" label="其他实际费用（元）" name="other" inputMode="decimal" pattern="\d+(\.\d{1,2})?" required />
       <Input id="execution-reference" label="交割编号（账户内唯一）" name="reference" maxLength={128} required />
       <Input id="execution-source" label="成交凭据说明" name="source" maxLength={300} required />
+      <Input id="execution-plan" label="关联人工计划编号（可选）" name="plan" minLength={32} maxLength={32} />
       <div className="form-actions"><Button variant="primary" type="submit" disabled={mutation.isPending}>{mutation.isPending ? "正在记账…" : "保存成交事实"}</Button><Button type="button" onClick={cancel}>取消</Button></div>
       {mutation.isError && <p role="alert" className="error">{errorMessage(mutation.error)}</p>}
     </form>
@@ -87,11 +89,11 @@ export function Executions({ account }: { account: Account }) {
   return <>
     <section className="ledger-section">
       <div className="section-toolbar"><h2>持仓</h2><Button onClick={() => { setEditing(true); setSaved(false); }} disabled={editing}>录入成交</Button></div>
-      <p className="source-note">成本按先进先出、含实际买入费用计算；可卖股数已扣除当日买入锁定。当前尚未计入计划预留。</p>
+      <p className="source-note">成本按先进先出、含实际买入费用计算；可卖股数扣除当日锁定，计划预留另列。实际成交优先记账，冲突计划自动失效。</p>
       {saved && <p role="status" className="save-notice">成交已记账，持仓与现金已更新。</p>}
       {editing && <ExecutionEditor account={account} cancel={() => setEditing(false)} saved={async () => {
         setEditing(false); setSaved(true);
-        for (const key of ["balance", "cash", "positions", "executions"])
+        for (const key of ["balance", "cash", "positions", "executions", "plans"])
           await cache.invalidateQueries({ queryKey: [key, account.id] });
       }} />}
       {positions.isPending ? <p role="status">正在读取持仓…</p> : positions.isError ? <div role="alert">{errorMessage(positions.error)}<Button onClick={() => positions.refetch()}>重新读取持仓</Button></div>

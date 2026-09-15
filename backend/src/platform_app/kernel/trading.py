@@ -38,7 +38,7 @@ def quantity_rule(exchange: str, board: str, as_of: date) -> QuantityRule:
         ("SH", "STAR"): (200, 1, 100_000),
         ("BJ", "BEIJING"): (100, 1, 1_000_000),
     }
-    start, verified = date(2026, 7, 6), date(2026, 9, 15)
+    start, verified = date(2026, 7, 6), date(2026, 9, 16)
     if not start <= as_of <= verified or (exchange, board) not in specs:
         raise ValueError("该证券或日期尚无已核验的限价申报规则")
     return QuantityRule(f"{exchange}-{board}-LIMIT-20260706", *specs[exchange, board],

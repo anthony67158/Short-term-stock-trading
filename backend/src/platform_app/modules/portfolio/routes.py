@@ -4,7 +4,9 @@ from fastapi import APIRouter, Header, Query
 
 from platform_app.contracts.base import Contract, Envelope
 from platform_app.modules.identity.routes import CurrentUser
-from platform_app.modules.portfolio import corrections, executions, imports, reconciliation, service
+from platform_app.modules.portfolio import (
+    corrections, executions, imports, plans, reconciliation, service,
+)
 from platform_app.modules.portfolio.correction_contracts import (
     CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
 )
@@ -15,6 +17,7 @@ from platform_app.modules.portfolio.contracts import (
     AccountBalance, AccountInput, AccountView, CashEntryView, CashFlowInput, CashPage,
 )
 from platform_app.modules.portfolio.import_contracts import ImportCommit, ImportInput, ImportView
+from platform_app.modules.portfolio.plan_contracts import PlanCancel, PlanInput, PlanPage, PlanView
 
 router = APIRouter(prefix="/api/v1/accounts", tags=["portfolio"])
 CommandKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=128)]
@@ -126,3 +129,23 @@ def get_import(account_id: str, import_id: str, user: CurrentUser):
              response_model=Envelope[ImportView])
 def confirm_import(account_id: str, import_id: str, body: ImportCommit, user: CurrentUser):
     return Envelope(data=imports.commit_import(user.id, account_id, import_id, body))
+
+
+@router.post("/{account_id}/plans", response_model=Envelope[PlanView], status_code=201)
+def create_plan(account_id: str, body: PlanInput, user: CurrentUser, key: CommandKey):
+    return Envelope(data=plans.create_plan(user.id, account_id, body, key))
+
+
+@router.get("/{account_id}/plans", response_model=Envelope[PlanPage])
+def list_plans(
+    account_id: str, user: CurrentUser, cursor: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    return Envelope(data=plans.list_plans(user.id, account_id, cursor, limit))
+
+
+@router.post("/{account_id}/plans/{plan_id}/cancellations", response_model=Envelope[PlanView])
+def cancel_plan(
+    account_id: str, plan_id: str, body: PlanCancel, user: CurrentUser, key: CommandKey,
+):
+    return Envelope(data=plans.cancel_plan(user.id, account_id, plan_id, body, key))

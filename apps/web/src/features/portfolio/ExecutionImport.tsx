@@ -54,7 +54,7 @@ export function ExecutionImport({ account }: { account: Account }) {
     },
     onSuccess: async (data) => {
       cache.setQueryData(["execution-import", account.id, data.id], data);
-      for (const key of ["balance", "cash", "positions", "executions"])
+      for (const key of ["balance", "cash", "positions", "executions", "plans"])
         await cache.invalidateQueries({ queryKey: [key, account.id] });
     },
   });

@@ -989,6 +989,209 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/plans": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Create Plan",
+        "operationId": "create_plan_api_v1_accounts__account_id__plans_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PlanView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "List Plans",
+        "operationId": "list_plans_api_v1_accounts__account_id__plans_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PlanPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}/plans/{plan_id}/cancellations": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Cancel Plan",
+        "operationId": "cancel_plan_api_v1_accounts__account_id__plans__plan_id__cancellations_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "plan_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Plan Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanCancel"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PlanView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/calendar": {
       "get": {
         "tags": [
@@ -2988,6 +3191,38 @@
         ],
         "title": "Envelope[JobView]"
       },
+      "Envelope_PlanPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PlanPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PlanPage]"
+      },
+      "Envelope_PlanView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PlanView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PlanView]"
+      },
       "Envelope_PositionPage_": {
         "properties": {
           "data": {
@@ -3302,6 +3537,19 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Expectedversion"
+          },
+          "planId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planid"
           }
         },
         "additionalProperties": false,
@@ -3446,6 +3694,17 @@
               }
             ],
             "title": "Correctionid"
+          },
+          "planId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planid"
           }
         },
         "additionalProperties": false,
@@ -3910,6 +4169,276 @@
         "additionalProperties": false,
         "type": "object",
         "title": "Meta"
+      },
+      "PlanCancel": {
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedrevision"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedVersion",
+          "expectedRevision",
+          "reason"
+        ],
+        "title": "PlanCancel"
+      },
+      "PlanInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ],
+            "title": "Side"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "limitPrice": {
+            "type": "string",
+            "title": "Limitprice",
+            "decimal_places": 4,
+            "gt": 0,
+            "max_digits": 18
+          },
+          "feeBudget": {
+            "type": "string",
+            "title": "Feebudget",
+            "decimal_places": 2,
+            "ge": 0,
+            "max_digits": 20
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expiresat"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "side",
+          "quantityShares",
+          "limitPrice",
+          "feeBudget",
+          "expiresAt",
+          "reason",
+          "expectedVersion"
+        ],
+        "title": "PlanInput"
+      },
+      "PlanPage": {
+        "properties": {
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/PlanView"
+            },
+            "type": "array",
+            "title": "Plans"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "reservedCash": {
+            "type": "string",
+            "title": "Reservedcash",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "spendableCash": {
+            "type": "string",
+            "title": "Spendablecash",
+            "decimal_places": 2,
+            "max_digits": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "plans",
+          "nextCursor",
+          "accountVersion",
+          "reservedCash",
+          "spendableCash"
+        ],
+        "title": "PlanPage"
+      },
+      "PlanView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ],
+            "title": "Side"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "limitPrice": {
+            "type": "string",
+            "title": "Limitprice",
+            "decimal_places": 4,
+            "gt": 0,
+            "max_digits": 18
+          },
+          "feeBudget": {
+            "type": "string",
+            "title": "Feebudget",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "recordedShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Recordedshares"
+          },
+          "reservedCash": {
+            "type": "string",
+            "title": "Reservedcash",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "reservedShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Reservedshares"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "CONFIRMED",
+              "PARTIALLY_RECORDED",
+              "COMPLETED",
+              "CANCELLED",
+              "EXPIRED",
+              "INVALIDATED"
+            ],
+            "title": "Status"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expiresat"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "source": {
+            "type": "string",
+            "const": "USER",
+            "title": "Source",
+            "default": "USER"
+          },
+          "scope": {
+            "type": "string",
+            "const": "MANUAL_LEDGER_PLAN",
+            "title": "Scope",
+            "default": "MANUAL_LEDGER_PLAN"
+          },
+          "executionEligibility": {
+            "type": "string",
+            "const": "NOT_ASSESSED",
+            "title": "Executioneligibility",
+            "default": "NOT_ASSESSED"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "instrumentId",
+          "side",
+          "quantityShares",
+          "limitPrice",
+          "feeBudget",
+          "recordedShares",
+          "reservedCash",
+          "reservedShares",
+          "status",
+          "revision",
+          "reason",
+          "expiresAt",
+          "createdAt"
+        ],
+        "title": "PlanView"
       },
       "PositionPage": {
         "properties": {

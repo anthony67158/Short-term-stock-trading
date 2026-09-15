@@ -25,6 +25,7 @@ class ExecutionInput(Contract):
     fees: ActualFees
     source: str = Field(min_length=1, max_length=300, pattern=r"\S")
     expected_version: int = Field(strict=True, ge=1)
+    plan_id: str | None = Field(default=None, min_length=32, max_length=32)
 
 
 class ExecutionView(Contract):
@@ -44,6 +45,7 @@ class ExecutionView(Contract):
     source: str
     account_version: int
     correction_id: str | None = None
+    plan_id: str | None = None
 
 
 class ExecutionPage(Contract):

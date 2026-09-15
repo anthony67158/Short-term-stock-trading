@@ -130,6 +130,26 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await page.getByRole("button", { name: "核对账本", exact: true }).click();
     await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     await expect(page.getByText("已复算 2 笔成交 · 1 个未平批次 · 现金 9424.99 元")).toBeVisible();
+    await page.getByRole("button", { name: "创建人工计划", exact: true }).click();
+    await page.getByLabel("计划证券代码").fill("000001");
+    await page.getByLabel("计划股数", { exact: true }).fill("100");
+    await page.getByLabel("计划限价（元）").fill("10");
+    await page.getByLabel("费用预留预算（元）").fill("5");
+    await page.getByLabel("计划到期时间（本设备时区，当日内）").fill(localTime(10 * 60_000));
+    await page.getByLabel("计划依据", { exact: true }).fill("合成现金预留验收");
+    await page.getByRole("button", { name: "确认人工计划并预留" }).click();
+    await expect(page.getByText("计划已确认，现金与持仓事实未改变。")).toBeVisible();
+    await expect(page.getByText("计划预留：1005.00 元 · 可支配现金：8419.99 元")).toBeVisible();
+    await expect(page.locator(".balance-value")).toHaveText("9,424.99");
+    await page.reload();
+    await expect(page.getByRole("region", { name: "人工计划，可横向滚动" })).toContainText("0 / 100");
+    await page.getByRole("button", { name: "取消计划", exact: true }).click();
+    await page.getByLabel("取消计划原因").fill("合成取消预留");
+    await page.getByRole("button", { name: "确认取消并释放剩余预留" }).click();
+    await expect(page.getByRole("region", { name: "人工计划，可横向滚动" })).toContainText("已取消");
+    await expect(page.getByText("计划预留：0 元 · 可支配现金：9424.99 元")).toBeVisible();
+    await page.getByRole("button", { name: "核对账本", exact: true }).click();
+    await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     for (const theme of ["dark", "light"]) {
       if (theme === "light") await page.getByRole("button", { name: "切换深浅主题" }).click();
       for (const width of [390, 768, 1280, 1440]) {
