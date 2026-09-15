@@ -102,6 +102,72 @@ class BuildV4ReviewDatasetTest(unittest.TestCase):
                 seen,
             )
 
+    def test_multi_root_cutover_assigns_overlapping_date_to_newer_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            first_root = os.path.join(directory, "first")
+            second_root = os.path.join(directory, "second")
+            first_before = outcome(1)
+            overlap = outcome(2)
+            second_overlap = {
+                **overlap,
+                "observations": {"sessions": 3},
+            }
+            second_after = outcome(3)
+            for root, values in (
+                (first_root, [first_before, overlap]),
+                (second_root, [second_overlap, second_after]),
+            ):
+                chunk = os.path.join(root, "chunk-01")
+                os.makedirs(chunk)
+                with gzip.open(
+                    os.path.join(
+                        chunk,
+                        "opportunity-outcomes-v4.json.gz",
+                    ),
+                    "wt",
+                    encoding="utf-8",
+                ) as handle:
+                    json.dump({"outcomes": values}, handle)
+                with gzip.open(
+                    os.path.join(chunk, "daily.json.gz"),
+                    "wt",
+                    encoding="utf-8",
+                ) as handle:
+                    json.dump([
+                        {
+                            "date": value["tradeDate"].replace("-", ""),
+                            "code": value["code"],
+                            "close": 10.2,
+                            "preClose": 10.1,
+                        }
+                        for value in values
+                    ], handle)
+                with open(
+                    os.path.join(root, "plan.json"),
+                    "w",
+                    encoding="utf-8",
+                ) as handle:
+                    json.dump({"chunks": [{"index": 1}]}, handle)
+
+            output = os.path.join(directory, "review-v4.npz")
+            audit = builder.build_dataset(
+                [first_root, second_root],
+                output,
+                root_cutovers=["20260902"],
+            )
+
+        self.assertEqual(audit["events"], 3)
+        self.assertEqual(audit["dateRangeExcluded"], 1)
+        self.assertEqual(audit["rootCutovers"], ["20260902"])
+        self.assertEqual(audit["duplicateEventsSkipped"], 0)
+
+    def test_multi_root_requires_one_cutover_per_boundary(self):
+        with self.assertRaisesRegex(ValueError, "日期切点"):
+            builder.build_dataset(
+                ["/first", "/second"],
+                "/output.npz",
+            )
+
     def test_builds_audited_npz_from_chunk_archives(self):
         with tempfile.TemporaryDirectory() as directory:
             chunks = []

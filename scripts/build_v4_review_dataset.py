@@ -78,6 +78,16 @@ def _compact_date(value):
     return digits[:8] if len(digits) >= 8 else ""
 
 
+def _within_root_date_range(outcome, start, end):
+    date = _compact_date(outcome.get("tradeDate"))
+    if not date:
+        return start is None and end is None
+    return (
+        (start is None or date >= start)
+        and (end is None or date < end)
+    )
+
+
 def _event_end_date(outcome):
     for value in (
         (outcome.get("exit") or {}).get("tradeDate"),
@@ -136,18 +146,35 @@ def _crosses_corporate_action(outcome, actions):
     )
 
 
-def build_dataset(input_root, output):
+def build_dataset(input_root, output, *, root_cutovers=None):
     roots = (
         list(input_root)
         if isinstance(input_root, (list, tuple))
         else [input_root]
     )
+    cutovers = [
+        _compact_date(value)
+        for value in (root_cutovers or [])
+    ]
+    if len(cutovers) != max(0, len(roots) - 1):
+        raise ValueError("多根训练源必须为每个相邻根提供一个日期切点")
+    if any(not value for value in cutovers):
+        raise ValueError("训练源日期切点必须为YYYYMMDD")
+    if cutovers != sorted(set(cutovers)):
+        raise ValueError("训练源日期切点必须严格递增且不重复")
     datasets = []
     seen_decisions = {}
     corporate_action_excluded = 0
     duplicate_events = 0
+    date_range_excluded = 0
     source_chunks = 0
-    for input_root_value in roots:
+    for root_index, input_root_value in enumerate(roots):
+        range_start = cutovers[root_index - 1] if root_index > 0 else None
+        range_end = (
+            cutovers[root_index]
+            if root_index < len(cutovers)
+            else None
+        )
         root = Path(input_root_value).expanduser().resolve()
         plan_path = root / "plan.json"
         with open(plan_path, encoding="utf-8") as handle:
@@ -166,13 +193,25 @@ def build_dataset(input_root, output):
                 raise FileNotFoundError(daily_path)
             actions = _corporate_action_keys(_read_gzip(daily_path))
             source_outcomes = payload.get("outcomes") or []
-            eligible_outcomes = [
+            ranged_outcomes = [
                 outcome
                 for outcome in source_outcomes
+                if _within_root_date_range(
+                    outcome,
+                    range_start,
+                    range_end,
+                )
+            ]
+            date_range_excluded += (
+                len(source_outcomes) - len(ranged_outcomes)
+            )
+            eligible_outcomes = [
+                outcome
+                for outcome in ranged_outcomes
                 if not _crosses_corporate_action(outcome, actions)
             ]
             corporate_action_excluded += (
-                len(source_outcomes) - len(eligible_outcomes)
+                len(ranged_outcomes) - len(eligible_outcomes)
             )
             eligible_outcomes, duplicate_count = _deduplicate_outcomes(
                 eligible_outcomes,
@@ -196,6 +235,8 @@ def build_dataset(input_root, output):
                 "events": len(dataset["X_all"]),
                 "conditional": len(dataset["X"]),
                 "opportunity": len(dataset["X_opportunity"]),
+                "rangeStart": range_start,
+                "rangeEndExclusive": range_end,
                 "duplicatesSkipped": duplicate_count,
             }), flush=True)
             gc.collect()
@@ -221,6 +262,8 @@ def build_dataset(input_root, output):
         "schemaVersion": "v4-review-dataset-audit.v1",
         "sourceRoots": len(roots),
         "sourceChunks": source_chunks,
+        "rootCutovers": cutovers,
+        "dateRangeExcluded": date_range_excluded,
         "duplicateEventsSkipped": duplicate_events,
         "featureSchema": merged["feature_schema"],
         "featureCount": int(len(merged["feature_names"])),
@@ -253,9 +296,14 @@ def build_dataset(input_root, output):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-root", required=True, action="append")
+    parser.add_argument("--root-cutover", action="append", default=[])
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
-    build_dataset(args.input_root, args.output)
+    build_dataset(
+        args.input_root,
+        args.output,
+        root_cutovers=args.root_cutover,
+    )
 
 
 if __name__ == "__main__":
