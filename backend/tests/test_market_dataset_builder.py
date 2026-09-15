@@ -796,6 +796,15 @@ def test_historical_tianxiang_listing_suspension_explains_missing_daily(tmp_path
             "20210602",
         ),
         (
+            "600634.SH",
+            "SH.600634",
+            "Fukong",
+            "19930304",
+            "20210721",
+            "20201209",
+            "20210602",
+        ),
+        (
             "000760.SZ",
             "SZ.000760",
             "Steyr",

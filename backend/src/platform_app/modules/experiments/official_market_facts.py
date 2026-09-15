@@ -235,6 +235,18 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
         ),
     },
     {
+        "instrument_id": "SH.600634",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20201209",
+        "effective_to": "20210602",
+        "source_urls": (
+            "https://www.sse.com.cn/disclosure/announcement/listing/stock/"
+            "c/c_20201204_80014390.shtml",
+            "https://www.sse.com.cn/disclosure/announcement/listing/stock/"
+            "c/c_20210525_81710480.shtml",
+        ),
+    },
+    {
         "instrument_id": "SH.600677",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20200529",
