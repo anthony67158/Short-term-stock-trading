@@ -740,14 +740,63 @@ def test_historical_tianxiang_listing_suspension_explains_missing_daily(tmp_path
 
 
 @pytest.mark.parametrize(
-    ("source_code", "instrument_id", "name", "list_date", "delist_date"),
+    (
+        "source_code",
+        "instrument_id",
+        "name",
+        "list_date",
+        "delist_date",
+        "trade_date",
+        "status_end",
+    ),
     [
-        ("600485.SH", "SH.600485", "Xinwei", "20030807", "20210601"),
-        ("002711.SZ", "SZ.002711", "Opur", "20140127", "20210715"),
+        (
+            "600485.SH",
+            "SH.600485",
+            "Xinwei",
+            "20030807",
+            "20210601",
+            "20200515",
+            "20210601",
+        ),
+        (
+            "002711.SZ",
+            "SZ.002711",
+            "Opur",
+            "20140127",
+            "20210715",
+            "20200515",
+            "20210602",
+        ),
+        (
+            "600677.SH",
+            "SH.600677",
+            "Aerospace Communications",
+            "19930928",
+            "20210318",
+            "20200529",
+            "20210318",
+        ),
+        (
+            "600701.SH",
+            "SH.600701",
+            "Harbin Gongda",
+            "19960528",
+            "20210430",
+            "20200529",
+            "20210315",
+        ),
     ],
 )
 def test_historical_2020_listing_suspensions_explain_missing_daily(
-    tmp_path, source_code, instrument_id, name, list_date, delist_date
+    tmp_path,
+    source_code,
+    instrument_id,
+    name,
+    list_date,
+    delist_date,
+    trade_date,
+    status_end,
 ):
     data = responses()
     data[("stock_basic", "D")] = [
@@ -757,7 +806,6 @@ def test_historical_2020_listing_suspensions_explain_missing_daily(
             "delist_date": delist_date,
         }
     ]
-    trade_date = "20200515"
     traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
     data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
     data[("adj_factor", trade_date)] = [
@@ -780,6 +828,7 @@ def test_historical_2020_listing_suspensions_explain_missing_daily(
         assert ds.listing_status_explanations(trade_date) == {
             instrument_id: ["SUSPENDED_LISTING"]
         }
+        assert ds.listing_status_explanations(status_end) == {}
 
 
 def test_historical_yanhu_listing_suspension_explains_missing_daily(tmp_path):

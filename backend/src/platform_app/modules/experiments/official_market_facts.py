@@ -225,6 +225,28 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
         ),
     },
     {
+        "instrument_id": "SH.600677",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20200529",
+        "effective_to": "20210318",
+        "source_urls": (
+            "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/"
+            "2021-01-09/600677_20210109_1.pdf",
+            "https://www.sse.com.cn/disclosure/listedinfo/announcement/c/"
+            "2021-03-12/600677_20210312_1.pdf",
+        ),
+    },
+    {
+        "instrument_id": "SH.600701",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20200529",
+        "effective_to": "20210315",
+        "source_urls": (
+            "https://static.sse.com.cn/disclosure/listedinfo/announcement/c/"
+            "2021-03-06/600701_20210306_2.pdf",
+        ),
+    },
+    {
         "instrument_id": "SZ.000670",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20200407",
