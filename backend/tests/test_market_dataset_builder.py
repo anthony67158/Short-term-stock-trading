@@ -642,6 +642,38 @@ def test_historical_xintan_listing_suspension_explains_missing_daily(tmp_path):
         }
 
 
+def test_historical_zhonghe_listing_suspension_explains_missing_daily(tmp_path):
+    data = responses()
+    data[("stock_basic", "D")] = [
+        {
+            **stock("002070.SZ", "Zhonghe", "主板", "SZSE", "20061012"),
+            "list_status": "D",
+            "delist_date": "20190709",
+        }
+    ]
+    trade_date = "20180515"
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+        for code in [*traded_codes, "002070.SZ"]
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="zhonghe-suspension", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+
+        assert result["dailyBars"] == 3
+        assert ds.listing_status_explanations(trade_date) == {
+            "SZ.002070": ["SUSPENDED_LISTING"]
+        }
+
+
 def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [
