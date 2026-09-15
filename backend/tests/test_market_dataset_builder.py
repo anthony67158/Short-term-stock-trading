@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -10,8 +11,10 @@ from platform_app.modules.experiments.market_dataset_builder import MarketDatase
 class FakeClient:
     def __init__(self, responses):
         self.responses = responses
+        self.calls = []
 
     def rows(self, api_name, params, fields):
+        self.calls.append((api_name, params, fields))
         key = (api_name, params.get("list_status") or params.get("trade_date") or "")
         rows = self.responses.get(key, self.responses.get((api_name, ""), []))
         if api_name == "namechange":
@@ -46,6 +49,32 @@ def bar(code, trade_date="20260915"):
         "vol": "1",
         "amount": "1",
     }
+
+
+def minute_rows(code, trade_date="20260915"):
+    date = datetime.strptime(trade_date, "%Y%m%d").strftime("%Y-%m-%d")
+    starts = (
+        datetime.fromisoformat(f"{date} 09:35:00"),
+        datetime.fromisoformat(f"{date} 13:05:00"),
+    )
+    times = [start + timedelta(minutes=5 * offset) for start in starts for offset in range(24)]
+    return list(
+        reversed(
+            [
+                {
+                    "ts_code": code,
+                    "trade_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "open": "10",
+                    "high": "11",
+                    "low": "9",
+                    "close": "10",
+                    "vol": "100" if index == 0 else "0",
+                    "amount": "1000" if index == 0 else "0",
+                }
+                for index, time in enumerate(times)
+            ]
+        )
+    )
 
 
 def responses():
@@ -184,6 +213,113 @@ def test_builder_rejects_unexplained_missing_daily_before_writing(tmp_path):
         with pytest.raises(MarketDatasetError, match="DAILY_COVERAGE_INCOMPLETE:1"):
             builder.sync_daily_partition("20260915")
         assert ds.db.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0] == 0
+
+
+def test_builder_syncs_complete_minute_partition_and_audits_daily_aggregation(tmp_path):
+    data = responses()
+    data[("stk_mins", "")] = minute_rows("000001.SZ")
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="minute-history", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(
+            FakeClient(data),
+            ds,
+            observed_at=lambda: "2026-09-16T01:00:00+00:00",
+        )
+        builder.sync_reference("20160101", "20260915")
+        builder.sync_daily_partition("20260915")
+
+        result = builder.sync_minute_partition("SZ.000001", "20260915")
+
+        assert result == {
+            "status": "COMPLETED",
+            "instrumentId": "SZ.000001",
+            "tradeDate": "20260915",
+            "minuteBars": 48,
+            "volumeDeltaShares": "0",
+            "amountDeltaCny": "0",
+        }
+        assert builder.sync_minute_partition("SZ.000001", "20260915")["status"] == "SKIPPED"
+        first, last, count = ds.db.execute(
+            "SELECT min(bar_end_shanghai), max(bar_end_shanghai), count(*) "
+            "FROM minute_bars WHERE instrument_id = 'SZ.000001'"
+        ).fetchone()
+        assert (first, last, count) == (
+            "2026-09-15 09:35:00",
+            "2026-09-15 15:00:00",
+            48,
+        )
+        details = json.loads(
+            ds.db.execute(
+                "SELECT details_json FROM sync_checkpoints "
+                "WHERE stream = 'minute_5min' AND partition_key = 'SZ.000001:20260915'"
+            ).fetchone()[0]
+        )
+        assert details["aggregation"]["amountToleranceCny"] == "2"
+
+
+def test_builder_rejects_incomplete_minute_session_before_writing(tmp_path):
+    data = responses()
+    data[("stk_mins", "")] = minute_rows("300001.SZ")[:-1]
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="minute-incomplete", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+        builder.sync_daily_partition("20260915")
+
+        with pytest.raises(MarketDatasetError, match="MINUTE_SESSION_INCOMPLETE"):
+            builder.sync_minute_partition("SZ.300001", "20260915")
+
+        assert ds.db.execute("SELECT COUNT(*) FROM minute_bars").fetchone()[0] == 0
+
+
+def test_builder_requests_bse_minutes_with_current_stable_source_code(tmp_path):
+    data = responses()
+    trade_date = "20211115"
+    data[("trade_cal", "")] = [
+        {
+            "exchange": "SSE",
+            "cal_date": trade_date,
+            "is_open": "1",
+            "pretrade_date": "20211112",
+        }
+    ]
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH", "839729.BJ"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"} for code in traded_codes
+    ]
+    data[("suspend_d", trade_date)] = []
+    data[("stk_mins", "")] = minute_rows("920729.BJ", trade_date)
+    client = FakeClient(data)
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="bse-minute-code", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(client, ds)
+        builder.sync_reference("20211115", "20211115")
+        builder.sync_daily_partition(trade_date)
+
+        result = builder.sync_minute_partition("BJ.920729", trade_date)
+
+        assert result["minuteBars"] == 48
+        minute_call = next(call for call in client.calls if call[0] == "stk_mins")
+        assert minute_call[1]["ts_code"] == "920729.BJ"
+        assert (
+            ds.db.execute(
+                "SELECT DISTINCT source_code FROM minute_bars WHERE instrument_id = 'BJ.920729'"
+            ).fetchone()[0]
+            == "920729.BJ"
+        )
+        assert (
+            ds.db.execute(
+                "SELECT source_code FROM daily_bars "
+                "WHERE instrument_id = 'BJ.920729' AND trade_date = ?",
+                (trade_date,),
+            ).fetchone()[0]
+            == "839729.BJ"
+        )
 
 
 def test_builder_rejects_vendor_row_limit_as_possible_truncation(tmp_path):

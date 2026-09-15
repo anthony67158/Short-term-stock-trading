@@ -94,6 +94,37 @@ uv run platform-cli audit-market-archive \
   2021-11-15丢弃250条未来北交所证券行、7条退市后复权因子和2条代码重复。
   同期无日线的证券分别由交易所公告记录的暂停上市期间解释，未使用公式兜底。
 
+## 5分钟数据政策与实测门禁
+
+- 全市场股票池、候选生成和全量回测以已核验日线分区为分母；5分钟数据按进入
+  候选或持仓episode的证券和日期显式获取。CLI要求传入`--instrument-id`，
+  不允许误触发“全证券×全交易日”的无界下载。
+- 每个证券日必须已有通过门禁的日线分区和当日日线，且严格包含09:35至11:30、
+  13:05至15:00共48个标准时点。开盘、收盘必须等于日线；分钟高低不得越过
+  日线范围；成交量汇总差必须小于100股；成交额汇总差不得超过2元与日线成交额
+  5bps二者中的较大值。实际汇总值、偏差、门限及日线源行hash写入checkpoint。
+- 分钟接口历史查询使用证券主档当前代码。真实探测证明北交所旧代码
+  `832000.BJ`在2021-11-15返回0行，而稳定代码`920000.BJ`返回48行；日线仍
+  保存当时旧代码，二者都映射到稳定身份`BJ.920000`，不改写来源。
+- 真实写入并通过门禁的样本为：2021-11-15沪市主板`SH.600000`、创业板
+  `SZ.300001`、科创板`SH.688001`，以及2022-11-15北交所`BJ.920000`，
+  共4个分区、192根K线，SQLite完整性为`ok`。
+- 2021-11-15北交所开市首日样本被拒绝：虽有48根K线且成交量仅差15股，
+  但分钟成交额比日线多77,963元（约10.03bps），超过门限，分钟最高价13.81
+  也未覆盖日线最高价13.90。该episode不可用于训练、回测或交易，不放宽全局
+  门限掩盖差异。后续回测必须按板块和日期报告分钟可用率及拒绝原因。
+
+可恢复命令示例：
+
+```sh
+cd backend
+uv run platform-cli build-market-dataset \
+  --dataset-root /absolute/external/dataset \
+  --dataset-id DATASET_ID --stage minute \
+  --start-date 20221115 --end-date 20221115 \
+  --instrument-id BJ.920000
+```
+
 实现依据：
 
 - Tushare `stock_basic`：https://tushare.pro/document/2?doc_id=25
@@ -102,6 +133,7 @@ uv run platform-cli audit-market-archive \
 - Tushare `adj_factor`：https://tushare.pro/document/2?doc_id=28
 - Tushare `namechange`：https://tushare.pro/document/2?doc_id=100
 - Tushare `suspend_d`：https://tushare.pro/document/2?doc_id=214
+- Tushare `stk_mins`：https://tushare.pro/document/2?doc_id=234
 - 北交所2021-11-15开市事实：https://www.bse.cn/important_news/200011776.html
 
 该单日探测仍不代表2016年至今全量历史已下载、分钟策略已覆盖或数值已完成

@@ -29,7 +29,8 @@ def main():
     parser.add_argument("--dataset-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
-    parser.add_argument("--stage", choices=["reference", "names", "daily", "seal"])
+    parser.add_argument("--stage", choices=["reference", "names", "daily", "minute", "seal"])
+    parser.add_argument("--instrument-id", action="append")
     args = parser.parse_args()
     if args.command == "export-contracts":
         from platform_app.entrypoints.api import app
@@ -72,7 +73,15 @@ def main():
                 or not re.fullmatch(r"\d{8}", args.end_date)
                 or args.start_date > args.end_date
             ):
-                parser.error("reference/names/daily dates must be ordered YYYYMMDD values")
+                parser.error("non-seal stages require ordered YYYYMMDD date values")
+            if args.stage == "minute" and (
+                not args.instrument_id
+                or len(args.instrument_id) != len(set(args.instrument_id))
+                or any(
+                    not re.fullmatch(r"(SH|SZ|BJ)\.\d{6}", value) for value in args.instrument_id
+                )
+            ):
+                parser.error("minute stage requires unique SH/SZ/BJ instrument-id values")
         try:
             dataset_root = external_dataset_root(args.dataset_root)
         except ValueError as exc:
@@ -92,7 +101,7 @@ def main():
                 elif args.stage == "names":
                     result = builder.sync_name_changes(args.start_date, args.end_date)
                     print(json.dumps(result, ensure_ascii=False))
-                else:
+                elif args.stage == "daily":
                     dates = dataset.db.execute(
                         "SELECT cal_date FROM trade_calendar "
                         "WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date",
@@ -103,6 +112,21 @@ def main():
                             builder.sync_daily_partition(trade_date),
                             ensure_ascii=False,
                         ), flush=True)
+                else:
+                    dates = dataset.db.execute(
+                        "SELECT cal_date FROM trade_calendar "
+                        "WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date",
+                        (args.start_date, args.end_date),
+                    ).fetchall()
+                    for (trade_date,) in dates:
+                        for instrument_id in args.instrument_id:
+                            print(
+                                json.dumps(
+                                    builder.sync_minute_partition(instrument_id, trade_date),
+                                    ensure_ascii=False,
+                                ),
+                                flush=True,
+                            )
     elif args.command == "create-user":
         from platform_app.modules.identity.service import create_user
 

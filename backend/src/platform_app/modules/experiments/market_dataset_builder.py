@@ -1,11 +1,13 @@
 """Resumable full-market ingestion with point-in-time coverage checks."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 from platform_app.adapters.market_tushare import (
     BSE_MAPPING_FIELDS,
     DAILY_FIELDS,
+    MINUTE_FIELDS,
     STOCK_BASIC_FIELDS,
     HistoricalMarketError,
     TushareClient,
@@ -14,6 +16,7 @@ from platform_app.adapters.market_tushare import (
     normalize_bse_mapping,
     normalize_daily,
     normalize_instrument,
+    normalize_minute,
     normalize_name_change,
     normalize_suspension,
     normalize_trade_calendar,
@@ -34,6 +37,9 @@ ADJUSTMENT_FIELDS = "ts_code,trade_date,adj_factor"
 SUSPENSION_FIELDS = "ts_code,trade_date,suspend_timing,suspend_type"
 NAME_CHANGE_FIELDS = "ts_code,name,start_date,end_date,ann_date,change_reason"
 NAME_CHANGE_PAGE_SIZE = 5000
+MINUTE_AMOUNT_TOLERANCE_RATE = Decimal("0.0005")
+MINUTE_AMOUNT_TOLERANCE_CNY = Decimal("2")
+MINUTE_VOLUME_TOLERANCE_SHARES = Decimal("100")
 
 
 def _observed_at() -> str:
@@ -41,7 +47,12 @@ def _observed_at() -> str:
 
 
 def _historical_available_at(trade_date: str, kind: str) -> str:
-    time = "09:20:00" if kind == "adj_factor" else "16:30:00"
+    if kind == "adj_factor":
+        time = "09:20:00"
+    elif kind == "minute":
+        time = "21:00:00"
+    else:
+        time = "16:30:00"
     return f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}T{time}+08:00"
 
 
@@ -56,6 +67,60 @@ def _validate_partition_rows(rows: list[dict], trade_date: str) -> list[dict]:
         if str(row.get("trade_date") or "") != trade_date:
             raise MarketDatasetError("UPSTREAM_PARTITION_DATE_MISMATCH")
     return rows
+
+
+def _expected_minute_bar_ends(trade_date: str) -> list[str]:
+    date = datetime.strptime(trade_date, "%Y%m%d").strftime("%Y-%m-%d")
+    starts = (
+        datetime.fromisoformat(f"{date} 09:35:00"),
+        datetime.fromisoformat(f"{date} 13:05:00"),
+    )
+    return [
+        (start + timedelta(minutes=5 * offset)).strftime("%Y-%m-%d %H:%M:%S")
+        for start in starts
+        for offset in range(24)
+    ]
+
+
+def _minute_aggregation(rows: list[dict], daily: dict) -> dict:
+    opening = Decimal(rows[0]["open"])
+    closing = Decimal(rows[-1]["close"])
+    high = max(Decimal(row["high"]) for row in rows)
+    low = min(Decimal(row["low"]) for row in rows)
+    daily_open = Decimal(daily["open"])
+    daily_close = Decimal(daily["close"])
+    daily_high = Decimal(daily["high"])
+    daily_low = Decimal(daily["low"])
+    if opening != daily_open or closing != daily_close:
+        raise MarketDatasetError("MINUTE_DAILY_OPEN_CLOSE_MISMATCH")
+    if high > daily_high or low < daily_low:
+        raise MarketDatasetError("MINUTE_OUTSIDE_DAILY_RANGE")
+
+    volume = sum(Decimal(row["volumeShares"]) for row in rows)
+    amount = sum(Decimal(row["amountCny"]) for row in rows)
+    daily_volume = Decimal(daily["volume_shares"])
+    daily_amount = Decimal(daily["amount_cny"])
+    volume_delta = volume - daily_volume
+    amount_delta = amount - daily_amount
+    if abs(volume_delta) >= MINUTE_VOLUME_TOLERANCE_SHARES:
+        raise MarketDatasetError("MINUTE_DAILY_VOLUME_MISMATCH")
+    amount_tolerance = max(
+        MINUTE_AMOUNT_TOLERANCE_CNY,
+        abs(daily_amount) * MINUTE_AMOUNT_TOLERANCE_RATE,
+    )
+    if abs(amount_delta) > amount_tolerance:
+        raise MarketDatasetError("MINUTE_DAILY_AMOUNT_MISMATCH")
+    return {
+        "open": format(opening, "f"),
+        "high": format(high, "f"),
+        "low": format(low, "f"),
+        "close": format(closing, "f"),
+        "volumeShares": format(volume, "f"),
+        "amountCny": format(amount, "f"),
+        "volumeDeltaShares": format(volume_delta, "f"),
+        "amountDeltaCny": format(amount_delta, "f"),
+        "amountToleranceCny": format(amount_tolerance, "f"),
+    }
 
 
 def _filter_pre_listing_bse_rows(
@@ -604,6 +669,97 @@ class MarketDatasetBuilder:
             "discardedAliasDuplicates": sum(
                 map(len, (duplicate_daily, duplicate_factors, duplicate_suspensions))
             ),
+        }
+
+    def sync_minute_partition(self, instrument_id: str, trade_date: str) -> dict:
+        partition_key = f"{instrument_id}:{trade_date}"
+        if self.dataset.has_checkpoint("minute_5min", partition_key):
+            return {
+                "status": "SKIPPED",
+                "instrumentId": instrument_id,
+                "tradeDate": trade_date,
+            }
+        if not self.dataset.has_checkpoint("daily", trade_date):
+            raise MarketDatasetError("MINUTE_REQUIRES_VALIDATED_DAILY_PARTITION")
+        daily = self.dataset.db.execute(
+            "SELECT * FROM daily_bars WHERE instrument_id = ? AND trade_date = ?",
+            (instrument_id, trade_date),
+        ).fetchone()
+        if not daily:
+            raise MarketDatasetError("MINUTE_DAILY_BAR_MISSING")
+
+        source_code = self.dataset.db.execute(
+            "SELECT source_code FROM instruments WHERE instrument_id = ?",
+            (instrument_id,),
+        ).fetchone()["source_code"]
+        date = datetime.strptime(trade_date, "%Y%m%d").strftime("%Y-%m-%d")
+        raw_rows = self.client.rows(
+            "stk_mins",
+            {
+                "ts_code": source_code,
+                "freq": "5min",
+                "start_date": f"{date} 09:30:00",
+                "end_date": f"{date} 15:00:00",
+            },
+            MINUTE_FIELDS,
+        )
+        if len(raw_rows) >= 8000:
+            raise MarketDatasetError("MINUTE_MAY_BE_TRUNCATED")
+        aliases = self.aliases()
+        rows = [normalize_minute(row, instrument_id, aliases) for row in raw_rows]
+        if any(row["sourceCode"] != source_code for row in rows):
+            raise MarketDatasetError("MINUTE_SOURCE_CODE_MISMATCH")
+        rows.sort(key=lambda row: row["barEndShanghai"])
+        if [row["barEndShanghai"] for row in rows] != _expected_minute_bar_ends(trade_date):
+            raise MarketDatasetError("MINUTE_SESSION_INCOMPLETE")
+        aggregation = _minute_aggregation(rows, dict(daily))
+
+        observed_at = self.observed_at()
+        available_at = _historical_available_at(trade_date, "minute")
+        stored = [
+            {
+                "instrument_id": row["instrumentId"],
+                "source_code": row["sourceCode"],
+                "bar_end_shanghai": row["barEndShanghai"],
+                "frequency": row["frequency"],
+                "open": row["open"],
+                "high": row["high"],
+                "low": row["low"],
+                "close": row["close"],
+                "volume_shares": row["volumeShares"],
+                "amount_cny": row["amountCny"],
+                "adjustment": row["adjustment"],
+                "source": SOURCE,
+                "available_at": available_at,
+                "source_row_sha256": row["sourceRowSha256"],
+            }
+            for row in rows
+        ]
+        self.dataset.write_facts(
+            "minute_bars",
+            stored,
+            key_fields=("instrument_id", "bar_end_shanghai", "frequency"),
+        )
+        self.dataset.checkpoint(
+            "minute_5min",
+            partition_key,
+            rows,
+            source=SOURCE,
+            first_seen_at=observed_at,
+            available_at=available_at,
+            availability_method="RECONSTRUCTED_FROM_VENDOR_SCHEDULE",
+            details={
+                "aggregation": aggregation,
+                "dailySourceRowSha256": daily["source_row_sha256"],
+            },
+        )
+        return {
+            "status": "COMPLETED",
+            "instrumentId": instrument_id,
+            "tradeDate": trade_date,
+            "minuteBars": len(rows),
+            "volumeDeltaShares": aggregation["volumeDeltaShares"],
+            "amountDeltaCny": aggregation["amountDeltaCny"],
         }
 
 
