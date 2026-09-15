@@ -52,7 +52,10 @@ from .evaluation import (
     regression_metrics,
 )
 from .review_bakeoff import load_dataset
-from .review_dataset import opportunity_fill_labels
+from .review_dataset import (
+    opportunity_fill_labels,
+    review_feature_coverage_audit,
+)
 from time_splits import four_way_interval_split
 
 
@@ -835,6 +838,13 @@ def train_review_ensemble(
         else 0
     )
     dataset = load_dataset(input_path, feature_schema=feature_schema)
+    if feature_schema == "v4":
+        feature_audit = review_feature_coverage_audit(dataset)
+        if feature_audit["trainingReady"] is not True:
+            raise ValueError(
+                "V4关键特征覆盖不足: "
+                + "; ".join(feature_audit["blockers"])
+            )
     if (
         len(dataset["X"]) < 500
         or len(dataset["X_all"]) < 500

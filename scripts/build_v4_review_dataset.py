@@ -26,6 +26,7 @@ from decision_engine.training.review_dataset import (  # noqa: E402
     build_opportunity_review_dataset,
     merge_opportunity_review_datasets,
     normalize_review_history_outcomes,
+    review_feature_coverage_audit,
     save_opportunity_review_dataset,
 )
 
@@ -242,6 +243,8 @@ def build_dataset(input_root, output, *, root_cutovers=None):
             gc.collect()
 
     merged = merge_opportunity_review_datasets(datasets)
+    feature_audit = review_feature_coverage_audit(merged)
+    merged["summary"]["feature_audit"] = feature_audit
     destination = Path(output).expanduser().resolve()
     save_opportunity_review_dataset(destination, merged)
     names = merged["feature_names"].astype(str).tolist()
@@ -278,6 +281,7 @@ def build_dataset(input_root, output, *, root_cutovers=None):
         "stress10Coverage": round(float(np.mean(
             merged["stress10_available_opportunity"],
         )), 6),
+        "featureAudit": feature_audit,
         "output": str(destination),
         "size": destination.stat().st_size,
         "sha256": _sha256(destination),

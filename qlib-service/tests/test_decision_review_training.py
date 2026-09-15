@@ -30,6 +30,9 @@ from decision_engine.training.review_ensemble import (  # noqa: E402
     train_review_ensemble,
 )
 from decision_engine.training.bakeoff import _probability  # noqa: E402
+from decision_engine.training.review_dataset import (  # noqa: E402
+    review_feature_coverage_audit,
+)
 
 
 class DecisionReviewTrainingTest(unittest.TestCase):
@@ -184,6 +187,11 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             dtype=np.float32,
         )
         matrix[:, 0] = np.arange(len(dates), dtype=np.float32)
+        if tuple(feature_names) == FEATURE_NAMES_V4:
+            matrix[
+                :,
+                feature_names.index("initial_sectorContextAvailable"),
+            ] = 1.0
         groups = np.asarray([
             f"600001:event-{index}"
             for index in range(len(dates))
@@ -224,7 +232,27 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             "sector_phases_opportunity": np.asarray(
                 ["ACCUMULATION"] * len(dates)
             ),
+            "feature_names": np.asarray(feature_names),
         }
+
+    def test_v4_feature_audit_blocks_missing_direct_inputs(self):
+        dataset = self.dataset(FEATURE_NAMES_V4, date_count=800)
+        matrix = dataset["X_opportunity"]
+        matrix[:, FEATURE_NAMES_V4.index("vwapMissing")] = 1.0
+        matrix[
+            :,
+            FEATURE_NAMES_V4.index("initialExpectedNetRMissing"),
+        ] = 1.0
+
+        audit = review_feature_coverage_audit(dataset)
+
+        self.assertFalse(audit["trainingReady"])
+        self.assertEqual(audit["coverage"]["reviewVwap"], 0.0)
+        self.assertEqual(audit["coverage"]["initialExpectedNetR"], 0.0)
+        self.assertTrue(any(
+            "reviewVwap" in blocker
+            for blocker in audit["blockers"]
+        ))
 
     def _run_training(self, dataset, **train_kwargs):
         def member(

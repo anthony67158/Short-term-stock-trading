@@ -136,6 +136,88 @@ def _count_by(values, field):
     return dict(sorted(counts.items()))
 
 
+def review_feature_coverage_audit(dataset):
+    names = tuple(np.asarray(dataset["feature_names"]).astype(str))
+    matrix = np.asarray(dataset["X_opportunity"], dtype=np.float64)
+    if matrix.ndim != 2 or matrix.shape[1] != len(names):
+        raise ValueError("复核特征覆盖审计维度无效")
+    indices = {name: index for index, name in enumerate(names)}
+
+    def available_from_missing(name):
+        index = indices.get(name)
+        return (
+            float(np.mean(matrix[:, index] < 0.5))
+            if index is not None and len(matrix)
+            else 0.0
+        )
+
+    def available_from_flag(name):
+        index = indices.get(name)
+        return (
+            float(np.mean(matrix[:, index] >= 0.5))
+            if index is not None and len(matrix)
+            else 0.0
+        )
+
+    alpha_missing = [
+        index
+        for index, name in enumerate(names)
+        if name.startswith("alpha_") and name.endswith("Missing")
+    ]
+    coverage = {
+        "reviewVwap": available_from_missing("vwapMissing"),
+        "initialPFill": available_from_missing(
+            "initialPFillMissing",
+        ),
+        "initialPWin": available_from_missing(
+            "initialPWinGivenFillMissing",
+        ),
+        "initialExpectedNetR": available_from_missing(
+            "initialExpectedNetRMissing",
+        ),
+        "sectorContext": available_from_flag(
+            "initial_sectorContextAvailable",
+        ),
+        "alpha": (
+            float(np.mean(
+                np.all(matrix[:, alpha_missing] < 0.5, axis=1),
+            ))
+            if alpha_missing and len(matrix)
+            else 0.0
+        ),
+    }
+    thresholds = {
+        "reviewVwap": 0.85,
+        "initialPFill": 0.85,
+        "initialPWin": 0.85,
+        "initialExpectedNetR": 0.85,
+        "sectorContext": 0.80,
+        "alpha": 0.80,
+    }
+    blockers = [
+        f"{name}覆盖率{coverage[name]:.2%}低于{minimum:.0%}"
+        for name, minimum in thresholds.items()
+        if coverage[name] < minimum
+    ]
+    constant = [
+        name
+        for index, name in enumerate(names)
+        if len(matrix) and float(np.std(matrix[:, index])) < 1e-9
+    ]
+    return {
+        "schemaVersion": "review-feature-coverage-audit.v1",
+        "trainingReady": not blockers,
+        "coverage": {
+            name: round(value, 6)
+            for name, value in coverage.items()
+        },
+        "thresholds": thresholds,
+        "constantFeatureCount": len(constant),
+        "constantFeatures": constant,
+        "blockers": blockers,
+    }
+
+
 def _sum_counts(datasets, path):
     counts = Counter()
     for dataset in datasets:

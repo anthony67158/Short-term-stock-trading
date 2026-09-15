@@ -213,7 +213,13 @@ class BuildV4ReviewDatasetTest(unittest.TestCase):
             self.assertEqual(audit["events"], 2)
             self.assertEqual(audit["conditionalSamples"], 2)
             self.assertEqual(audit["stress10Coverage"], 1.0)
+            self.assertFalse(audit["featureAudit"]["trainingReady"])
+            self.assertTrue(audit["featureAudit"]["blockers"])
             self.assertEqual(dataset["X"].shape, (2, len(FEATURE_NAMES_V4)))
+            self.assertEqual(
+                dataset["summary"]["feature_audit"],
+                audit["featureAudit"],
+            )
             self.assertTrue(os.path.isfile(
                 os.path.join(directory, "review-v4.audit.json"),
             ))
