@@ -706,6 +706,38 @@ def test_historical_changsheng_listing_suspension_explains_missing_daily(tmp_pat
         }
 
 
+def test_historical_tianxiang_listing_suspension_explains_missing_daily(tmp_path):
+    data = responses()
+    data[("stock_basic", "D")] = [
+        {
+            **stock("300362.SZ", "Tianxiang", "创业板", "SZSE", "20140121"),
+            "list_status": "D",
+            "delist_date": "20210830",
+        }
+    ]
+    trade_date = "20200513"
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+        for code in [*traded_codes, "300362.SZ"]
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="tianxiang-suspension", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+
+        assert result["dailyBars"] == 3
+        assert ds.listing_status_explanations(trade_date) == {
+            "SZ.300362": ["SUSPENDED_LISTING"]
+        }
+
+
 @pytest.mark.parametrize(
     ("source_code", "instrument_id", "name", "list_date", "delist_date"),
     [

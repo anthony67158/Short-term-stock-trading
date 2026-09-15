@@ -320,4 +320,16 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
             "2020-07-14/cfc9fc69-9544-42e7-8cda-a86cfb2cf7c1.PDF",
         ),
     },
+    {
+        "instrument_id": "SZ.300362",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20200513",
+        "effective_to": "20210719",
+        "source_urls": (
+            "http://disc.static.szse.cn/download/disc/disk02/finalpage/"
+            "2020-05-09/db70cc33-6e60-4309-beda-5093ff67ebb5.PDF",
+            "https://disc.static.szse.cn/disc/disk02/finalpage/"
+            "2021-07-16/26041616-c4cf-4c32-8652-2eec5262386b.PDF",
+        ),
+    },
 )
