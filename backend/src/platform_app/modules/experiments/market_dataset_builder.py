@@ -9,6 +9,7 @@ from platform_app.adapters.market_tushare import (
     STOCK_BASIC_FIELDS,
     HistoricalMarketError,
     TushareClient,
+    instrument_parts,
     normalize_adjustment_factor,
     normalize_bse_mapping,
     normalize_daily,
@@ -54,37 +55,51 @@ def _validate_partition_rows(rows: list[dict], trade_date: str) -> list[dict]:
     return rows
 
 
-def _filter_out_of_window_rows(
+def _filter_pre_listing_bse_rows(
+    rows: list[dict],
+    *,
+    trade_date: str,
+    aliases: dict[str, str],
+    lifecycles: dict[str, dict[str, str | None]],
+) -> tuple[list[dict], list[dict]]:
+    kept = []
+    discarded = []
+    for row in rows:
+        source_code = str(row.get("ts_code") or "").upper()
+        canonical_code = aliases.get(source_code, source_code)
+        code, exchange, _ = instrument_parts(canonical_code)
+        instrument_id = f"{exchange}.{code}"
+        lifecycle = lifecycles.get(instrument_id)
+        if lifecycle and lifecycle["board"] == "BEIJING" and trade_date < lifecycle["list_date"]:
+            discarded.append(row)
+        else:
+            kept.append(row)
+    return kept, discarded
+
+
+def _filter_post_delisting_adjustments(
     raw_rows: list[dict],
     normalized_rows: list[dict],
     *,
     trade_date: str,
-    instrument_id_field: str,
-    stream: str,
     eligible_ids: set[str],
     lifecycles: dict[str, dict[str, str | None]],
-) -> tuple[list[dict], list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict]]:
     kept = []
-    pre_listing_bse = []
-    post_delisting_adjustments = []
+    discarded = []
     for raw, normalized in zip(raw_rows, normalized_rows, strict=True):
-        instrument_id = normalized[instrument_id_field]
-        if instrument_id in eligible_ids:
-            kept.append(normalized)
-            continue
+        instrument_id = normalized["instrument_id"]
         lifecycle = lifecycles.get(instrument_id)
         if (
-            lifecycle
-            and stream == "adjustment_factor"
+            instrument_id not in eligible_ids
+            and lifecycle
             and lifecycle["delist_date"]
             and trade_date > lifecycle["delist_date"]
         ):
-            post_delisting_adjustments.append(raw)
-        elif lifecycle and lifecycle["board"] == "BEIJING" and trade_date < lifecycle["list_date"]:
-            pre_listing_bse.append(raw)
+            discarded.append(raw)
         else:
             kept.append(normalized)
-    return kept, pre_listing_bse, post_delisting_adjustments
+    return kept, discarded
 
 
 def _discard_audit(rows: list[dict]) -> dict:
@@ -304,24 +319,21 @@ class MarketDatasetBuilder:
             return {"status": "SKIPPED", "tradeDate": trade_date}
         observed_at = self.observed_at()
         aliases = self.aliases()
+        expected = set(self.dataset.eligible_instruments(trade_date))
+        lifecycles = self.dataset.instrument_lifecycles()
         raw_daily = _validate_partition_rows(
             self.client.rows("daily", {"trade_date": trade_date}, DAILY_FIELDS),
             trade_date,
         )
         if len(raw_daily) >= 6000:
             raise MarketDatasetError("DAILY_MAY_BE_TRUNCATED")
-        daily = [normalize_daily(row, aliases) for row in raw_daily]
-        expected = set(self.dataset.eligible_instruments(trade_date))
-        lifecycles = self.dataset.instrument_lifecycles()
-        daily, pre_listing_daily, _ = _filter_out_of_window_rows(
+        raw_daily, pre_listing_daily = _filter_pre_listing_bse_rows(
             raw_daily,
-            daily,
             trade_date=trade_date,
-            instrument_id_field="instrumentId",
-            stream="daily",
-            eligible_ids=expected,
+            aliases=aliases,
             lifecycles=lifecycles,
         )
+        daily = [normalize_daily(row, aliases) for row in raw_daily]
         daily, duplicate_daily = _deduplicate_alias_rows(
             daily,
             key=lambda row: (row["instrumentId"], row["tradeDate"]),
@@ -332,18 +344,22 @@ class MarketDatasetBuilder:
             self.client.rows("adj_factor", {"trade_date": trade_date}, ADJUSTMENT_FIELDS),
             trade_date,
         )
+        raw_factors, pre_listing_factors = _filter_pre_listing_bse_rows(
+            raw_factors,
+            trade_date=trade_date,
+            aliases=aliases,
+            lifecycles=lifecycles,
+        )
         factors = [
             normalize_adjustment_factor(
                 row, aliases, _historical_available_at(trade_date, "adj_factor")
             )
             for row in raw_factors
         ]
-        factors, pre_listing_factors, post_delisting_factors = _filter_out_of_window_rows(
+        factors, post_delisting_factors = _filter_post_delisting_adjustments(
             raw_factors,
             factors,
             trade_date=trade_date,
-            instrument_id_field="instrument_id",
-            stream="adjustment_factor",
             eligible_ids=expected,
             lifecycles=lifecycles,
         )
@@ -357,19 +373,16 @@ class MarketDatasetBuilder:
             self.client.rows("suspend_d", {"trade_date": trade_date}, SUSPENSION_FIELDS),
             trade_date,
         )
+        raw_suspensions, pre_listing_suspensions = _filter_pre_listing_bse_rows(
+            raw_suspensions,
+            trade_date=trade_date,
+            aliases=aliases,
+            lifecycles=lifecycles,
+        )
         suspensions = [
             normalize_suspension(row, aliases, _historical_available_at(trade_date, "suspension"))
             for row in raw_suspensions
         ]
-        suspensions, pre_listing_suspensions, _ = _filter_out_of_window_rows(
-            raw_suspensions,
-            suspensions,
-            trade_date=trade_date,
-            instrument_id_field="instrument_id",
-            stream="suspension",
-            eligible_ids=expected,
-            lifecycles=lifecycles,
-        )
         suspensions, duplicate_suspensions = _deduplicate_alias_rows(
             suspensions,
             key=lambda row: (

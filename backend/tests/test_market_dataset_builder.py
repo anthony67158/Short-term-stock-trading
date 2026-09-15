@@ -274,9 +274,10 @@ def test_builder_discards_future_bse_backfill_from_all_daily_streams(tmp_path):
     )
     trade_date = "20211115"
     codes = ["000001.SZ", "300001.SZ", "688001.SH", "920729.BJ"]
+    invalid_backfill = {**bar("920123.BJ", trade_date), "pre_close": None}
     data[("daily", trade_date)] = [
         *(bar(code, trade_date) for code in codes),
-        bar("920123.BJ", trade_date),
+        invalid_backfill,
     ]
     data[("adj_factor", trade_date)] = [
         {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
