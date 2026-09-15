@@ -31,6 +31,22 @@ uv run uvicorn platform_app.entrypoints.api:app --reload --host 127.0.0.1 --port
 首次证券目录通过`uv run platform-cli sync-instruments`显式联网采集；
 当前目录不能用于历史回测股票池。
 
+历史数据集必须写入仓库外绝对路径，并按参考数据、逐交易日、封存三阶段执行：
+
+```bash
+uv run platform-cli build-market-dataset --dataset-root /absolute/external/path \
+  --dataset-id a-share-2016-current --start-date 20160101 --end-date YYYYMMDD \
+  --stage reference
+uv run platform-cli build-market-dataset --dataset-root /absolute/external/path \
+  --dataset-id a-share-2016-current --start-date 20160101 --end-date YYYYMMDD \
+  --stage daily
+uv run platform-cli build-market-dataset --dataset-root /absolute/external/path \
+  --dataset-id a-share-2016-current --stage seal
+```
+
+该命令只从`PLATFORM_MARKET_DATA_*`读取仓库外凭据。未完成所有分区质量检查前
+不得执行`seal`，封存后数据集拒绝继续写入。
+
 研究Worker单独启动：`uv run python -m platform_app.modules.research.worker`。
 账本维护单独启动：`uv run python -m platform_app.modules.portfolio.worker`，
 每秒为到期人工计划释放剩余预留并追加审计；读取时也立即排除到期占用。

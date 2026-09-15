@@ -88,6 +88,20 @@ def test_dataset_resumes_exact_rows_and_rejects_conflicts_atomically(tmp_path):
             ds.checkpoint("daily", "20260915", [])
 
 
+def test_reference_replay_preserves_first_observation_time(tmp_path):
+    first = instrument()
+    replay = {**first, "availableAt": "2026-09-16T16:00:00+08:00"}
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="reference-retry", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        assert ds.write_instruments([first]) == 1
+        assert ds.write_instruments([replay]) == 0
+        stored = ds.db.execute(
+            "SELECT available_at FROM instruments WHERE instrument_id = 'SZ.000001'"
+        ).fetchone()[0]
+        assert stored == first["availableAt"]
+
+
 def test_sealed_dataset_has_verifiable_database_hash_and_is_immutable(tmp_path):
     root = tmp_path / "dataset"
     with MarketDataset(root, dataset_id="full-a-share-2016", source="TUSHARE_COMPATIBLE") as ds:

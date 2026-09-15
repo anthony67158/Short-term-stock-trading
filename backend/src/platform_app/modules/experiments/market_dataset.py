@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS instruments (
     name TEXT NOT NULL,
     list_status TEXT NOT NULL CHECK (list_status IN ('L', 'D', 'P')),
     list_date TEXT NOT NULL,
+    source_list_date TEXT NOT NULL,
     delist_date TEXT,
     source TEXT NOT NULL,
     available_at TEXT NOT NULL,
@@ -129,6 +130,10 @@ CREATE TABLE IF NOT EXISTS sync_checkpoints (
     partition_key TEXT NOT NULL,
     row_count INTEGER NOT NULL CHECK (row_count >= 0),
     payload_sha256 TEXT NOT NULL,
+    source TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    availability_method TEXT NOT NULL,
     completed_at TEXT NOT NULL,
     PRIMARY KEY (stream, partition_key)
 ) STRICT;
@@ -185,7 +190,14 @@ class MarketDataset:
     def __exit__(self, exc_type, exc, traceback):
         self.close()
 
-    def _insert_exact(self, table: str, keys: dict, values: dict) -> bool:
+    def _insert_exact(
+        self,
+        table: str,
+        keys: dict,
+        values: dict,
+        *,
+        ignored_on_replay: tuple[str, ...] = (),
+    ) -> bool:
         self._assert_writable()
         row = {**keys, **values}
         where = " AND ".join(f"{column} = ?" for column in keys)
@@ -194,7 +206,12 @@ class MarketDataset:
             tuple(keys.values()),
         ).fetchone()
         if current:
-            if dict(current) != row:
+            current_values = dict(current)
+            if any(
+                current_values[field] != value
+                for field, value in row.items()
+                if field not in ignored_on_replay
+            ):
                 raise MarketDatasetError("DATASET_CONFLICT")
             return False
         placeholders = ", ".join("?" for _ in row)
@@ -218,11 +235,13 @@ class MarketDataset:
                         "name": row["name"],
                         "list_status": row["listStatus"],
                         "list_date": row["listDate"],
+                        "source_list_date": row.get("sourceListDate", row["listDate"]),
                         "delist_date": row.get("delistDate"),
                         "source": row["source"],
                         "available_at": row["availableAt"],
                         "source_row_sha256": row["sourceRowSha256"],
                     },
+                    ignored_on_replay=("available_at",),
                 )
             self.db.commit()
         except Exception:
@@ -246,6 +265,7 @@ class MarketDataset:
                         "available_at": row["availableAt"],
                         "source_row_sha256": row["sourceRowSha256"],
                     },
+                    ignored_on_replay=("available_at",),
                 )
             self.db.commit()
         except Exception:
@@ -334,10 +354,27 @@ class MarketDataset:
             )
         return result
 
-    def checkpoint(self, stream: str, partition_key: str, rows: list[dict]) -> bool:
+    def checkpoint(
+        self,
+        stream: str,
+        partition_key: str,
+        rows: list[dict],
+        *,
+        source: str | None = None,
+        first_seen_at: str | None = None,
+        available_at: str | None = None,
+        availability_method: str = "DIRECT_OBSERVATION",
+    ) -> bool:
+        observed_at = first_seen_at or _utc_now()
         values = {
             "row_count": len(rows),
             "payload_sha256": canonical_sha256(rows),
+            "source": source or self.db.execute(
+                "SELECT source FROM dataset_metadata"
+            ).fetchone()[0],
+            "first_seen_at": observed_at,
+            "available_at": available_at or observed_at,
+            "availability_method": availability_method,
             "completed_at": _utc_now(),
         }
         try:
@@ -354,7 +391,7 @@ class MarketDataset:
                     raise MarketDatasetError("CHECKPOINT_CONFLICT")
                 return False
             self.db.execute(
-                "INSERT INTO sync_checkpoints VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO sync_checkpoints VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (stream, partition_key, *values.values()),
             )
             self.db.commit()

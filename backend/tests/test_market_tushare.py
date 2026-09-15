@@ -90,6 +90,8 @@ def test_bse_mapping_preserves_old_code_under_stable_920_identity():
     assert normalized["instrumentId"] == "BJ.920729"
     assert normalized["sourceCode"] == "839729.BJ"
     assert normalized["board"] == "BEIJING"
+    assert normalized["sourceListDate"] == "20200727"
+    assert normalized["listDate"] == "20211115"
 
     with pytest.raises(HistoricalMarketError, match="INVALID_BSE_MAPPING"):
         normalize_bse_mapping({

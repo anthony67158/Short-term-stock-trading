@@ -25,6 +25,7 @@ STOCK_BASIC_FIELDS = (
 BSE_MAPPING_FIELDS = "name,o_code,n_code,list_date"
 TS_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$")
 BSE_CODE_CHANGE_DATE = "20251009"
+BSE_OPEN_DATE = "20211115"
 
 
 class HistoricalMarketError(ValueError):
@@ -132,7 +133,7 @@ def normalize_bse_mapping(row: dict, available_at: str) -> dict:
         "reason": "BSE_920_CODE_MIGRATION",
         "source": "TUSHARE_COMPATIBLE",
         "availableAt": available_at_text(available_at),
-        "sourceRowSha256": _row_sha256(source),
+        "sourceRowSha256": _row_sha256(row),
     }
 
 
@@ -155,6 +156,9 @@ def normalize_instrument(row: dict, aliases: dict[str, str], available_at: str) 
     }
     if source["delist_date"] and source["delist_date"] < source["list_date"]:
         raise HistoricalMarketError("INVALID_LISTING_RANGE")
+    effective_list_date = (
+        max(source["list_date"], BSE_OPEN_DATE) if exchange == "BJ" else source["list_date"]
+    )
     return {
         "instrumentId": f"{exchange}.{code}",
         "sourceCode": source_code,
@@ -162,11 +166,12 @@ def normalize_instrument(row: dict, aliases: dict[str, str], available_at: str) 
         "board": board,
         "name": name,
         "listStatus": status,
-        "listDate": source["list_date"],
+        "listDate": effective_list_date,
+        "sourceListDate": source["list_date"],
         "delistDate": source["delist_date"],
         "source": "TUSHARE_COMPATIBLE",
         "availableAt": available_at_text(available_at),
-        "sourceRowSha256": _row_sha256(source),
+        "sourceRowSha256": _row_sha256(row),
     }
 
 
