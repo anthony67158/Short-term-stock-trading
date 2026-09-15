@@ -81,7 +81,7 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
         account = owned_account(db, user_id, account_id, lock=True)
         existing = db.scalar(select(CashEntry).where(
             CashEntry.account_id == account_id, CashEntry.source_key == key,
-            CashEntry.kind.in_(["OPENING", "DEPOSIT", "WITHDRAWAL"]),
+            CashEntry.kind.in_(["OPENING", "DEPOSIT", "WITHDRAWAL", "CASH_DIVIDEND", "DIVIDEND_TAX"]),
         ))
         if existing:
             if existing.request_hash != fingerprint(body):
@@ -89,6 +89,15 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
             return CashEntryView.model_validate(existing)
         if account.version != body.expected_version:
             raise PortfolioError("ACCOUNT_VERSION_CONFLICT", "账户已有新记录，请刷新后核对")
+        if body.instrument_id:
+            from platform_app.modules.market.models import Instrument
+            if not db.get(Instrument, body.instrument_id):
+                raise PortfolioError("INSTRUMENT_NOT_FOUND", "证券尚未建立档案", 422)
+            if db.scalar(select(CashEntry.id).where(
+                CashEntry.account_id == account_id,
+                CashEntry.corporate_source_key == body.corporate_source_key,
+            )):
+                raise PortfolioError("CORPORATE_SOURCE_EXISTS", "此公司行动现金凭据已入账")
         if body.effective_at > utcnow():
             raise PortfolioError("FUTURE_CASH_FLOW", "不能将尚未发生的资金变动记为事实", 422)
         last = db.scalar(select(CashEntry).where(
@@ -100,10 +109,12 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
         last_time = last_fact_time(db, account_id)
         if last_time and body.effective_at < last_time:
             raise PortfolioError("OUT_OF_ORDER_CASH_FLOW", "请按发生时间顺序录入资金记录", 422)
-        amount = -body.amount if body.kind == "WITHDRAWAL" else body.amount
+        amount = -body.amount if body.kind in ("WITHDRAWAL", "DIVIDEND_TAX") else body.amount
         total = cash_total(db, account_id) + amount
         if total < 0:
-            raise PortfolioError("INSUFFICIENT_CASH", "出金金额超过现金余额", 422)
+            raise PortfolioError("INSUFFICIENT_CASH",
+                                 "出金金额超过现金余额" if body.kind == "WITHDRAWAL"
+                                 else "实际补税超过现金余额，请先补齐资金凭据", 422)
         if total >= Decimal("1000000000000000000"):
             raise PortfolioError("BALANCE_LIMIT", "余额超过当前账户支持的金额范围", 422)
         account.version += 1
@@ -111,6 +122,7 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
             account_id=account_id, source_key=key, request_hash=fingerprint(body),
             kind=body.kind, amount=amount, source=body.source, effective_at=body.effective_at,
             account_version=account.version,
+            instrument_id=body.instrument_id, corporate_source_key=body.corporate_source_key,
         )
         db.add(entry)
         db.flush()

@@ -2626,7 +2626,9 @@
               "DEPOSIT",
               "WITHDRAWAL",
               "EXECUTION",
-              "REVERSAL"
+              "REVERSAL",
+              "CASH_DIVIDEND",
+              "DIVIDEND_TAX"
             ],
             "title": "Kind"
           },
@@ -2675,6 +2677,29 @@
               }
             ],
             "title": "Correctionid"
+          },
+          "instrumentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(SH|SZ|BJ)\\.\\d{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrumentid"
+          },
+          "corporateSourceKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corporatesourcekey"
           }
         },
         "additionalProperties": false,
@@ -2697,7 +2722,9 @@
             "enum": [
               "OPENING",
               "DEPOSIT",
-              "WITHDRAWAL"
+              "WITHDRAWAL",
+              "CASH_DIVIDEND",
+              "DIVIDEND_TAX"
             ],
             "title": "Kind"
           },
@@ -2724,6 +2751,32 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Expectedversion"
+          },
+          "instrumentId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(SH|SZ|BJ)\\.\\d{6}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instrumentid"
+          },
+          "corporateSourceKey": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Corporatesourcekey"
           }
         },
         "additionalProperties": false,

@@ -13,7 +13,7 @@ import { OpeningLots } from "./OpeningLots";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
-const cashLabels = { OPENING: "期初余额", DEPOSIT: "入金", WITHDRAWAL: "出金", EXECUTION: "成交结算", REVERSAL: "成交冲正" };
+const cashLabels = { OPENING: "期初余额", DEPOSIT: "入金", WITHDRAWAL: "出金", EXECUTION: "成交结算", REVERSAL: "成交冲正", CASH_DIVIDEND: "现金分红", DIVIDEND_TAX: "红利补税" };
 const money = (value: string) => value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 // A network retry must reuse the exact command. Edits intentionally create a new command.
@@ -58,6 +58,8 @@ function CreateAccount({ onCreated, onCancel }: { onCreated: (id: string) => voi
 
 function CashEditor({ account, onSaved, onCancel }: { account: Account; onSaved: () => void; onCancel: () => void }) {
   const commandKey = useCommandKey();
+  const [kind, setKind] = useState<CashInput["kind"]>(account.version === 1 ? "OPENING" : "DEPOSIT");
+  const corporate = kind === "CASH_DIVIDEND" || kind === "DIVIDEND_TAX";
   const submittedTime = useRef("");
   const mutation = useMutation({
     mutationFn: async (body: CashInput) => {
@@ -77,17 +79,25 @@ function CashEditor({ account, onSaved, onCancel }: { account: Account; onSaved:
       kind: data.get("kind") as CashInput["kind"], amount: String(data.get("amount")),
       source: String(data.get("source")).trim(), expectedVersion: account.version,
       effectiveAt: entered ? new Date(entered).toISOString() : submittedTime.current,
+      instrumentId: corporate ? `${data.get("exchange")}.${String(data.get("code")).trim()}` : null,
+      corporateSourceKey: corporate ? String(data.get("reference")).trim() : null,
     });
   }
   return <section className="editor-section"><h2>录入资金变动</h2>
-    <p className="secondary">按实际发生时间顺序录入。金额填写正数，出金会扣减现金。</p>
+    <p className="secondary">按实际发生时间顺序录入。金额填写正数，出金和补税扣减现金；现金分红填写券商实际入账金额，已扣除的税不要重复录入。</p>
     <form className="inline-form" onSubmit={submit}>
-      <label className="field"><span>资金类型</span><select name="kind" defaultValue={account.version === 1 ? "OPENING" : "DEPOSIT"}>
+      <label className="field"><span>资金类型</span><select name="kind" value={kind} onChange={event => setKind(event.target.value as CashInput["kind"])}>
         {account.version === 1 && <option value="OPENING">期初余额</option>}<option value="DEPOSIT">入金</option><option value="WITHDRAWAL">出金</option>
+        <option value="CASH_DIVIDEND">现金分红</option><option value="DIVIDEND_TAX">红利补税</option>
       </select></label>
       <Input id="cash-amount" label="金额（元）" name="amount" type="text" inputMode="decimal" pattern="\d+(\.\d{1,2})?" required autoFocus />
       <Input id="cash-time" label="发生时间（留空为当前时间）" name="time" type="datetime-local" />
       <Input id="cash-source" label="凭据或来源说明" name="source" maxLength={300} required />
+      {corporate && <>
+        <label className="field"><span>公司行动证券市场</span><select name="exchange" defaultValue="SZ"><option value="SZ">深圳</option><option value="SH">上海</option><option value="BJ">北京</option></select></label>
+        <Input id="cash-code" label="公司行动证券代码" name="code" pattern="\d{6}" required />
+        <Input id="cash-reference" label="公司行动现金凭据编号" name="reference" maxLength={128} required />
+      </>}
       <div className="form-actions"><Button type="submit" variant="primary" disabled={mutation.isPending}>{mutation.isPending ? "正在保存…" : "保存资金记录"}</Button><Button type="button" onClick={onCancel}>取消</Button></div>
       {mutation.isError && <p className="error" role="alert">{errorMessage(mutation.error)}</p>}
     </form>
@@ -143,7 +153,7 @@ function AccountLedger({ accountId }: { accountId: string }) {
       {history.isPending ? <p role="status">正在读取资金流水…</p> : history.isError ? <div role="alert"><p>{errorMessage(history.error)}</p><Button onClick={() => history.refetch()}>重新读取</Button></div>
         : rows.length === 0 ? <Empty title="尚无资金记录">录入期初余额或第一笔入金，开始建立账户账本。</Empty>
           : <div className="table-scroll" tabIndex={0} role="region" aria-label="资金流水，可横向滚动"><table><thead><tr><th>发生时间</th><th>类型</th><th className="numeric">金额（元）</th><th>凭据 / 来源</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}>
-            <td>{new Date(row.effectiveAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}</td><td>{cashLabels[row.kind]}</td><td className="numeric">{money(row.amount)}</td><td>{row.source}</td>
+            <td>{new Date(row.effectiveAt).toLocaleString("zh-CN", { timeZone: "Asia/Shanghai", hour12: false })}</td><td>{cashLabels[row.kind]}{row.instrumentId && <div className="secondary">{row.instrumentId}</div>}</td><td className="numeric">{money(row.amount)}</td><td>{row.source}{row.corporateSourceKey && <div className="secondary">{row.corporateSourceKey}</div>}</td>
           </tr>)}</tbody></table></div>}
       {history.hasNextPage && <Button disabled={history.isFetchingNextPage} onClick={() => history.fetchNextPage()}>加载更早记录</Button>}
     </section>

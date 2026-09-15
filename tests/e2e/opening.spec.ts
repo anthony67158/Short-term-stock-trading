@@ -57,6 +57,25 @@ test("期初持仓不扣现金、刷新、卖出FIFO与独立核对", async ({ b
     await page.getByRole("button", { name: "核对账本", exact: true }).click();
     await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     await expect(page.getByText("包含 1 个期初取得批次。")).toBeVisible();
+    for (const [kind, amount, balance, reference] of [
+      ["CASH_DIVIDEND", "12.34", "155.34", "synthetic-dividend"],
+      ["DIVIDEND_TAX", "2.47", "152.87", "synthetic-tax"],
+    ]) {
+      await page.getByRole("button", { name: "录入资金", exact: true }).click();
+      await page.getByLabel("资金类型").selectOption(kind);
+      await page.getByLabel("金额（元）", { exact: true }).fill(amount);
+      await page.getByLabel("凭据或来源说明").fill("合成公司行动现金凭据");
+      await page.getByLabel("公司行动证券代码").fill("000001");
+      await page.getByLabel("公司行动现金凭据编号").fill(reference);
+      await page.getByRole("button", { name: "保存资金记录" }).click();
+      await expect(page.locator(".balance-value")).toHaveText(balance);
+    }
+    await page.reload();
+    await expect(page.locator(".balance-value")).toHaveText("152.87");
+    await expect(page.getByRole("region", { name: "持仓明细，可横向滚动" })).toContainText("253.39");
+    await expect(page.getByRole("region", { name: "资金流水，可横向滚动" })).toContainText("红利补税");
+    await page.getByRole("button", { name: "核对账本", exact: true }).click();
+    await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     await page.screenshot({ path: "test-results/opening-mobile.png", fullPage: true });

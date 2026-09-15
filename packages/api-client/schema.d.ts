@@ -751,7 +751,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL" | "EXECUTION" | "REVERSAL";
+            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL" | "EXECUTION" | "REVERSAL" | "CASH_DIVIDEND" | "DIVIDEND_TAX";
             /** Amount */
             amount: string;
             /**
@@ -772,6 +772,10 @@ export interface components {
             executionId?: string | null;
             /** Correctionid */
             correctionId?: string | null;
+            /** Instrumentid */
+            instrumentId?: string | null;
+            /** Corporatesourcekey */
+            corporateSourceKey?: string | null;
         };
         /** CashFlowInput */
         CashFlowInput: {
@@ -779,7 +783,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL";
+            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL" | "CASH_DIVIDEND" | "DIVIDEND_TAX";
             /** Amount */
             amount: string;
             /**
@@ -791,6 +795,10 @@ export interface components {
             source: string;
             /** Expectedversion */
             expectedVersion: number;
+            /** Instrumentid */
+            instrumentId?: string | null;
+            /** Corporatesourcekey */
+            corporateSourceKey?: string | null;
         };
         /** CashPage */
         CashPage: {

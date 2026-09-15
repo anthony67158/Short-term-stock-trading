@@ -38,12 +38,14 @@ class CashEntry(Base):
     __table_args__ = (
         UniqueConstraint("account_id", "kind", "source_key", name="uq_cash_entries_source"),
         UniqueConstraint("account_id", "account_version", name="uq_cash_entries_version"),
+        UniqueConstraint("account_id", "corporate_source_key", name="uq_cash_corporate_source"),
         CheckConstraint(
-            "kind IN ('OPENING','DEPOSIT','WITHDRAWAL','EXECUTION','REVERSAL')", name="kind",
+            "kind IN ('OPENING','DEPOSIT','WITHDRAWAL','EXECUTION','REVERSAL',"
+            "'CASH_DIVIDEND','DIVIDEND_TAX')", name="kind",
         ),
         CheckConstraint(
-            "(kind = 'WITHDRAWAL' AND amount < 0) OR "
-            "(kind IN ('OPENING','DEPOSIT') AND amount > 0) OR "
+            "(kind IN ('WITHDRAWAL','DIVIDEND_TAX') AND amount < 0) OR "
+            "(kind IN ('OPENING','DEPOSIT','CASH_DIVIDEND') AND amount > 0) OR "
             "kind IN ('EXECUTION','REVERSAL')",
             name="signed_amount",
         ),
@@ -53,6 +55,10 @@ class CashEntry(Base):
         CheckConstraint(
             "(kind = 'REVERSAL') = (correction_id IS NOT NULL)", name="correction_link",
         ),
+        CheckConstraint(
+            "(kind IN ('CASH_DIVIDEND','DIVIDEND_TAX')) = (instrument_id IS NOT NULL) AND "
+            "(kind IN ('CASH_DIVIDEND','DIVIDEND_TAX')) = (corporate_source_key IS NOT NULL)",
+            name="corporate_link"),
     )
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
@@ -70,6 +76,8 @@ class CashEntry(Base):
     correction_id: Mapped[str | None] = mapped_column(
         ForeignKey("execution_corrections.id"), unique=True,
     )
+    instrument_id: Mapped[str | None] = mapped_column(ForeignKey("instruments.id"))
+    corporate_source_key: Mapped[str | None] = mapped_column(String(128))
 
 
 class Execution(Base):
