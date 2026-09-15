@@ -18,6 +18,12 @@ test("期初持仓不扣现金、刷新、卖出FIFO与独立核对", async ({ b
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
     await page.goto("http://localhost:5173/portfolio");
+    await expect(page.locator(".skip")).toHaveCSS("clip-path", "inset(100%)");
+    await page.keyboard.press("Tab");
+    await expect(page.locator(".skip")).toBeFocused();
+    await expect(page.locator(".skip")).toHaveCSS("clip-path", "none");
+    await page.keyboard.press("Enter");
+    await expect(page).toHaveURL(/#main$/);
     await page.getByRole("button", { name: "创建账户", exact: true }).click();
     await page.getByLabel("账户名称").fill("期初合成账户");
     await page.getByRole("button", { name: "创建账户", exact: true }).last().click();

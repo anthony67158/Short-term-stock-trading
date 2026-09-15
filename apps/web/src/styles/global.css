@@ -106,8 +106,8 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
 .empty h1, .empty h2 { color: var(--text); margin-bottom: 12px; }
 .empty p { display: flex; align-items: center; justify-content: center; gap: 8px; }
 .empty button { margin-top: 20px; }
-.skip { position: fixed; top: -100px; left: 16px; background: var(--raised); padding: 12px; z-index: 100; }
-.skip:focus { top: 8px; }
+.skip { position: fixed; top: 8px; left: 16px; background: var(--raised); padding: 12px; z-index: 100; clip-path: inset(100%); }
+.skip:focus { clip-path: none; }
 @media (max-width: 767px) {
   :root { --control-height: 44px; }
   .login { display: flex; flex-direction: column; }
