@@ -95,6 +95,43 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             -1.0,
         )
 
+    def test_policy_search_maximizes_coverage_when_none_reach_target(self):
+        def metrics(_dataset, _holdout, _predictions, policy):
+            broad = (
+                policy["rankingMode"] == "VALUE"
+                and policy["minimumExpectedNetR"] == 0.0
+                and policy["minimumNetRLowerBound"] == -1.0
+                and policy["minimumPFill"] == 0.0
+                and not policy["allowedSectorPhases"]
+            )
+            return {
+                "selected": 70 if broad else 5,
+                "activeDays": 45 if broad else 5,
+                "netRLowerBound95": -0.02 if broad else 0.5,
+                "stress10NetRLowerBound95": -0.03 if broad else 0.4,
+                "meanNetRAt5": 0.01 if broad else 0.6,
+                "precisionAt5": 0.5,
+                "account": {
+                    "annualizedTrades": 70 if broad else 20,
+                },
+            }
+
+        with patch(
+            "decision_engine.training.review_ensemble._policy_metrics",
+            side_effect=metrics,
+        ):
+            selected, _leaders = _select_opportunity_policy(
+                {},
+                np.asarray([], dtype=np.int64),
+                {"DECOMPOSED": []},
+            )
+
+        self.assertEqual(
+            selected["metrics"]["account"]["annualizedTrades"],
+            70,
+        )
+        self.assertEqual(selected["policy"]["rankingMode"], "VALUE")
+
     def test_account_metrics_use_actual_daily_selection_count(self):
         dates = [f"2025-{index:03d}" for index in range(300)]
         ranking = {

@@ -694,10 +694,10 @@ def _select_opportunity_policy(
         policy = value["policy"]
         metrics = value["metrics"]
         return (
+            metrics["account"]["annualizedTrades"],
             metrics["netRLowerBound95"],
             metrics["stress10NetRLowerBound95"],
             metrics["meanNetRAt5"],
-            metrics["account"]["annualizedTrades"],
             policy["minimumNetRLowerBound"],
             policy["rankingMode"] == "RANKER",
             metrics["precisionAt5"],
