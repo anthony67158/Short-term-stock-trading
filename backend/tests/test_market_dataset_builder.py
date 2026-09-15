@@ -975,7 +975,13 @@ def test_builder_rejects_unclassified_adjustment_factor(tmp_path):
             builder.sync_daily_partition(trade_date)
 
 
-def test_builder_prefers_historical_alias_when_factors_only_differ_by_rounding(tmp_path):
+@pytest.mark.parametrize(
+    ("historical_factor", "alias_factor"),
+    [("4.189", "4.1885"), ("8.333", "8.334")],
+)
+def test_builder_prefers_historical_alias_for_adjacent_factor_rounding(
+    tmp_path, historical_factor, alias_factor
+):
     data = responses()
     data[("stock_basic", "L")].append(
         stock("001872.SZ", "Renamed Port", "主板", "SZSE", "19930505")
@@ -992,8 +998,12 @@ def test_builder_prefers_historical_alias_when_factors_only_differ_by_rounding(t
             {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
             for code in codes
         ),
-        {"ts_code": "000022.SZ", "trade_date": trade_date, "adj_factor": "4.189"},
-        {"ts_code": "001872.SZ", "trade_date": trade_date, "adj_factor": "4.1885"},
+        {
+            "ts_code": "000022.SZ",
+            "trade_date": trade_date,
+            "adj_factor": historical_factor,
+        },
+        {"ts_code": "001872.SZ", "trade_date": trade_date, "adj_factor": alias_factor},
     ]
     data[("suspend_d", trade_date)] = []
 
@@ -1011,7 +1021,7 @@ def test_builder_prefers_historical_alias_when_factors_only_differ_by_rounding(t
         ).fetchone()
 
         assert result["discardedAliasDuplicates"] == 2
-        assert tuple(factor) == ("000022.SZ", "4.189")
+        assert tuple(factor) == ("000022.SZ", historical_factor)
 
 
 def test_builder_rejects_conflicting_alias_duplicate(tmp_path):

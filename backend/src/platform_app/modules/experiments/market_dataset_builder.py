@@ -2,7 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
 from platform_app.adapters.market_tushare import (
     BSE_MAPPING_FIELDS,
@@ -41,7 +41,7 @@ NAME_CHANGE_PAGE_SIZE = 5000
 MINUTE_AMOUNT_TOLERANCE_RATE = Decimal("0.0005")
 MINUTE_AMOUNT_TOLERANCE_CNY = Decimal("2")
 MINUTE_VOLUME_TOLERANCE_SHARES = Decimal("100")
-ALIAS_DECIMAL_TOLERANCE = Decimal("0.0005")
+ALIAS_DECIMAL_RELATIVE_TOLERANCE = Decimal("0.0005")
 
 
 def _observed_at() -> str:
@@ -266,10 +266,12 @@ def _deduplicate_alias_rows(
                     right = Decimal(str(candidate.get(field)))
                     shared_exponent = max(left.as_tuple().exponent, right.as_tuple().exponent)
                     quantum = Decimal(1).scaleb(shared_exponent)
+                    difference = abs(left - right)
+                    scale = max(abs(left), abs(right))
                     if (
-                        abs(left - right) <= ALIAS_DECIMAL_TOLERANCE
-                        and left.quantize(quantum, rounding=ROUND_HALF_UP)
-                        == right.quantize(quantum, rounding=ROUND_HALF_UP)
+                        difference <= quantum
+                        and scale > 0
+                        and difference / scale <= ALIAS_DECIMAL_RELATIVE_TOLERANCE
                     ):
                         continue
                 conflicts.append(field)
