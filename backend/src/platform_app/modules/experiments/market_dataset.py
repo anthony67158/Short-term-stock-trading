@@ -355,7 +355,7 @@ class MarketDataset:
     def eligible_instruments(self, trade_date: str) -> list[str]:
         rows = self.db.execute(
             "SELECT instrument_id FROM instruments "
-            "WHERE list_date <= ? AND (delist_date IS NULL OR delist_date >= ?) "
+            "WHERE list_date <= ? AND (delist_date IS NULL OR delist_date > ?) "
             "ORDER BY instrument_id",
             (trade_date, trade_date),
         )

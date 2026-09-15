@@ -97,7 +97,7 @@ def _filter_post_delisting_adjustments(
             instrument_id not in eligible_ids
             and lifecycle
             and lifecycle["delist_date"]
-            and trade_date > lifecycle["delist_date"]
+            and trade_date >= lifecycle["delist_date"]
         ):
             discarded.append(raw)
         else:
@@ -377,7 +377,7 @@ class MarketDatasetBuilder:
             row
             for row in raw_instruments
             if str(row.get("list_date") or "") <= end_date
-            and (not row.get("delist_date") or str(row["delist_date"]) >= start_date)
+            and (not row.get("delist_date") or str(row["delist_date"]) > start_date)
         ]
         normalized = [normalize_instrument(row, aliases, observed_at) for row in raw_instruments]
         instruments: dict[str, dict] = {}

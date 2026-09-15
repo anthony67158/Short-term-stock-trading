@@ -202,6 +202,8 @@ def test_point_in_time_universe_and_suspension_explanations(tmp_path):
             key_fields=("instrument_id", "status", "effective_from"),
         )
         assert ds.eligible_instruments("20200102") == ["SH.600001", "SZ.000001"]
+        assert ds.eligible_instruments("20200130") == ["SH.600001", "SZ.000001"]
+        assert ds.eligible_instruments("20200131") == ["SZ.000001"]
         assert ds.eligible_instruments("20210201") == ["SZ.000001", "SZ.300001"]
         assert ds.suspension_explanations("20200102") == {"SH.600001": ["S:DAY"]}
         assert ds.listing_status_explanations("20200102") == {"SH.600001": ["SUSPENDED_LISTING"]}

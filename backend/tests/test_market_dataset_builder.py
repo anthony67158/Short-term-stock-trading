@@ -329,7 +329,7 @@ def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
             "delist_date": "20190315",
         }
     ]
-    trade_date = "20200102"
+    trade_date = "20190315"
     codes = ["000001.SZ", "300001.SZ", "688001.SH"]
     data[("daily", trade_date)] = [bar(code, trade_date) for code in codes]
     data[("adj_factor", trade_date)] = [
