@@ -144,6 +144,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Calendar */
+        get: operations["get_calendar_api_v1_market_calendar_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instruments": {
         parameters: {
             query?: never;
@@ -536,6 +553,41 @@ export interface components {
              */
             usage: "RESEARCH_ONLY";
         };
+        /** CalendarDay */
+        CalendarDay: {
+            /**
+             * Exchange
+             * @enum {string}
+             */
+            exchange: "SH" | "SZ" | "BJ";
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Istradingday */
+            isTradingDay: boolean | null;
+            /** Reason */
+            reason: string;
+            /** Sourceurl */
+            sourceUrl: string | null;
+            /** Version */
+            version: string | null;
+            /** Publishedat */
+            publishedAt: string | null;
+            /** Availableat */
+            availableAt: string | null;
+            /** Nexttradingday */
+            nextTradingDay?: string | null;
+            /** Nextdaymissingreason */
+            nextDayMissingReason?: string | null;
+            /**
+             * Calendarscope
+             * @default PUBLISHED_SCHEDULE
+             * @constant
+             */
+            calendarScope: "PUBLISHED_SCHEDULE";
+        };
         /** CashEntryView */
         CashEntryView: {
             /** Id */
@@ -631,6 +683,11 @@ export interface components {
         /** Envelope[AssessmentPage] */
         Envelope_AssessmentPage_: {
             data: components["schemas"]["AssessmentPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CalendarDay] */
+        Envelope_CalendarDay_: {
+            data: components["schemas"]["CalendarDay"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[CashEntryView] */
@@ -1529,6 +1586,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ReconciliationView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_calendar_api_v1_market_calendar_get: {
+        parameters: {
+            query: {
+                exchange: "SH" | "SZ" | "BJ";
+                day: string;
+                asOf?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CalendarDay_"];
                 };
             };
             /** @description Validation Error */

@@ -1,9 +1,12 @@
-from typing import Annotated
+from datetime import date
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Query
+from pydantic import AwareDatetime
 
 from platform_app.adapters.market_public import fetch_quote
 from platform_app.contracts.base import Envelope, InstrumentId
+from platform_app.kernel.calendar import CalendarDay, calendar_day
 from platform_app.modules.identity.routes import CurrentUser
 from platform_app.modules.market import service
 from platform_app.modules.market.contracts import (
@@ -12,6 +15,14 @@ from platform_app.modules.market.contracts import (
 
 router = APIRouter(prefix="/api/v1", tags=["market"])
 Limit = Annotated[int, Query(ge=1, le=100)]
+
+
+@router.get("/market/calendar", response_model=Envelope[CalendarDay])
+def get_calendar(
+    user: CurrentUser, exchange: Literal["SH", "SZ", "BJ"], day: date,
+    as_of: Annotated[AwareDatetime | None, Query(alias="asOf")] = None,
+):
+    return Envelope(data=calendar_day(exchange, day, as_of=as_of))
 
 
 @router.get("/instruments", response_model=Envelope[InstrumentPage])

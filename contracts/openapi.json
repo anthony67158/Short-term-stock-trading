@@ -610,6 +610,80 @@
         }
       }
     },
+    "/api/v1/market/calendar": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Get Calendar",
+        "operationId": "get_calendar_api_v1_market_calendar_get",
+        "parameters": [
+          {
+            "name": "exchange",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "SH",
+                "SZ",
+                "BJ"
+              ],
+              "type": "string",
+              "title": "Exchange"
+            }
+          },
+          {
+            "name": "day",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Day"
+            }
+          },
+          {
+            "name": "asOf",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Asof"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CalendarDay_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments": {
       "get": {
         "tags": [
@@ -1704,6 +1778,127 @@
         ],
         "title": "AssessmentView"
       },
+      "CalendarDay": {
+        "properties": {
+          "exchange": {
+            "type": "string",
+            "enum": [
+              "SH",
+              "SZ",
+              "BJ"
+            ],
+            "title": "Exchange"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "title": "Date"
+          },
+          "isTradingDay": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Istradingday"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "sourceUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceurl"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "publishedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Publishedat"
+          },
+          "availableAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Availableat"
+          },
+          "nextTradingDay": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nexttradingday"
+          },
+          "nextDayMissingReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextdaymissingreason"
+          },
+          "calendarScope": {
+            "type": "string",
+            "const": "PUBLISHED_SCHEDULE",
+            "title": "Calendarscope",
+            "default": "PUBLISHED_SCHEDULE"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "exchange",
+          "date",
+          "isTradingDay",
+          "reason",
+          "sourceUrl",
+          "version",
+          "publishedAt",
+          "availableAt"
+        ],
+        "title": "CalendarDay"
+      },
       "CashEntryView": {
         "properties": {
           "id": {
@@ -1973,6 +2168,22 @@
           "data"
         ],
         "title": "Envelope[AssessmentPage]"
+      },
+      "Envelope_CalendarDay_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CalendarDay"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CalendarDay]"
       },
       "Envelope_CashEntryView_": {
         "properties": {
