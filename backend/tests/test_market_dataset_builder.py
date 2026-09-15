@@ -813,6 +813,15 @@ def test_historical_tianxiang_listing_suspension_explains_missing_daily(tmp_path
             "20200709",
             "20210610",
         ),
+        (
+            "002450.SZ",
+            "SZ.002450",
+            "Kangdexin",
+            "20100716",
+            "20210603",
+            "20200710",
+            "20210414",
+        ),
     ],
 )
 def test_historical_2020_listing_suspensions_explain_missing_daily(
