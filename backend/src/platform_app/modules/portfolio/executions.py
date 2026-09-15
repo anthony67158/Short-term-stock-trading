@@ -87,7 +87,7 @@ def record_execution(
             ).order_by(PositionLot.sequence)))
             try:
                 consumed = consume_fifo([
-                    Lot(lot.execution_id, lot.acquired_date,
+                    Lot(lot.id, lot.acquired_date,
                         lot.remaining_quantity, lot.remaining_basis) for lot in lots
                 ], body.quantity_shares, trading_date(body.executed_at))
             except ValueError as exc:
@@ -130,19 +130,19 @@ def record_execution(
         ))
         if body.side == "BUY":
             db.add(PositionLot(
-                execution_id=execution.id, account_id=account_id,
+                id=execution.id, execution_id=execution.id, account_id=account_id,
                 instrument_id=body.instrument_id, acquired_date=trading_date(body.executed_at),
                 remaining_quantity=body.quantity_shares, remaining_basis=-delta,
                 sequence=account.version,
             ))
         else:
-            by_id = {lot.execution_id: lot for lot in lots}
+            by_id = {lot.id: lot for lot in lots}
             for item in consumed:
-                lot = by_id[item.execution_id]
+                lot = by_id[item.lot_id]
                 lot.remaining_quantity -= item.quantity
                 lot.remaining_basis -= item.basis
                 db.add(LotConsumption(
-                    sell_execution_id=execution.id, buy_execution_id=item.execution_id,
+                    sell_execution_id=execution.id, lot_id=item.lot_id,
                     quantity=item.quantity, basis=item.basis,
                 ))
         db.flush()

@@ -74,8 +74,8 @@ def prepare(db, account, execution_id, body):
             ) from exc
         basis = Decimal(0)
         for allocation in allocations:
-            lot = lots[allocation.execution_id]
-            lots[lot.execution_id] = replace(
+            lot = lots[allocation.lot_id]
+            lots[lot.lot_id] = replace(
                 lot, quantity=lot.quantity - allocation.quantity, basis=lot.basis - allocation.basis)
             links.append((row.id, allocation))
             basis += allocation.basis
@@ -141,14 +141,15 @@ def correct_execution(
         db.execute(delete(PositionLot).where(PositionLot.account_id == account_id))
         for lot in lots.values():
             db.add(PositionLot(
-                execution_id=lot.execution_id, account_id=account_id,
-                instrument_id=instruments[lot.execution_id], acquired_date=lot.acquired_date,
+                id=lot.lot_id, execution_id=lot.lot_id, account_id=account_id,
+                instrument_id=instruments[lot.lot_id], acquired_date=lot.acquired_date,
                 remaining_quantity=lot.quantity, remaining_basis=lot.basis,
-                sequence=sequences[lot.execution_id],
+                sequence=sequences[lot.lot_id],
             ))
+        db.flush()
         for sell_id, allocation in links:
             db.add(LotConsumption(
-                sell_execution_id=sell_id, buy_execution_id=allocation.execution_id,
+                sell_execution_id=sell_id, lot_id=allocation.lot_id,
                 quantity=allocation.quantity, basis=allocation.basis,
             ))
         for row in trades:

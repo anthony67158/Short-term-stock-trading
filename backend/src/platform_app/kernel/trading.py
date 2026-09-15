@@ -64,7 +64,7 @@ def validate_order_quantity(rule: QuantityRule, side: str, quantity: int, availa
 
 @dataclass(frozen=True)
 class Lot:
-    execution_id: str
+    lot_id: str
     acquired_date: date
     quantity: int
     basis: Decimal
@@ -72,7 +72,7 @@ class Lot:
 
 @dataclass(frozen=True)
 class Consumption:
-    execution_id: str
+    lot_id: str
     quantity: int
     basis: Decimal
 
@@ -89,7 +89,7 @@ def consume_fifo(lots: list[Lot], quantity: int, sold_date: date) -> list[Consum
             continue
         take = min(remaining, lot.quantity)
         basis = lot.basis if take == lot.quantity else money(lot.basis * take / lot.quantity)
-        result.append(Consumption(lot.execution_id, take, basis))
+        result.append(Consumption(lot.lot_id, take, basis))
         remaining -= take
         if not remaining:
             break

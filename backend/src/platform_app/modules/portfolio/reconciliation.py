@@ -123,18 +123,19 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             check(trade.id, "uncoveredSaleShares", 0, remaining)
             check(trade.id, "realizedPnl", delta - basis, trade.realized_pnl)
 
-        actual_lots = {lot.execution_id: lot for lot in lots}
+        actual_lots = {lot.id: lot for lot in lots}
         for buy_id in expected_lots.keys() | actual_lots.keys():
             expected, actual = expected_lots.get(buy_id), actual_lots.get(buy_id)
             if expected is None or actual is None:
                 check(buy_id, "lotExists", expected is not None, actual is not None)
                 continue
+            check(buy_id, "executionLink", buy_id, actual.execution_id)
             for field, column in [
                 ("quantity", "remaining_quantity"), ("basis", "remaining_basis"),
                 ("instrument", "instrument_id"), ("date", "acquired_date"), ("sequence", "sequence"),
             ]:
                 check(buy_id, field, expected[field], getattr(actual, column))
-        actual_links = {(row.sell_execution_id, row.buy_execution_id): (row.quantity, row.basis)
+        actual_links = {(row.sell_execution_id, row.lot_id): (row.quantity, row.basis)
                         for row in consumptions}
         for key in expected_links.keys() | actual_links.keys():
             check(":".join(key), "lotConsumption", expected_links.get(key), actual_links.get(key))

@@ -111,7 +111,8 @@ class PositionLot(Base):
         CheckConstraint("remaining_basis >= 0", name="basis"),
         CheckConstraint("remaining_quantity > 0 OR remaining_basis = 0", name="closed_basis"),
     )
-    execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id"), primary_key=True)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    execution_id: Mapped[str | None] = mapped_column(ForeignKey("executions.id"), unique=True)
     account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
     instrument_id: Mapped[str] = mapped_column(ForeignKey("instruments.id"), index=True)
     acquired_date: Mapped[date] = mapped_column(Date)
@@ -155,7 +156,7 @@ class LotConsumption(Base):
         CheckConstraint("quantity > 0 AND basis >= 0", name="amounts"),
     )
     sell_execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id"), primary_key=True)
-    buy_execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id"), primary_key=True)
+    lot_id: Mapped[str] = mapped_column(ForeignKey("position_lots.id"), primary_key=True)
     quantity: Mapped[int] = mapped_column(Integer)
     basis: Mapped[Decimal] = mapped_column(Numeric(20, 2))
 
