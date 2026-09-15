@@ -43,6 +43,7 @@ class ExecutionView(Contract):
     recorded_at: AwareDatetime
     source: str
     account_version: int
+    correction_id: str | None = None
 
 
 class ExecutionPage(Contract):

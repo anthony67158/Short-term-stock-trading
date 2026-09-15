@@ -12,7 +12,7 @@ from platform_app.modules.portfolio.execution_contracts import (
     ExecutionInput, ExecutionPage, ExecutionView, PositionPage, PositionView,
 )
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionCommand, LotConsumption, PositionLot,
+    CashEntry, Execution, ExecutionCommand, ExecutionCorrection, LotConsumption, PositionLot,
 )
 from platform_app.modules.portfolio.service import (
     PortfolioError, cash_total, fingerprint, owned_account,
@@ -30,15 +30,21 @@ def record_execution(user_id: str, account_id: str, body: ExecutionInput, key: s
         if command:
             if command.request_hash != fingerprint(body):
                 raise PortfolioError("IDEMPOTENCY_CONFLICT", "同一请求编号对应不同成交")
-            return ExecutionView.model_validate(db.get(Execution, command.execution_id))
+            return ExecutionView.model_validate(command.result)
         existing = db.scalar(select(Execution).where(
             Execution.account_id == account_id, Execution.source_key == body.source_key,
         ))
         if existing:
+            if db.scalar(select(ExecutionCorrection.id).where(
+                ExecutionCorrection.execution_id == existing.id,
+            )):
+                raise PortfolioError("EXECUTION_REVERSED", "此交割编号已冲正，不能重复导入原记录")
             if existing.fact_hash != fact_hash:
                 raise PortfolioError("IDEMPOTENCY_CONFLICT", "同一交割编号对应不同成交")
             db.add(ExecutionCommand(account_id=account_id, command_key=key,
-                                    request_hash=fingerprint(body), execution_id=existing.id))
+                                    request_hash=fingerprint(body), execution_id=existing.id,
+                                    result=ExecutionView.model_validate(existing).model_dump(
+                                        mode="json")))
             return ExecutionView.model_validate(existing)
         if account.version != body.expected_version:
             raise PortfolioError("ACCOUNT_VERSION_CONFLICT", "账户已有新记录，请刷新后核对")
@@ -46,7 +52,8 @@ def record_execution(user_id: str, account_id: str, body: ExecutionInput, key: s
             raise PortfolioError("FUTURE_EXECUTION", "不能将尚未发生的成交记为事实", 422)
         if not db.get(Instrument, body.instrument_id):
             raise PortfolioError("INSTRUMENT_NOT_FOUND", "证券尚未建立档案，请先核对代码", 422)
-        last = db.scalar(select(CashEntry).where(CashEntry.account_id == account_id)
+        last = db.scalar(select(CashEntry).where(
+            CashEntry.account_id == account_id, CashEntry.kind != "REVERSAL")
                          .order_by(CashEntry.account_version.desc()).limit(1))
         if last and body.executed_at < last.effective_at:
             raise PortfolioError("OUT_OF_ORDER_EXECUTION", "请按发生时间顺序录入成交和资金", 422)
@@ -102,7 +109,9 @@ def record_execution(user_id: str, account_id: str, body: ExecutionInput, key: s
         db.add(execution)
         db.flush()
         db.add(ExecutionCommand(account_id=account_id, command_key=key,
-                                request_hash=fingerprint(body), execution_id=execution.id))
+                                request_hash=fingerprint(body), execution_id=execution.id,
+                                result=ExecutionView.model_validate(execution).model_dump(
+                                    mode="json")))
         db.add(CashEntry(
             account_id=account_id, source_key=execution.id, request_hash=fingerprint(body),
             kind="EXECUTION", amount=delta, source=body.source, effective_at=body.executed_at,
@@ -140,8 +149,13 @@ def execution_history(user_id: str, account_id: str, before: int | None, limit: 
         if before is not None:
             query = query.where(Execution.account_version < before)
         rows = list(db.scalars(query.order_by(Execution.account_version.desc()).limit(limit + 1)))
+        corrections = dict(db.execute(select(
+            ExecutionCorrection.execution_id, ExecutionCorrection.id,
+        ).where(ExecutionCorrection.account_id == account_id,
+                ExecutionCorrection.execution_id.in_([row.id for row in rows]))).all())
         return ExecutionPage(
-            executions=[ExecutionView.model_validate(row) for row in rows[:limit]],
+            executions=[ExecutionView.model_validate(row).model_copy(
+                update={"correction_id": corrections.get(row.id)}) for row in rows[:limit]],
             next_cursor=str(rows[limit - 1].account_version) if len(rows) > limit else None,
         )
 

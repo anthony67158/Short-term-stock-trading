@@ -4,7 +4,10 @@ from fastapi import APIRouter, Header, Query
 
 from platform_app.contracts.base import Contract, Envelope
 from platform_app.modules.identity.routes import CurrentUser
-from platform_app.modules.portfolio import executions, reconciliation, service
+from platform_app.modules.portfolio import corrections, executions, reconciliation, service
+from platform_app.modules.portfolio.correction_contracts import (
+    CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
+)
 from platform_app.modules.portfolio.execution_contracts import (
     ExecutionInput, ExecutionPage, ExecutionView, PositionPage,
 )
@@ -81,3 +84,28 @@ def positions(
 @router.get("/{account_id}/reconciliation", response_model=Envelope[reconciliation.ReconciliationView])
 def reconcile(account_id: str, user: CurrentUser):
     return Envelope(data=reconciliation.reconcile(user.id, account_id))
+
+
+@router.post("/{account_id}/executions/{execution_id}/correction-previews",
+             response_model=Envelope[CorrectionPreview])
+def preview_correction(
+    account_id: str, execution_id: str, body: CorrectionInput, user: CurrentUser,
+):
+    return Envelope(data=corrections.preview_correction(user.id, account_id, execution_id, body))
+
+
+@router.post("/{account_id}/executions/{execution_id}/corrections",
+             response_model=Envelope[CorrectionView], status_code=201)
+def correct_execution(
+    account_id: str, execution_id: str, body: CorrectionCommit, user: CurrentUser, key: CommandKey,
+):
+    return Envelope(data=corrections.correct_execution(user.id, account_id, execution_id, body, key))
+
+
+@router.get("/{account_id}/corrections", response_model=Envelope[CorrectionPage])
+def correction_history(
+    account_id: str, user: CurrentUser,
+    cursor: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    return Envelope(data=corrections.correction_history(user.id, account_id, cursor, limit))

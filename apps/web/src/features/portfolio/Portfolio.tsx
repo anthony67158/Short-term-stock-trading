@@ -9,7 +9,7 @@ import { Reconciliation } from "./Reconciliation";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
-const cashLabels = { OPENING: "期初余额", DEPOSIT: "入金", WITHDRAWAL: "出金", EXECUTION: "成交结算" };
+const cashLabels = { OPENING: "期初余额", DEPOSIT: "入金", WITHDRAWAL: "出金", EXECUTION: "成交结算", REVERSAL: "成交冲正" };
 const money = (value: string) => value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 // A network retry must reuse the exact command. Edits intentionally create a new command.

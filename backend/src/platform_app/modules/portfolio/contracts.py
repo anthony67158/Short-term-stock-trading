@@ -30,13 +30,14 @@ class CashFlowInput(Contract):
 
 class CashEntryView(Contract):
     id: str
-    kind: Literal["OPENING", "DEPOSIT", "WITHDRAWAL", "EXECUTION"]
+    kind: Literal["OPENING", "DEPOSIT", "WITHDRAWAL", "EXECUTION", "REVERSAL"]
     amount: Money
     effective_at: AwareDatetime
     recorded_at: AwareDatetime
     source: str
     account_version: int
     execution_id: str | None = None
+    correction_id: str | None = None
 
 
 class CashPage(Contract):

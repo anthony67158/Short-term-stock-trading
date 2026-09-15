@@ -1,5 +1,6 @@
 """Independent read-only replay of immutable facts against current projections."""
 from collections import defaultdict, deque
+from contextlib import nullcontext
 from decimal import ROUND_HALF_UP, Decimal
 
 from pydantic import Field
@@ -8,7 +9,9 @@ from sqlalchemy import select
 from platform_app.adapters.database import sessions
 from platform_app.contracts.base import Contract, Money, utcnow
 from platform_app.kernel.trading import trading_date
-from platform_app.modules.portfolio.models import CashEntry, Execution, LotConsumption, PositionLot
+from platform_app.modules.portfolio.models import (
+    CashEntry, Execution, ExecutionCorrection, LotConsumption, PositionLot,
+)
 from platform_app.modules.portfolio.service import PortfolioError, owned_account
 
 
@@ -24,6 +27,7 @@ class ReconciliationView(Contract):
     cash_balance: Money
     replay_cash_balance: Money
     execution_count: int
+    correction_count: int = 0
     open_lot_count: int
     discrepancy_count: int
     discrepancies: list[Discrepancy]
@@ -32,8 +36,8 @@ class ReconciliationView(Contract):
     checked_at: str = Field(default_factory=lambda: utcnow().isoformat())
 
 
-def reconcile(user_id: str, account_id: str) -> ReconciliationView:
-    with sessions().begin() as db:
+def reconcile(user_id: str, account_id: str, *, db_session=None) -> ReconciliationView:
+    with nullcontext(db_session) if db_session is not None else sessions().begin() as db:
         account = owned_account(db, user_id, account_id, lock=True)
         cash_rows = list(db.scalars(select(CashEntry).where(
             CashEntry.account_id == account_id).order_by(CashEntry.account_version).limit(50_001)))
@@ -47,6 +51,10 @@ def reconcile(user_id: str, account_id: str) -> ReconciliationView:
         consumptions = list(db.scalars(select(LotConsumption).join(
             Execution, Execution.id == LotConsumption.sell_execution_id,
         ).where(Execution.account_id == account_id)))
+        corrections = list(db.scalars(select(ExecutionCorrection).where(
+            ExecutionCorrection.account_id == account_id)))
+        by_correction = {row.id: row for row in corrections}
+        reversed_ids = {row.execution_id for row in corrections}
         issues: list[Discrepancy] = []
         count = 0
 
@@ -74,6 +82,9 @@ def reconcile(user_id: str, account_id: str) -> ReconciliationView:
             check(trade.id, "grossAmount", gross, trade.gross_amount)
             check(trade.id, "totalFees", fee, trade.total_fees)
             check(trade.id, "cashDelta", delta, trade.cash_delta)
+            if trade.id in reversed_ids:
+                check(trade.id, "realizedPnl", None, trade.realized_pnl)
+                continue
             date = trading_date(trade.executed_at)
             if trade.side == "BUY":
                 expected_lots[trade.id] = {
@@ -123,12 +134,15 @@ def reconcile(user_id: str, account_id: str) -> ReconciliationView:
 
         actual_cash, replay_cash = Decimal(0), Decimal(0)
         linked = set()
+        reversed_links = set()
         previous_time = None
+        active_cash = Decimal(0)
         for version, row in enumerate(cash_rows, start=2):
             check(row.id, "accountVersion", version, row.account_version)
-            if previous_time and row.effective_at < previous_time:
-                check(row.id, "chronological", True, False)
-            previous_time = row.effective_at
+            if row.kind != "REVERSAL":
+                if previous_time and row.effective_at < previous_time:
+                    check(row.id, "chronological", True, False)
+                previous_time = row.effective_at
             actual_cash += row.amount
             if row.kind == "EXECUTION":
                 linked.add(row.execution_id)
@@ -140,17 +154,42 @@ def reconcile(user_id: str, account_id: str) -> ReconciliationView:
                 if trade:
                     check(row.id, "executionVersion", trade.account_version, row.account_version)
                     check(row.id, "executionTime", trade.executed_at, row.effective_at)
+                if row.execution_id not in reversed_ids and expected is not None:
+                    active_cash += expected
+            elif row.kind == "REVERSAL":
+                reversed_links.add(row.correction_id)
+                correction = by_correction.get(row.correction_id)
+                check(row.id, "correctionExists", True, correction is not None)
+                if correction:
+                    original_delta = execution_deltas.get(correction.execution_id)
+                    expected = -original_delta if original_delta is not None else None
+                    check(row.id, "reversalCash", expected, row.amount)
+                    check(row.id, "reversalFact", expected, correction.reversal_amount)
+                    check(row.id, "correctionVersion", correction.account_version,
+                          row.account_version)
+                    check(row.id, "correctionTime", correction.recorded_at, row.effective_at)
+                    trade = by_id.get(correction.execution_id)
+                    check(row.id, "correctionAfterExecution", True, trade is not None
+                          and correction.account_version > trade.account_version)
+                    if expected is not None:
+                        replay_cash += expected
             else:
                 replay_cash += row.amount
+                active_cash += row.amount
             if replay_cash < 0:
                 check(row.id, "nonnegativeCash", True, False)
+            if active_cash < 0:
+                check(row.id, "correctedNonnegativeCash", True, False)
+        for missing_id in by_correction.keys() - reversed_links:
+            check(missing_id, "reversalEntryExists", True, False)
         for missing_id in execution_deltas.keys() - linked:
             check(missing_id, "cashEntryExists", True, False)
         check(account_id, "accountVersion", len(cash_rows) + 1, account.version)
         check(account_id, "cashBalance", replay_cash, actual_cash)
+        check(account_id, "correctedCashBalance", active_cash, actual_cash)
         return ReconciliationView(
             account_version=account.version, cash_balance=actual_cash, replay_cash_balance=replay_cash,
-            execution_count=len(executions), open_lot_count=sum(
+            execution_count=len(executions), correction_count=len(corrections), open_lot_count=sum(
                 lot["quantity"] > 0 for lot in expected_lots.values()),
             discrepancy_count=count, discrepancies=issues, matches=count == 0,
         )

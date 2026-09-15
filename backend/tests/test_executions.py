@@ -16,7 +16,7 @@ from platform_app.modules.portfolio import executions, service
 from platform_app.modules.portfolio.contracts import AccountInput, CashFlowInput
 from platform_app.modules.portfolio.execution_contracts import ExecutionInput
 from platform_app.modules.portfolio.models import (
-    Account, CashEntry, Execution, ExecutionCommand, LotConsumption, PositionLot,
+    Account, CashEntry, Execution, ExecutionCommand, ExecutionCorrection, LotConsumption, PositionLot,
 )
 
 
@@ -41,6 +41,7 @@ def ledger():
         db.execute(delete(PositionLot).where(PositionLot.account_id == account.id))
         db.execute(delete(ExecutionCommand).where(ExecutionCommand.account_id == account.id))
         db.execute(delete(CashEntry).where(CashEntry.account_id == account.id))
+        db.execute(delete(ExecutionCorrection).where(ExecutionCorrection.account_id == account.id))
         db.execute(delete(Execution).where(Execution.account_id == account.id))
         db.execute(delete(Account).where(Account.id == account.id))
         db.execute(delete(Outbox).where(Outbox.owner_id == owner))

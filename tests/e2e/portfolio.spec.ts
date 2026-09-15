@@ -88,6 +88,22 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await page.getByRole("button", { name: "核对账本", exact: true }).click();
     await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     await expect(page.getByText("已复算 1 笔成交 · 1 个未平批次 · 现金 9424.99 元")).toBeVisible();
+    await page.getByRole("button", { name: "冲正", exact: true }).click();
+    await page.getByLabel("冲正原因", { exact: true }).fill("合成误录冲正");
+    await page.getByRole("button", { name: "预览冲正影响" }).click();
+    await expect(page.getByRole("region", { name: "成交冲正", exact: true })).toContainText("9424.99 → 9799.99");
+    await page.screenshot({ path: "test-results/correction-preview.png", fullPage: true });
+    await page.getByRole("button", { name: "确认冲正这笔成交" }).click();
+    await expect(page.getByText("成交已冲正，持仓与现金已更新，原始凭据已保留。")).toBeVisible();
+    await expect(page.locator(".balance-value")).toHaveText("9,799.99");
+    await page.getByRole("button", { name: "关闭冲正结果" }).click();
+    await page.reload();
+    await expect(page.getByRole("region", { name: "成交明细，可横向滚动" })).toContainText("已冲正");
+    await expect(page.getByRole("region", { name: "冲正记录，可横向滚动" })).toContainText("合成误录冲正");
+    await expect(page.getByRole("heading", { name: "尚无持仓", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "核对账本", exact: true }).click();
+    await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
+    await expect(page.getByText("已复算 1 笔成交 · 0 个未平批次 · 现金 9799.99 元")).toBeVisible();
     for (const theme of ["dark", "light"]) {
       if (theme === "light") await page.getByRole("button", { name: "切换深浅主题" }).click();
       for (const width of [390, 768, 1280, 1440]) {

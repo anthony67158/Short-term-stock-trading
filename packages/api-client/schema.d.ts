@@ -144,6 +144,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/executions/{execution_id}/correction-previews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Correction */
+        post: operations["preview_correction_api_v1_accounts__account_id__executions__execution_id__correction_previews_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/executions/{execution_id}/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Correct Execution */
+        post: operations["correct_execution_api_v1_accounts__account_id__executions__execution_id__corrections_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/corrections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Correction History */
+        get: operations["correction_history_api_v1_accounts__account_id__corrections_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/calendar": {
         parameters: {
             query?: never;
@@ -596,7 +647,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL" | "EXECUTION";
+            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL" | "EXECUTION" | "REVERSAL";
             /** Amount */
             amount: string;
             /**
@@ -615,6 +666,8 @@ export interface components {
             accountVersion: number;
             /** Executionid */
             executionId?: string | null;
+            /** Correctionid */
+            correctionId?: string | null;
         };
         /** CashFlowInput */
         CashFlowInput: {
@@ -653,6 +706,70 @@ export interface components {
             statement: string;
             /** Evidenceids */
             evidenceIds: string[];
+        };
+        /** CorrectionCommit */
+        CorrectionCommit: {
+            /** Reason */
+            reason: string;
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Previewhash */
+            previewHash: string;
+        };
+        /** CorrectionInput */
+        CorrectionInput: {
+            /** Reason */
+            reason: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** CorrectionPage */
+        CorrectionPage: {
+            /** Corrections */
+            corrections: components["schemas"]["CorrectionView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** CorrectionPreview */
+        CorrectionPreview: {
+            /** Executionid */
+            executionId: string;
+            /** Accountversion */
+            accountVersion: number;
+            /** Cashbefore */
+            cashBefore: string;
+            /** Cashafter */
+            cashAfter: string;
+            /** Reversalamount */
+            reversalAmount: string;
+            /** Opensharesbefore */
+            openSharesBefore: number;
+            /** Opensharesafter */
+            openSharesAfter: number;
+            /** Recalculatedsales */
+            recalculatedSales: number;
+            /** Previewhash */
+            previewHash: string;
+        };
+        /** CorrectionView */
+        CorrectionView: {
+            /** Id */
+            id: string;
+            /** Executionid */
+            executionId: string;
+            /** Reason */
+            reason: string;
+            /** Actorid */
+            actorId: string;
+            /**
+             * Recordedat
+             * Format: date-time
+             */
+            recordedAt: string;
+            /** Accountversion */
+            accountVersion: number;
+            /** Reversalamount */
+            reversalAmount: string;
         };
         /** Discrepancy */
         Discrepancy: {
@@ -698,6 +815,21 @@ export interface components {
         /** Envelope[CashPage] */
         Envelope_CashPage_: {
             data: components["schemas"]["CashPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CorrectionPage] */
+        Envelope_CorrectionPage_: {
+            data: components["schemas"]["CorrectionPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CorrectionPreview] */
+        Envelope_CorrectionPreview_: {
+            data: components["schemas"]["CorrectionPreview"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CorrectionView] */
+        Envelope_CorrectionView_: {
+            data: components["schemas"]["CorrectionView"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[EvidencePage] */
@@ -916,6 +1048,8 @@ export interface components {
             source: string;
             /** Accountversion */
             accountVersion: number;
+            /** Correctionid */
+            correctionId?: string | null;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1130,6 +1264,11 @@ export interface components {
             replayCashBalance: string;
             /** Executioncount */
             executionCount: number;
+            /**
+             * Correctioncount
+             * @default 0
+             */
+            correctionCount: number;
             /** Openlotcount */
             openLotCount: number;
             /** Discrepancycount */
@@ -1586,6 +1725,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ReconciliationView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_correction_api_v1_accounts__account_id__executions__execution_id__correction_previews_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CorrectionPreview_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correct_execution_api_v1_accounts__account_id__executions__execution_id__corrections_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+                execution_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorrectionCommit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CorrectionView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    correction_history_api_v1_accounts__account_id__corrections_get: {
+        parameters: {
+            query?: {
+                cursor?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CorrectionPage_"];
                 };
             };
             /** @description Validation Error */

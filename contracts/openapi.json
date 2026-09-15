@@ -610,6 +610,210 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/executions/{execution_id}/correction-previews": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Preview Correction",
+        "operationId": "preview_correction_api_v1_accounts__account_id__executions__execution_id__correction_previews_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CorrectionPreview_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}/executions/{execution_id}/corrections": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Correct Execution",
+        "operationId": "correct_execution_api_v1_accounts__account_id__executions__execution_id__corrections_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "execution_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Execution Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorrectionCommit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CorrectionView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}/corrections": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Correction History",
+        "operationId": "correction_history_api_v1_accounts__account_id__corrections_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CorrectionPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/calendar": {
       "get": {
         "tags": [
@@ -1911,7 +2115,8 @@
               "OPENING",
               "DEPOSIT",
               "WITHDRAWAL",
-              "EXECUTION"
+              "EXECUTION",
+              "REVERSAL"
             ],
             "title": "Kind"
           },
@@ -1949,6 +2154,17 @@
               }
             ],
             "title": "Executionid"
+          },
+          "correctionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correctionid"
           }
         },
         "additionalProperties": false,
@@ -2075,6 +2291,194 @@
           "evidenceIds"
         ],
         "title": "Claim"
+      },
+      "CorrectionCommit": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          },
+          "previewHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Previewhash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "expectedVersion",
+          "previewHash"
+        ],
+        "title": "CorrectionCommit"
+      },
+      "CorrectionInput": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "expectedVersion"
+        ],
+        "title": "CorrectionInput"
+      },
+      "CorrectionPage": {
+        "properties": {
+          "corrections": {
+            "items": {
+              "$ref": "#/components/schemas/CorrectionView"
+            },
+            "type": "array",
+            "title": "Corrections"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "corrections",
+          "nextCursor"
+        ],
+        "title": "CorrectionPage"
+      },
+      "CorrectionPreview": {
+        "properties": {
+          "executionId": {
+            "type": "string",
+            "title": "Executionid"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "cashBefore": {
+            "type": "string",
+            "title": "Cashbefore",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "cashAfter": {
+            "type": "string",
+            "title": "Cashafter",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "reversalAmount": {
+            "type": "string",
+            "title": "Reversalamount",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "openSharesBefore": {
+            "type": "integer",
+            "title": "Opensharesbefore"
+          },
+          "openSharesAfter": {
+            "type": "integer",
+            "title": "Opensharesafter"
+          },
+          "recalculatedSales": {
+            "type": "integer",
+            "title": "Recalculatedsales"
+          },
+          "previewHash": {
+            "type": "string",
+            "title": "Previewhash"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "executionId",
+          "accountVersion",
+          "cashBefore",
+          "cashAfter",
+          "reversalAmount",
+          "openSharesBefore",
+          "openSharesAfter",
+          "recalculatedSales",
+          "previewHash"
+        ],
+        "title": "CorrectionPreview"
+      },
+      "CorrectionView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "executionId": {
+            "type": "string",
+            "title": "Executionid"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "actorId": {
+            "type": "string",
+            "title": "Actorid"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recordedat"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "reversalAmount": {
+            "type": "string",
+            "title": "Reversalamount",
+            "decimal_places": 2,
+            "max_digits": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "executionId",
+          "reason",
+          "actorId",
+          "recordedAt",
+          "accountVersion",
+          "reversalAmount"
+        ],
+        "title": "CorrectionView"
       },
       "Discrepancy": {
         "properties": {
@@ -2216,6 +2620,54 @@
           "data"
         ],
         "title": "Envelope[CashPage]"
+      },
+      "Envelope_CorrectionPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CorrectionPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CorrectionPage]"
+      },
+      "Envelope_CorrectionPreview_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CorrectionPreview"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CorrectionPreview]"
+      },
+      "Envelope_CorrectionView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CorrectionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CorrectionView]"
       },
       "Envelope_EvidencePage_": {
         "properties": {
@@ -2792,6 +3244,17 @@
           "accountVersion": {
             "type": "integer",
             "title": "Accountversion"
+          },
+          "correctionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Correctionid"
           }
         },
         "additionalProperties": false,
@@ -3378,6 +3841,11 @@
           "executionCount": {
             "type": "integer",
             "title": "Executioncount"
+          },
+          "correctionCount": {
+            "type": "integer",
+            "title": "Correctioncount",
+            "default": 0
           },
           "openLotCount": {
             "type": "integer",

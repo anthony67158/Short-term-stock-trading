@@ -81,7 +81,7 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
         account = owned_account(db, user_id, account_id, lock=True)
         existing = db.scalar(select(CashEntry).where(
             CashEntry.account_id == account_id, CashEntry.source_key == key,
-            CashEntry.execution_id.is_(None),
+            CashEntry.kind.in_(["OPENING", "DEPOSIT", "WITHDRAWAL"]),
         ))
         if existing:
             if existing.request_hash != fingerprint(body):
@@ -91,7 +91,8 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
             raise PortfolioError("ACCOUNT_VERSION_CONFLICT", "账户已有新记录，请刷新后核对")
         if body.effective_at > utcnow():
             raise PortfolioError("FUTURE_CASH_FLOW", "不能将尚未发生的资金变动记为事实", 422)
-        last = db.scalar(select(CashEntry).where(CashEntry.account_id == account_id)
+        last = db.scalar(select(CashEntry).where(
+            CashEntry.account_id == account_id, CashEntry.kind != "REVERSAL")
                          .order_by(CashEntry.account_version.desc()).limit(1))
         if body.kind == "OPENING" and last:
             raise PortfolioError("OPENING_ALREADY_STARTED", "期初余额只能作为账户首笔资金记录")

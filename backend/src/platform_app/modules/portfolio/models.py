@@ -38,14 +38,20 @@ class CashEntry(Base):
     __table_args__ = (
         UniqueConstraint("account_id", "kind", "source_key", name="uq_cash_entries_source"),
         UniqueConstraint("account_id", "account_version", name="uq_cash_entries_version"),
-        CheckConstraint("kind IN ('OPENING','DEPOSIT','WITHDRAWAL','EXECUTION')", name="kind"),
+        CheckConstraint(
+            "kind IN ('OPENING','DEPOSIT','WITHDRAWAL','EXECUTION','REVERSAL')", name="kind",
+        ),
         CheckConstraint(
             "(kind = 'WITHDRAWAL' AND amount < 0) OR "
-            "(kind IN ('OPENING','DEPOSIT') AND amount > 0) OR kind = 'EXECUTION'",
+            "(kind IN ('OPENING','DEPOSIT') AND amount > 0) OR "
+            "kind IN ('EXECUTION','REVERSAL')",
             name="signed_amount",
         ),
         CheckConstraint(
             "(kind = 'EXECUTION') = (execution_id IS NOT NULL)", name="execution_link",
+        ),
+        CheckConstraint(
+            "(kind = 'REVERSAL') = (correction_id IS NOT NULL)", name="correction_link",
         ),
     )
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
@@ -60,6 +66,9 @@ class CashEntry(Base):
     account_version: Mapped[int] = mapped_column(Integer)
     execution_id: Mapped[str | None] = mapped_column(
         ForeignKey("executions.id"), unique=True,
+    )
+    correction_id: Mapped[str | None] = mapped_column(
+        ForeignKey("execution_corrections.id"), unique=True,
     )
 
 
@@ -118,6 +127,25 @@ class ExecutionCommand(Base):
     command_key: Mapped[str] = mapped_column(String(128), primary_key=True)
     request_hash: Mapped[str] = mapped_column(String(64))
     execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id"))
+    result: Mapped[dict] = mapped_column(JSONB, default=dict)
+
+
+class ExecutionCorrection(Base):
+    __tablename__ = "execution_corrections"
+    __table_args__ = (
+        UniqueConstraint("account_id", "command_key", name="uq_corrections_command"),
+        UniqueConstraint("account_id", "account_version", name="uq_corrections_version"),
+    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
+    execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id"), unique=True)
+    actor_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    reason: Mapped[str] = mapped_column(String(500))
+    command_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    account_version: Mapped[int] = mapped_column(Integer)
+    reversal_amount: Mapped[Decimal] = mapped_column(Numeric(20, 2))
 
 
 class LotConsumption(Base):

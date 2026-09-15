@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import type { components } from "../../../../../packages/api-client/schema";
 import { Button, Empty, Input } from "../../components/Controls";
 import { api, errorMessage } from "../../lib/api";
+import { CorrectionEditor, CorrectionHistory } from "./Corrections";
 
 type Account = components["schemas"]["AccountView"];
 type ExecutionInput = components["schemas"]["ExecutionInput"];
@@ -59,6 +60,7 @@ export function Executions({ account }: { account: Account }) {
   const cache = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [correcting, setCorrecting] = useState<components["schemas"]["ExecutionView"] | null>(null);
   const positions = useInfiniteQuery({
     queryKey: ["positions", account.id], initialPageParam: undefined as string | undefined,
     queryFn: async ({ pageParam, signal }) => {
@@ -99,11 +101,13 @@ export function Executions({ account }: { account: Account }) {
       {positions.hasNextPage && <Button disabled={positions.isFetchingNextPage} onClick={() => positions.fetchNextPage()}>更多持仓</Button>}
     </section>
     <section className="ledger-section"><h2>成交记录</h2>
+      {correcting && <CorrectionEditor key={correcting.id} account={account} trade={correcting} close={() => setCorrecting(null)} />}
       {history.isPending ? <p role="status">正在读取成交…</p> : history.isError ? <div role="alert">{errorMessage(history.error)}<Button onClick={() => history.refetch()}>重新读取成交</Button></div>
         : trades.length === 0 ? <p className="secondary">尚无已记录成交。</p>
-          : <div className="table-scroll" role="region" aria-label="成交明细，可横向滚动" tabIndex={0}><table><thead><tr><th>时间 / 交割编号</th><th>股票 / 方向</th><th className="numeric">股数 × 价格</th><th className="numeric">费用（元）</th><th className="numeric">现金变动（元）</th><th className="numeric">已实现盈亏（元）</th></tr></thead>
-            <tbody>{trades.map((row) => <tr key={row.id}><td>{timestamp(row.executedAt)}<div className="secondary">{row.sourceKey}</div></td><td>{row.instrumentId} · {row.side === "BUY" ? "买入" : "卖出"}</td><td className="numeric">{row.quantityShares} × {row.price}</td><td className="numeric">{row.totalFees}</td><td className="numeric">{row.cashDelta}</td><td className="numeric">{row.realizedPnl ?? "—"}</td></tr>)}</tbody></table></div>}
+          : <div className="table-scroll" role="region" aria-label="成交明细，可横向滚动" tabIndex={0}><table><thead><tr><th>时间 / 交割编号</th><th>股票 / 方向</th><th className="numeric">股数 × 价格</th><th className="numeric">费用（元）</th><th className="numeric">原现金变动（元）</th><th className="numeric">已实现盈亏（元）</th><th>记录状态</th></tr></thead>
+            <tbody>{trades.map((row) => <tr key={row.id}><td>{timestamp(row.executedAt)}<div className="secondary">{row.sourceKey}</div></td><td>{row.instrumentId} · {row.side === "BUY" ? "买入" : "卖出"}</td><td className="numeric">{row.quantityShares} × {row.price}</td><td className="numeric">{row.totalFees}</td><td className="numeric">{row.cashDelta}</td><td className="numeric">{row.realizedPnl ?? "—"}</td><td>{row.correctionId ? "已冲正" : <Button disabled={!!correcting} onClick={() => setCorrecting(row)}>冲正</Button>}</td></tr>)}</tbody></table></div>}
       {history.hasNextPage && <Button disabled={history.isFetchingNextPage} onClick={() => history.fetchNextPage()}>更早成交</Button>}
     </section>
+    <CorrectionHistory accountId={account.id} />
   </>;
 }
