@@ -63,6 +63,67 @@ CREATE TABLE IF NOT EXISTS daily_bars (
     source_row_sha256 TEXT NOT NULL,
     PRIMARY KEY (instrument_id, trade_date)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS trade_calendar (
+    exchange TEXT NOT NULL,
+    cal_date TEXT NOT NULL,
+    is_open INTEGER NOT NULL CHECK (is_open IN (0, 1)),
+    previous_open_date TEXT,
+    source TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (exchange, cal_date)
+) STRICT;
+CREATE TABLE IF NOT EXISTS adjustment_factors (
+    instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
+    source_code TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    factor TEXT NOT NULL,
+    source TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, trade_date)
+) STRICT;
+CREATE TABLE IF NOT EXISTS suspensions (
+    instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
+    source_code TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    suspend_type TEXT NOT NULL,
+    suspend_timing TEXT NOT NULL,
+    source TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, trade_date, suspend_type, suspend_timing)
+) STRICT;
+CREATE TABLE IF NOT EXISTS name_changes (
+    instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
+    source_code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    start_date TEXT NOT NULL,
+    end_date TEXT,
+    announced_date TEXT,
+    reason TEXT,
+    source TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, start_date, name)
+) STRICT;
+CREATE TABLE IF NOT EXISTS minute_bars (
+    instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
+    source_code TEXT NOT NULL,
+    bar_end_shanghai TEXT NOT NULL,
+    frequency TEXT NOT NULL CHECK (frequency = '5min'),
+    open TEXT NOT NULL,
+    high TEXT NOT NULL,
+    low TEXT NOT NULL,
+    close TEXT NOT NULL,
+    volume_shares TEXT NOT NULL,
+    amount_cny TEXT NOT NULL,
+    adjustment TEXT NOT NULL CHECK (adjustment = 'RAW'),
+    source TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, bar_end_shanghai, frequency)
+) STRICT;
 CREATE TABLE IF NOT EXISTS sync_checkpoints (
     stream TEXT NOT NULL,
     partition_key TEXT NOT NULL,
@@ -223,6 +284,56 @@ class MarketDataset:
             raise
         return inserted
 
+    def write_facts(
+        self,
+        table: str,
+        rows: list[dict],
+        *,
+        key_fields: tuple[str, ...],
+    ) -> int:
+        allowed = {
+            "trade_calendar",
+            "adjustment_factors",
+            "suspensions",
+            "name_changes",
+            "minute_bars",
+        }
+        if table not in allowed:
+            raise MarketDatasetError("DATASET_TABLE_REJECTED")
+        inserted = 0
+        try:
+            for row in rows:
+                keys = {field: row[field] for field in key_fields}
+                values = {field: value for field, value in row.items() if field not in keys}
+                inserted += self._insert_exact(table, keys, values)
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return inserted
+
+    def eligible_instruments(self, trade_date: str) -> list[str]:
+        rows = self.db.execute(
+            "SELECT instrument_id FROM instruments "
+            "WHERE list_date <= ? AND (delist_date IS NULL OR delist_date >= ?) "
+            "ORDER BY instrument_id",
+            (trade_date, trade_date),
+        )
+        return [row["instrument_id"] for row in rows]
+
+    def suspension_explanations(self, trade_date: str) -> dict[str, list[str]]:
+        rows = self.db.execute(
+            "SELECT instrument_id, suspend_type, suspend_timing FROM suspensions "
+            "WHERE trade_date = ? ORDER BY instrument_id, suspend_type, suspend_timing",
+            (trade_date,),
+        )
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            result.setdefault(row["instrument_id"], []).append(
+                f"{row['suspend_type']}:{row['suspend_timing']}"
+            )
+        return result
+
     def checkpoint(self, stream: str, partition_key: str, rows: list[dict]) -> bool:
         values = {
             "row_count": len(rows),
@@ -262,7 +373,17 @@ class MarketDataset:
         self._assert_writable()
         metadata = dict(self.db.execute("SELECT * FROM dataset_metadata").fetchone())
         tables = {}
-        for table in ("instruments", "instrument_aliases", "daily_bars", "sync_checkpoints"):
+        for table in (
+            "instruments",
+            "instrument_aliases",
+            "trade_calendar",
+            "daily_bars",
+            "adjustment_factors",
+            "suspensions",
+            "name_changes",
+            "minute_bars",
+            "sync_checkpoints",
+        ):
             tables[table] = self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         self.db.commit()
         self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")

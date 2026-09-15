@@ -115,3 +115,47 @@ def test_resume_rejects_a_different_dataset_identity(tmp_path):
         pass
     with pytest.raises(MarketDatasetError, match="DATASET_IDENTITY_MISMATCH"):
         MarketDataset(root, dataset_id="two", source="TUSHARE_COMPATIBLE")
+
+
+def test_point_in_time_universe_and_suspension_explanations(tmp_path):
+    root = tmp_path / "dataset"
+    rows = [
+        instrument(),
+        instrument(
+            instrumentId="SH.600001", sourceCode="600001.SH", exchange="SH",
+            name="Delisted Synthetic", listDate="20100101", delistDate="20200131",
+            listStatus="D",
+        ),
+        instrument(
+            instrumentId="SZ.300001", sourceCode="300001.SZ", exchange="SZ",
+            board="CHINEXT", name="Future Synthetic", listDate="20210101",
+        ),
+    ]
+    suspension = {
+        "instrument_id": "SH.600001",
+        "source_code": "600001.SH",
+        "trade_date": "20200102",
+        "suspend_type": "S",
+        "suspend_timing": "DAY",
+        "source": "TUSHARE_COMPATIBLE",
+        "available_at": "2020-01-02T09:00:00+08:00",
+        "source_row_sha256": canonical_sha256({"synthetic": "suspension"}),
+    }
+    with MarketDataset(root, dataset_id="point-in-time", source="TUSHARE_COMPATIBLE") as ds:
+        ds.write_instruments(rows)
+        ds.write_facts(
+            "suspensions",
+            [suspension],
+            key_fields=("instrument_id", "trade_date", "suspend_type", "suspend_timing"),
+        )
+        assert ds.eligible_instruments("20200102") == ["SH.600001", "SZ.000001"]
+        assert ds.eligible_instruments("20210201") == ["SZ.000001", "SZ.300001"]
+        assert ds.suspension_explanations("20200102") == {"SH.600001": ["S:DAY"]}
+
+
+def test_fact_writer_rejects_unknown_tables(tmp_path):
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="safe-table", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        with pytest.raises(MarketDatasetError, match="DATASET_TABLE_REJECTED"):
+            ds.write_facts("sqlite_master", [], key_fields=("name",))
