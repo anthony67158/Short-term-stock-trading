@@ -13,7 +13,12 @@ class FakeClient:
 
     def rows(self, api_name, params, fields):
         key = (api_name, params.get("list_status") or params.get("trade_date") or "")
-        return self.responses.get(key, self.responses.get((api_name, ""), []))
+        rows = self.responses.get(key, self.responses.get((api_name, ""), []))
+        if api_name == "namechange":
+            offset = params.get("offset", 0)
+            limit = params.get("limit", len(rows))
+            return rows[offset : offset + limit]
+        return rows
 
 
 def stock(code, name, market, exchange, list_date="20100101"):
@@ -120,6 +125,53 @@ def test_builder_syncs_reference_and_complete_daily_partition(tmp_path):
             "SELECT list_date, source_list_date FROM instruments WHERE instrument_id = 'BJ.920729'"
         ).fetchone()
         assert bse_dates == ("20211115", "20200727")
+
+
+def test_builder_syncs_paginated_name_changes_with_historical_availability(tmp_path):
+    data = responses()
+    current = {
+        "ts_code": "000001.SZ",
+        "name": "Current Name",
+        "start_date": "20160108",
+        "end_date": None,
+        "ann_date": "20160107",
+        "change_reason": "改名",
+    }
+    data[("namechange", "")] = [
+        current,
+        current.copy(),
+        {
+            **current,
+            "name": "Expired Name",
+            "start_date": "20100101",
+            "end_date": "20151231",
+            "ann_date": "20091231",
+        },
+        {
+            **current,
+            "name": "Future Name",
+            "start_date": "20260916",
+            "ann_date": "20260915",
+        },
+    ]
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="name-history", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        assert builder.sync_name_changes("20160101", "20260915") == {
+            "status": "COMPLETED",
+            "nameChanges": 1,
+            "discardedExactDuplicates": 1,
+            "discardedAliasDuplicates": 0,
+        }
+        assert builder.sync_name_changes("20160101", "20260915") == {"status": "SKIPPED"}
+        row = ds.db.execute(
+            "SELECT name, available_at FROM name_changes WHERE instrument_id = 'SZ.000001'"
+        ).fetchone()
+        assert tuple(row) == ("Current Name", "2016-01-08T16:30:00+08:00")
 
 
 def test_builder_rejects_unexplained_missing_daily_before_writing(tmp_path):

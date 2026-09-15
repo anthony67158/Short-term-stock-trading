@@ -14,6 +14,7 @@ from platform_app.adapters.market_tushare import (
     normalize_bse_mapping,
     normalize_daily,
     normalize_instrument,
+    normalize_name_change,
     normalize_suspension,
     normalize_trade_calendar,
 )
@@ -31,6 +32,8 @@ SOURCE = "TUSHARE_COMPATIBLE"
 CALENDAR_FIELDS = "exchange,cal_date,is_open,pretrade_date"
 ADJUSTMENT_FIELDS = "ts_code,trade_date,adj_factor"
 SUSPENSION_FIELDS = "ts_code,trade_date,suspend_timing,suspend_type"
+NAME_CHANGE_FIELDS = "ts_code,name,start_date,end_date,ann_date,change_reason"
+NAME_CHANGE_PAGE_SIZE = 5000
 
 
 def _observed_at() -> str:
@@ -108,6 +111,18 @@ def _discard_audit(rows: list[dict]) -> dict:
         key=lambda row: json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
     )
     return {"count": len(ordered), "sourceRowsSha256": canonical_sha256(ordered)}
+
+
+def _deduplicate_exact_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    kept_by_payload = {}
+    discarded = []
+    for row in rows:
+        payload = json.dumps(row, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if payload in kept_by_payload:
+            discarded.append(row)
+        else:
+            kept_by_payload[payload] = row
+    return list(kept_by_payload.values()), discarded
 
 
 def _deduplicate_alias_rows(
@@ -250,6 +265,91 @@ class MarketDatasetBuilder:
             availability_method="DIRECT_OBSERVATION",
         )
         return {"status": "COMPLETED", "listingStatusPeriods": len(rows)}
+
+    def sync_name_changes(self, start_date: str, end_date: str) -> dict:
+        partition_key = f"{start_date}:{end_date}"
+        if self.dataset.has_checkpoint("name_changes", partition_key):
+            return {"status": "SKIPPED"}
+
+        raw_rows = []
+        first_page = None
+        for page in range(20):
+            rows = self.client.rows(
+                "namechange",
+                {"offset": page * NAME_CHANGE_PAGE_SIZE, "limit": NAME_CHANGE_PAGE_SIZE},
+                NAME_CHANGE_FIELDS,
+            )
+            if len(rows) > NAME_CHANGE_PAGE_SIZE:
+                raise MarketDatasetError("NAME_CHANGE_PAGE_MAY_BE_TRUNCATED")
+            if first_page is None:
+                first_page = rows
+            raw_rows.extend(rows)
+            if len(rows) < NAME_CHANGE_PAGE_SIZE:
+                break
+        else:
+            raise MarketDatasetError("NAME_CHANGE_PAGINATION_LIMIT")
+
+        replayed_first_page = self.client.rows(
+            "namechange",
+            {"offset": 0, "limit": NAME_CHANGE_PAGE_SIZE},
+            NAME_CHANGE_FIELDS,
+        )
+        if canonical_sha256(first_page or []) != canonical_sha256(replayed_first_page):
+            raise MarketDatasetError("NAME_CHANGE_SOURCE_CHANGED_DURING_SYNC")
+
+        raw_rows, exact_duplicates = _deduplicate_exact_rows(raw_rows)
+        aliases = self.aliases()
+        known_ids = {
+            row["instrument_id"]
+            for row in self.dataset.db.execute("SELECT instrument_id FROM instruments")
+        }
+        normalized = []
+        for row in raw_rows:
+            effective_date = max(
+                str(row.get("start_date") or ""),
+                str(row.get("ann_date") or ""),
+            )
+            item = normalize_name_change(
+                row,
+                aliases,
+                _historical_available_at(effective_date, "name_change"),
+            )
+            if (
+                item["instrument_id"] in known_ids
+                and item["start_date"] <= end_date
+                and (item["end_date"] is None or item["end_date"] >= start_date)
+            ):
+                normalized.append(item)
+        normalized, alias_duplicates = _deduplicate_alias_rows(
+            normalized,
+            key=lambda row: (row["instrument_id"], row["start_date"], row["name"]),
+            preferred_source_code=self.dataset.source_code_for_date,
+        )
+        normalized.sort(key=lambda row: (row["instrument_id"], row["start_date"], row["name"]))
+        self.dataset.write_facts(
+            "name_changes",
+            normalized,
+            key_fields=("instrument_id", "start_date", "name"),
+        )
+        self.dataset.checkpoint(
+            "name_changes",
+            partition_key,
+            normalized,
+            source=SOURCE,
+            first_seen_at=self.observed_at(),
+            availability_method="RECONSTRUCTED_FROM_VENDOR_ANNOUNCEMENT_DATE",
+            details={
+                "rawRows": len(raw_rows) + len(exact_duplicates),
+                "discardedExactDuplicates": _discard_audit(exact_duplicates),
+                "discardedAliasDuplicates": _discard_audit(alias_duplicates),
+            },
+        )
+        return {
+            "status": "COMPLETED",
+            "nameChanges": len(normalized),
+            "discardedExactDuplicates": len(exact_duplicates),
+            "discardedAliasDuplicates": len(alias_duplicates),
+        }
 
     def sync_reference(self, start_date: str, end_date: str) -> dict:
         if self.dataset.has_checkpoint("reference", f"{start_date}:{end_date}"):

@@ -29,7 +29,7 @@ def main():
     parser.add_argument("--dataset-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
-    parser.add_argument("--stage", choices=["reference", "daily", "seal"])
+    parser.add_argument("--stage", choices=["reference", "names", "daily", "seal"])
     args = parser.parse_args()
     if args.command == "export-contracts":
         from platform_app.entrypoints.api import app
@@ -72,7 +72,7 @@ def main():
                 or not re.fullmatch(r"\d{8}", args.end_date)
                 or args.start_date > args.end_date
             ):
-                parser.error("reference/daily dates must be ordered YYYYMMDD values")
+                parser.error("reference/names/daily dates must be ordered YYYYMMDD values")
         try:
             dataset_root = external_dataset_root(args.dataset_root)
         except ValueError as exc:
@@ -88,6 +88,9 @@ def main():
                 builder = MarketDatasetBuilder(TushareClient(), dataset)
                 if args.stage == "reference":
                     result = builder.sync_reference(args.start_date, args.end_date)
+                    print(json.dumps(result, ensure_ascii=False))
+                elif args.stage == "names":
+                    result = builder.sync_name_changes(args.start_date, args.end_date)
                     print(json.dumps(result, ensure_ascii=False))
                 else:
                     dates = dataset.db.execute(
