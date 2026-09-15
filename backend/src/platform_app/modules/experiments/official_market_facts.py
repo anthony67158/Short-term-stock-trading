@@ -61,6 +61,16 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
         ),
     },
     {
+        "instrument_id": "SH.600432",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20170526",
+        "effective_to": "20180530",
+        "source_urls": (
+            "http://www.sse.com.cn/disclosure/announcement/listing/"
+            "c/c_20180522_4559445.shtml",
+        ),
+    },
+    {
         "instrument_id": "SZ.000629",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20170505",
