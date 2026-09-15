@@ -7,6 +7,7 @@ CREDENTIALS.md
 .trae/
 .DS_Store
 node_modules/
+.vite/
 dist/
 .venv/
 __pycache__/
