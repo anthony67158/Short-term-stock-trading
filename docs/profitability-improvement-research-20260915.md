@@ -8,7 +8,7 @@
 
 当前第一问题不是模型复杂度或交易覆盖，而是**尚无合格盈利基线，且 V4 数据合同和原始机会标签不支持正期望结论**：
 
-1. `/tmp/current-v3-account-repro.json` 的 `maximumOpenRiskPct=14.5173`，超过 BASELINE 上限 `5%`；`maximumSinglePositionPct=20.7401`，超过单票上限 `20%`；同时缺少 `riskProfileVersion`，10bps 压力收益转负。`profitability-v2` 因此返回 `BASELINE_REJECTED`。[验证器](../backtest/decision/run-profitability-v2.mjs#L184-L330) 191 日回放的 `+0.4229%` 只能作为诊断结果，不能作为权威盈利基线。
+1. 旧 `/tmp/current-v3-account-repro.json` 的 `maximumOpenRiskPct=14.5173` 来自取消/失败订单未释放审计占用。修复后，提交时开放风险为 `3.4351%`、单票开仓为 `19.4887%`、总开仓仓位为 `69.3736%`，均在 BASELINE 限额内；但 10bps 压力收益仍为 `-0.0866%`，`profitability-v2` 仍返回 `BASELINE_REJECTED`。[验证器](../backtest/decision/run-profitability-v2.mjs#L184-L330) 191 日回放的 `+0.4229%` 只能作为诊断结果，不能作为合格盈利基线。
 2. 15 年 V4 本地审计的 882,912 个事件、176 维特征中有 53 维恒定；review VWAP 全缺，`initialPFill`、`initialPWinGivenFill`、`initialExpectedNetR` 全缺，sector context/action 与 formula ID 全为 `UNKNOWN`。Alpha 覆盖虽为 `87.2219%`，但无法补偿这些业务特征块缺失。
 3. 原始费后机会均值在各打法和路径上全部为负：较好的 `MOMENTUM_BREAKOUT=-0.053R`、`IMMEDIATE=-0.091R`，`PULLBACK=-0.375R`、`BREAKOUT=-0.276R`；Alpha 分位有单调性，但 Top10% 仍为 `-0.132R`。这首先指向候选生成、标签与执行口径，而不是阈值或校准器。
 4. position 模型的 103,982 个样本覆盖 807 日，Alpha 覆盖仅 `21.2%`，`sellableRatio` 恒为 `1`；确认段 `EXIT=91.9%`，平均效用 `-0.00390R`，相对现役 adapter `-0.00397R`，95% 下界 `-0.00636R`，不具备发布资格。[数据报告](../qlib-service/position-model/research-current/dataset-report.json) [训练报告](../qlib-service/position-model/research-current/position_training_report.json)
@@ -21,7 +21,7 @@
 
 | 对象 | 已验证事实 | 研究含义 |
 |---|---|---|
-| current-v3 191 日回放 | `BASELINE_REJECTED`；开放风险 `14.5173%`、单票 `20.7401%`、缺风险合同版本、10bps 转负 | 可继续作为生产失败关闭对象，不能称为 profitability-qualified baseline |
+| current-v3 191 日回放 | 风险审计已修复并满足开仓限额；5bps `+0.4229%`，但 10bps `-0.0866%`，仍为 `BASELINE_REJECTED` | 成本安全垫不足，不能称为 profitability-qualified baseline |
 | V4 review 数据 | 882,912 事件、398,721 条条件样本、2,532 个交易日、176 维；53 维恒定 | 在修复数据合同前，复杂 ranker 和分层校准的收益不可归因 |
 | 原始机会标签 | 所有已审计打法、路径和 Alpha Top10% 均为负费后均值 | 必须先让预注册可交易桶出现正均值与正下界 |
 | V4 发布结果 | 确认段年化成交 `126.66`，但 10bps 净 R 下界 `-0.02749R`、最大回撤 `11.72%` | 交易数达到目标不等于盈利能力合格。[V4 复盘](./v4-review-15y-training-20260915.md) |
@@ -35,8 +35,8 @@
 
 **系统映射。**
 
-- 冻结账户、事件、价格、费用、退出、风险和最终确认版本，重新生成同一合同的 current-v3 三情景回放。生产冠军与盈利合格基线必须分开标记。
-- 在 `scripts/build_v4_review_dataset.py` 的训练前审计中阻断恒定或全缺的 DIRECT 业务特征。重点恢复 review VWAP、initial 三个价值字段、sector context/action 和 formula ID；无法可靠回填的字段从 DIRECT 合同删除，不能靠缺失掩码伪装为有效信号。
+- 已修复回放风险占用释放，并分开记录开仓约束和持仓后的市值漂移。下一步冻结账户、事件、价格、费用、退出和最终确认版本，补齐真正的决策事件流与风险匹配基准。
+- 已在 `scripts/build_v4_review_dataset.py` 和 V4 训练入口增加关键特征覆盖审计，现有十五年数组会因关键覆盖为 0% 而快速失败。下一步恢复 review VWAP、initial 三个价值字段、sector context/action 和 formula ID；无法可靠回填的字段从 DIRECT 合同删除，不能靠缺失掩码伪装为有效信号。
 - 每个 train/calibration/selection/confirmation 分段都输出覆盖率、唯一值数、时间范围和数据哈希。
 
 **验收。**
@@ -47,7 +47,12 @@
 
 ### P0-1：先修候选与费后标签，再优化模型
 
-**依据。** 最优执行应把收益、交易成本和执行风险放在同一目标中，而不是只扩大成交数量。[S1] Qlib 官方回测也将开平仓费用、最低费用和涨跌停可交易性纳入评估。[S2] 当前 `cost_aware_opportunity_reward` 的额外换手、资金占用和尾损参数默认均为零，[代码](../qlib-service/decision_engine/training/opportunity_reward.py#L90-L132)；V4 选策则先比较 `annualizedTrades`，再看净 R 下界。[代码](../qlib-service/decision_engine/training/review_ensemble.py#L688-L710)
+**依据。** 最优执行应把收益、交易成本和执行风险放在同一目标中，而不是只扩大成交数量。[S1] Qlib 官方回测也将开平仓费用、最低费用和涨跌停可交易性纳入评估。[S2] 当前 `cost_aware_opportunity_reward` 的额外换手、资金占用和尾损参数默认均为零。[代码](../qlib-service/decision_engine/training/opportunity_reward.py#L90-L132) V4 选策已修正为先筛选 5bps/10bps 正下界，再把年化交易数作为可行性约束；仍需用合格数据重训验证。
+
+单因子诊断也支持这个顺序：`patternDailyVolumeRatio5` 的高低分位机会收益差约
+`+0.176R`，但最高分位绝对收益仍为 `-0.131R`，说明它有排序信息却不能单独创造
+正期望；高 `feeRateBps` 组均值为 `-0.315R`，低费用组为 `-0.052R`，最低佣金
+和小额交易成本是当前 10 万元账户的主要损耗之一。
 
 **系统映射。**
 
@@ -171,8 +176,8 @@
 
 ## 建议实验顺序
 
-1. 修复 `/tmp/current-v3-account-repro.json` 暴露的风险合同与账户回放问题，建立首个 `BASELINE_QUALIFIED` 基线。
-2. 修复 V4 的 53 个恒定特征和关键业务字段缺失，按分段重新审计覆盖率。
+1. 使用已修复的风险审计重建完整决策事件流和风险匹配基准，解决 10bps 转负，建立首个 `BASELINE_QUALIFIED` 基线。
+2. 补齐被新门禁拦截的 V4 关键业务字段，重建数据并按分段审计覆盖率。
 3. 重做候选、成交和费后标签，先证明预注册打法/路径存在绝对正期望。
 4. 接入真实执行、部分成交和条件滑点，再做嵌套 purged walk-forward。
 5. 数据合格后依次评估校准、批次 ranker、去相关和状态稳健性。
