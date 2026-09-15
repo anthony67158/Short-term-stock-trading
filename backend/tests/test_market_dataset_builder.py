@@ -210,8 +210,9 @@ def test_builder_rejects_unexplained_missing_daily_before_writing(tmp_path):
     with MarketDataset(root, dataset_id="all-a-share", source="TUSHARE_COMPATIBLE") as ds:
         builder = MarketDatasetBuilder(FakeClient(data), ds)
         builder.sync_reference("20160101", "20260915")
-        with pytest.raises(MarketDatasetError, match="DAILY_COVERAGE_INCOMPLETE:1"):
+        with pytest.raises(MarketDatasetError) as exc_info:
             builder.sync_daily_partition("20260915")
+        assert str(exc_info.value) == "DAILY_COVERAGE_INCOMPLETE:1:BJ.920729"
         assert ds.db.execute("SELECT COUNT(*) FROM daily_bars").fetchone()[0] == 0
 
 

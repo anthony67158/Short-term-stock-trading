@@ -673,7 +673,10 @@ class MarketDatasetBuilder:
         status_explanations = set(self.dataset.listing_status_explanations(trade_date))
         unexplained = expected - bar_ids - suspended - status_explanations
         if unexplained:
-            raise MarketDatasetError(f"DAILY_COVERAGE_INCOMPLETE:{len(unexplained)}")
+            instrument_ids = ",".join(sorted(unexplained))
+            raise MarketDatasetError(
+                f"DAILY_COVERAGE_INCOMPLETE:{len(unexplained)}:{instrument_ids}"
+            )
 
         available_at = _historical_available_at(trade_date, "daily")
         self.dataset.write_daily_bars(daily, source=SOURCE, available_at=available_at)
