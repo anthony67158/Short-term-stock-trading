@@ -41,6 +41,16 @@ OFFICIAL_CODE_MIGRATIONS = (
 
 OFFICIAL_LISTING_STATUS_PERIODS = (
     {
+        "instrument_id": "SZ.000950",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20170511",
+        "effective_to": "20180828",
+        "source_urls": (
+            "https://www.szse.cn/disclosure/notice/t20170508_502037.html",
+            "https://www.szse.cn/disclosure/notice/company/t20180820_554288.html",
+        ),
+    },
+    {
         "instrument_id": "SZ.000629",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20170505",
