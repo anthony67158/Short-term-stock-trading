@@ -18,6 +18,7 @@ import {
 function completedAccount({
   quantityShares = 100,
   sellPrice = 11,
+  peakPrice = null,
   slippageBps = 5,
   stopExecution = 'INTRADAY_STOP',
 } = {}) {
@@ -46,17 +47,24 @@ function completedAccount({
     date: '20260901',
     prices: { 600001: 10 },
   })
+  const sellDate = peakPrice == null ? '20260902' : '20260903'
+  if (peakPrice != null) {
+    state = markDecisionAccount(state, {
+      date: '20260902',
+      prices: { 600001: peakPrice },
+    })
+  }
   state = submitDecisionOrder(state, {
     orderId: 'sell',
     code: '600001',
     security: { code: '600001', name: '样本' },
     side: 'SELL',
-    submittedDate: '20260902',
+    submittedDate: sellDate,
     quantityShares,
     referencePrice: sellPrice,
   })
   state = processDecisionBar(state, {
-    date: '20260902',
+    date: sellDate,
     code: '600001',
     previousClose: 10,
     open: sellPrice,
@@ -64,13 +72,14 @@ function completedAccount({
     close: sellPrice,
     volume: 100000,
   })
-  return markDecisionAccount(state, { date: '20260902' })
+  return markDecisionAccount(state, { date: sellDate })
 }
 
 function runSet(profile, {
   quantityShares = 100,
   sellPrice = 11,
   stressSellPrice = sellPrice,
+  peakPrice = null,
   pairedExcessLower95Pct = 0.1,
 } = {}) {
   const riskEvidence = profile === 'BASELINE'
@@ -93,6 +102,7 @@ function runSet(profile, {
       accountState: completedAccount({
         quantityShares,
         sellPrice,
+        peakPrice,
       }),
     },
     doubleSlippage: {
@@ -102,6 +112,7 @@ function runSet(profile, {
       accountState: completedAccount({
         quantityShares,
         sellPrice: stressSellPrice,
+        peakPrice,
         slippageBps: 10,
       }),
     },
@@ -112,6 +123,7 @@ function runSet(profile, {
       accountState: completedAccount({
         quantityShares,
         sellPrice: stressSellPrice,
+        peakPrice,
         stopExecution: 'NEXT_OPEN',
       }),
     },
@@ -258,4 +270,39 @@ test('风险标签与实际风险证据不一致时拒绝场景', () => {
   assert.ok(result.baseline.blockers.includes(
     'primary:RISK_EVIDENCE_REQUIRED',
   ))
+})
+
+test('持仓升值越过仓位比例不等于开仓超配', () => {
+  const baseline = runSet('BASELINE', {
+    sellPrice: 250,
+    stressSellPrice: 249,
+    peakPrice: 250,
+  })
+  for (const scenario of Object.values({
+    primary: baseline.primary,
+    doubleSlippage: baseline.doubleSlippage,
+    nextOpen: baseline.nextOpen,
+  })) {
+    scenario.riskEvidence = {
+      ...scenario.riskEvidence,
+      maximumEntrySinglePositionPct: 1.01,
+      maximumEntryTotalPositionPct: 1.01,
+      minimumEntryAvailableCashPct: 98.9,
+    }
+  }
+
+  const result = evaluateProfitabilityExperiment(experiment({
+    BASELINE: baseline,
+  }))
+
+  assert.ok(
+    result.baseline.scenarios.primary.maximumSinglePositionPct > 20,
+  )
+  assert.equal(result.baseline.status, 'BASELINE_QUALIFIED')
+  assert.equal(
+    result.baseline.blockers.includes(
+      'primary:SINGLE_POSITION_LIMIT_EXCEEDED',
+    ),
+    false,
+  )
 })
