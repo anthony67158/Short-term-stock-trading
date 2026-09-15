@@ -17,6 +17,7 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     expect(login.status()).toBe(200);
     context = await browser.newContext({
       storageState: await auth.storageState(), viewport: { width: 1440, height: 900 },
+      timezoneId: "Asia/Shanghai",
     });
     const page = await context.newPage();
     const errors: string[] = [];
@@ -32,6 +33,8 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await expect(page.getByText("现金余额 · 人民币")).toBeVisible();
     await page.getByRole("button", { name: "录入资金", exact: true }).click();
     await page.getByLabel("金额（元）", { exact: true }).fill("10000.01");
+    const localTime = (offsetMs = 0) => new Date(Date.now() + 8 * 3600_000 + offsetMs).toISOString().slice(0, 19);
+    await page.getByLabel("发生时间（留空为当前时间）").fill(localTime(-2 * 86400_000).slice(0, 16));
     await page.getByLabel("凭据或来源说明").fill("合成期初凭据");
     await page.getByRole("button", { name: "保存资金记录" }).click();
     await expect(page.locator(".balance-value")).toHaveText("10,000.01");
@@ -40,6 +43,7 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await expect(page.locator(".balance-value")).toHaveText("10,000.01");
     await page.getByRole("button", { name: "录入资金", exact: true }).click();
     await page.getByLabel("资金类型").selectOption("WITHDRAWAL");
+    await page.getByLabel("发生时间（留空为当前时间）").fill(localTime(-86400_000).slice(0, 16));
     await page.getByLabel("金额（元）", { exact: true }).fill("20000");
     await page.getByLabel("凭据或来源说明").fill("合成出金凭据");
     await page.getByRole("button", { name: "保存资金记录" }).click();
@@ -48,6 +52,39 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await page.getByRole("button", { name: "保存资金记录" }).click();
     await expect(page.locator(".balance-value")).toHaveText("9,799.99");
     await expect(page.locator("tbody tr")).toHaveCount(2);
+    await page.getByRole("button", { name: "录入成交", exact: true }).click();
+    await page.getByLabel("证券代码（6位）").fill("000001");
+    await page.getByLabel("实际成交股数").fill("37");
+    await page.getByLabel("成交价格（元）").fill("10");
+    await page.getByLabel("成交时间", { exact: true }).fill(localTime());
+    await page.getByLabel("实际佣金（元）").fill("5");
+    await page.getByLabel("实际印花税（元）").fill("0");
+    await page.getByLabel("实际过户费（元）").fill("0");
+    await page.getByLabel("其他实际费用（元）").fill("0");
+    await page.getByLabel("交割编号（账户内唯一）").fill("synthetic-partial-buy-1");
+    await page.getByLabel("成交凭据说明").fill("浏览器合成部分成交");
+    await page.getByRole("button", { name: "保存成交事实" }).click();
+    await expect(page.locator(".balance-value")).toHaveText("9,424.99");
+    await expect(page.getByRole("region", { name: "持仓明细，可横向滚动" })).toContainText("37 / 0");
+    await page.reload();
+    await expect(page.locator(".balance-value")).toHaveText("9,424.99");
+    await expect(page.getByRole("region", { name: "持仓明细，可横向滚动" })).toContainText("375.00");
+    await page.getByRole("button", { name: "录入成交", exact: true }).click();
+    await page.getByLabel("证券代码（6位）").fill("000001");
+    await page.getByLabel("成交方向").selectOption("SELL");
+    await page.getByLabel("实际成交股数").fill("37");
+    await page.getByLabel("成交价格（元）").fill("12");
+    await page.getByLabel("成交时间", { exact: true }).fill(localTime());
+    await page.getByLabel("实际佣金（元）").fill("5");
+    await page.getByLabel("实际印花税（元）").fill("0.22");
+    await page.getByLabel("实际过户费（元）").fill("0");
+    await page.getByLabel("其他实际费用（元）").fill("0");
+    await page.getByLabel("交割编号（账户内唯一）").fill("synthetic-rejected-sale");
+    await page.getByLabel("成交凭据说明").fill("合成T+1拒绝场景");
+    await page.getByRole("button", { name: "保存成交事实" }).click();
+    await expect(page.getByRole("alert")).toContainText("可卖股数不足");
+    await expect(page.locator(".balance-value")).toHaveText("9,424.99");
+    await page.getByRole("button", { name: "取消", exact: true }).click();
     for (const theme of ["dark", "light"]) {
       if (theme === "light") await page.getByRole("button", { name: "切换深浅主题" }).click();
       for (const width of [390, 768, 1280, 1440]) {

@@ -81,6 +81,7 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
         account = owned_account(db, user_id, account_id, lock=True)
         existing = db.scalar(select(CashEntry).where(
             CashEntry.account_id == account_id, CashEntry.source_key == key,
+            CashEntry.execution_id.is_(None),
         ))
         if existing:
             if existing.request_hash != fingerprint(body):

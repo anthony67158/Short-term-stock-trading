@@ -366,6 +366,208 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/executions": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Record Execution",
+        "operationId": "record_execution_api_v1_accounts__account_id__executions_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExecutionView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Execution History",
+        "operationId": "execution_history_api_v1_accounts__account_id__executions_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExecutionPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}/positions": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Positions",
+        "operationId": "positions_api_v1_accounts__account_id__positions_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PositionPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments": {
       "get": {
         "tags": [
@@ -1216,6 +1418,53 @@
         ],
         "title": "AccountView"
       },
+      "ActualFees": {
+        "properties": {
+          "commission": {
+            "type": "string",
+            "title": "Commission",
+            "decimal_places": 2,
+            "ge": 0,
+            "max_digits": 20
+          },
+          "stampTax": {
+            "type": "string",
+            "title": "Stamptax",
+            "decimal_places": 2,
+            "ge": 0,
+            "max_digits": 20
+          },
+          "transferFee": {
+            "type": "string",
+            "title": "Transferfee",
+            "decimal_places": 2,
+            "ge": 0,
+            "max_digits": 20
+          },
+          "otherFee": {
+            "type": "string",
+            "title": "Otherfee",
+            "decimal_places": 2,
+            "ge": 0,
+            "max_digits": 20
+          },
+          "basis": {
+            "type": "string",
+            "const": "ACTUAL",
+            "title": "Basis",
+            "default": "ACTUAL"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "commission",
+          "stampTax",
+          "transferFee",
+          "otherFee"
+        ],
+        "title": "ActualFees"
+      },
       "AssessmentOutput": {
         "properties": {
           "summary": {
@@ -1424,7 +1673,8 @@
             "enum": [
               "OPENING",
               "DEPOSIT",
-              "WITHDRAWAL"
+              "WITHDRAWAL",
+              "EXECUTION"
             ],
             "title": "Kind"
           },
@@ -1451,6 +1701,17 @@
           "accountVersion": {
             "type": "integer",
             "title": "Accountversion"
+          },
+          "executionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executionid"
           }
         },
         "additionalProperties": false,
@@ -1706,6 +1967,38 @@
         ],
         "title": "Envelope[EvidenceView]"
       },
+      "Envelope_ExecutionPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExecutionPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ExecutionPage]"
+      },
+      "Envelope_ExecutionView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExecutionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ExecutionView]"
+      },
       "Envelope_Health_": {
         "properties": {
           "data": {
@@ -1769,6 +2062,22 @@
           "data"
         ],
         "title": "Envelope[JobView]"
+      },
+      "Envelope_PositionPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PositionPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PositionPage]"
       },
       "Envelope_QuoteView_": {
         "properties": {
@@ -1996,6 +2305,217 @@
           "validation"
         ],
         "title": "EvidenceView"
+      },
+      "ExecutionInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "sourceKey": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Sourcekey"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ],
+            "title": "Side"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price",
+            "decimal_places": 4,
+            "gt": 0,
+            "max_digits": 18
+          },
+          "executedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Executedat"
+          },
+          "fees": {
+            "$ref": "#/components/schemas/ActualFees"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Source"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "sourceKey",
+          "side",
+          "quantityShares",
+          "price",
+          "executedAt",
+          "fees",
+          "source",
+          "expectedVersion"
+        ],
+        "title": "ExecutionInput"
+      },
+      "ExecutionPage": {
+        "properties": {
+          "executions": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionView"
+            },
+            "type": "array",
+            "title": "Executions"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "executions",
+          "nextCursor"
+        ],
+        "title": "ExecutionPage"
+      },
+      "ExecutionView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "sourceKey": {
+            "type": "string",
+            "title": "Sourcekey"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "BUY",
+              "SELL"
+            ],
+            "title": "Side"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price",
+            "decimal_places": 4,
+            "gt": 0,
+            "max_digits": 18
+          },
+          "grossAmount": {
+            "type": "string",
+            "title": "Grossamount",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "totalFees": {
+            "type": "string",
+            "title": "Totalfees",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "fees": {
+            "$ref": "#/components/schemas/ActualFees"
+          },
+          "cashDelta": {
+            "type": "string",
+            "title": "Cashdelta",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "realizedPnl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 2,
+                "max_digits": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realizedpnl"
+          },
+          "executedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Executedat"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recordedat"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "instrumentId",
+          "sourceKey",
+          "side",
+          "quantityShares",
+          "price",
+          "grossAmount",
+          "totalFees",
+          "fees",
+          "cashDelta",
+          "realizedPnl",
+          "executedAt",
+          "recordedAt",
+          "source",
+          "accountVersion"
+        ],
+        "title": "ExecutionView"
       },
       "HTTPValidationError": {
         "properties": {
@@ -2288,6 +2808,100 @@
         "additionalProperties": false,
         "type": "object",
         "title": "Meta"
+      },
+      "PositionPage": {
+        "properties": {
+          "positions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionView"
+            },
+            "type": "array",
+            "title": "Positions"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Asof"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "positions",
+          "nextCursor",
+          "accountVersion",
+          "asOf"
+        ],
+        "title": "PositionPage"
+      },
+      "PositionView": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "sellableShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Sellableshares"
+          },
+          "lockedShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Lockedshares"
+          },
+          "remainingBasis": {
+            "type": "string",
+            "title": "Remainingbasis",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "costMethod": {
+            "type": "string",
+            "const": "FIFO_ACTUAL_FEES",
+            "title": "Costmethod",
+            "default": "FIFO_ACTUAL_FEES"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "name",
+          "quantityShares",
+          "sellableShares",
+          "lockedShares",
+          "remainingBasis"
+        ],
+        "title": "PositionView"
       },
       "QuoteView": {
         "properties": {

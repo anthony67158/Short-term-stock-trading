@@ -4,10 +4,11 @@ import { Plus } from "lucide-react";
 import type { components } from "../../../../../packages/api-client/schema";
 import { api, errorMessage } from "../../lib/api";
 import { Button, Empty, Input } from "../../components/Controls";
+import { Executions } from "./Executions";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
-const cashLabels = { OPENING: "期初余额", DEPOSIT: "入金", WITHDRAWAL: "出金" };
+const cashLabels = { OPENING: "期初余额", DEPOSIT: "入金", WITHDRAWAL: "出金", EXECUTION: "成交结算" };
 const money = (value: string) => value.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 // A network retry must reuse the exact command. Edits intentionally create a new command.
@@ -128,6 +129,7 @@ function AccountLedger({ accountId }: { accountId: string }) {
       await cache.invalidateQueries({ queryKey: ["cash", accountId] });
       await cache.invalidateQueries({ queryKey: ["accounts"] });
     }} />}
+    <Executions account={account} />
     <section className="ledger-section"><h2>资金流水</h2>
       {history.isPending ? <p role="status">正在读取资金流水…</p> : history.isError ? <div role="alert"><p>{errorMessage(history.error)}</p><Button onClick={() => history.refetch()}>重新读取</Button></div>
         : rows.length === 0 ? <Empty title="尚无资金记录">录入期初余额或第一笔入金，开始建立账户账本。</Empty>

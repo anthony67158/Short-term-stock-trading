@@ -13,7 +13,9 @@ from platform_app.modules.identity.models import LoginSession, User
 from platform_app.modules.identity.service import create_user
 from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.market.models import Watch
-from platform_app.modules.portfolio.models import Account, CashEntry
+from platform_app.modules.portfolio.models import (
+    Account, CashEntry, Execution, ExecutionCommand, LotConsumption, PositionLot,
+)
 from platform_app.modules.research.models import Assessment, Evidence
 
 config = settings()
@@ -33,7 +35,13 @@ else:
         if not user or not user.username.startswith("browser-fixture-"):
             raise SystemExit("Refusing to remove a non-fixture user")
         account_ids = select(Account.id).where(Account.owner_id == user.id)
+        execution_ids = select(Execution.id).where(Execution.account_id.in_(account_ids))
+        db.execute(delete(LotConsumption).where(
+            LotConsumption.sell_execution_id.in_(execution_ids)))
+        db.execute(delete(PositionLot).where(PositionLot.account_id.in_(account_ids)))
+        db.execute(delete(ExecutionCommand).where(ExecutionCommand.account_id.in_(account_ids)))
         db.execute(delete(CashEntry).where(CashEntry.account_id.in_(account_ids)))
+        db.execute(delete(Execution).where(Execution.account_id.in_(account_ids)))
         db.execute(delete(Account).where(Account.owner_id == user.id))
         db.execute(delete(Outbox).where(Outbox.owner_id == user.id))
         db.execute(delete(Watch).where(Watch.owner_id == user.id))

@@ -92,6 +92,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/executions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Execution History */
+        get: operations["execution_history_api_v1_accounts__account_id__executions_get"];
+        put?: never;
+        /** Record Execution */
+        post: operations["record_execution_api_v1_accounts__account_id__executions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Positions */
+        get: operations["positions_api_v1_accounts__account_id__positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instruments": {
         parameters: {
             query?: never;
@@ -393,6 +428,23 @@ export interface components {
              */
             createdAt: string;
         };
+        /** ActualFees */
+        ActualFees: {
+            /** Commission */
+            commission: string;
+            /** Stamptax */
+            stampTax: string;
+            /** Transferfee */
+            transferFee: string;
+            /** Otherfee */
+            otherFee: string;
+            /**
+             * Basis
+             * @default ACTUAL
+             * @constant
+             */
+            basis: "ACTUAL";
+        };
         /** AssessmentOutput */
         AssessmentOutput: {
             /** Summary */
@@ -475,7 +527,7 @@ export interface components {
              * Kind
              * @enum {string}
              */
-            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL";
+            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL" | "EXECUTION";
             /** Amount */
             amount: string;
             /**
@@ -492,6 +544,8 @@ export interface components {
             source: string;
             /** Accountversion */
             accountVersion: number;
+            /** Executionid */
+            executionId?: string | null;
         };
         /** CashFlowInput */
         CashFlowInput: {
@@ -571,6 +625,16 @@ export interface components {
             data: components["schemas"]["EvidenceView"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[ExecutionPage] */
+        Envelope_ExecutionPage_: {
+            data: components["schemas"]["ExecutionPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[ExecutionView] */
+        Envelope_ExecutionView_: {
+            data: components["schemas"]["ExecutionView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[Health] */
         Envelope_Health_: {
             data: components["schemas"]["Health"];
@@ -589,6 +653,11 @@ export interface components {
         /** Envelope[JobView] */
         Envelope_JobView_: {
             data: components["schemas"]["JobView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[PositionPage] */
+        Envelope_PositionPage_: {
+            data: components["schemas"]["PositionPage"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[QuoteView] */
@@ -683,6 +752,80 @@ export interface components {
              * @constant
              */
             validation: "QUOTE_MATCHED";
+        };
+        /** ExecutionInput */
+        ExecutionInput: {
+            /** Instrumentid */
+            instrumentId: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "BUY" | "SELL";
+            /** Quantityshares */
+            quantityShares: number;
+            /** Price */
+            price: string;
+            /**
+             * Executedat
+             * Format: date-time
+             */
+            executedAt: string;
+            fees: components["schemas"]["ActualFees"];
+            /** Source */
+            source: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** ExecutionPage */
+        ExecutionPage: {
+            /** Executions */
+            executions: components["schemas"]["ExecutionView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** ExecutionView */
+        ExecutionView: {
+            /** Id */
+            id: string;
+            /** Instrumentid */
+            instrumentId: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "BUY" | "SELL";
+            /** Quantityshares */
+            quantityShares: number;
+            /** Price */
+            price: string;
+            /** Grossamount */
+            grossAmount: string;
+            /** Totalfees */
+            totalFees: string;
+            fees: components["schemas"]["ActualFees"];
+            /** Cashdelta */
+            cashDelta: string;
+            /** Realizedpnl */
+            realizedPnl: string | null;
+            /**
+             * Executedat
+             * Format: date-time
+             */
+            executedAt: string;
+            /**
+             * Recordedat
+             * Format: date-time
+             */
+            recordedAt: string;
+            /** Source */
+            source: string;
+            /** Accountversion */
+            accountVersion: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -801,6 +944,41 @@ export interface components {
             asOf?: string;
             /** Revision */
             revision?: number | null;
+        };
+        /** PositionPage */
+        PositionPage: {
+            /** Positions */
+            positions: components["schemas"]["PositionView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+            /** Accountversion */
+            accountVersion: number;
+            /**
+             * Asof
+             * Format: date-time
+             */
+            asOf: string;
+        };
+        /** PositionView */
+        PositionView: {
+            /** Instrumentid */
+            instrumentId: string;
+            /** Name */
+            name: string;
+            /** Quantityshares */
+            quantityShares: number;
+            /** Sellableshares */
+            sellableShares: number;
+            /** Lockedshares */
+            lockedShares: number;
+            /** Remainingbasis */
+            remainingBasis: string;
+            /**
+             * Costmethod
+             * @default FIFO_ACTUAL_FEES
+             * @constant
+             */
+            costMethod: "FIFO_ACTUAL_FEES";
         };
         /** QuoteView */
         QuoteView: {
@@ -1156,6 +1334,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_CashEntryView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execution_history_api_v1_accounts__account_id__executions_get: {
+        parameters: {
+            query?: {
+                cursor?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExecutionPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_execution_api_v1_accounts__account_id__executions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExecutionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExecutionView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    positions_api_v1_accounts__account_id__positions_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_PositionPage_"];
                 };
             };
             /** @description Validation Error */
