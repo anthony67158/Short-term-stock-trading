@@ -14,6 +14,8 @@ retrying one range cannot delete another range's data.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import gzip
 import hashlib
 import json
@@ -50,6 +52,30 @@ V4_FEATURE_NAMES = tuple([
         for name in _ALPHA_CONTRACT["featureNames"]
     ],
 ])
+
+
+@contextlib.contextmanager
+def _exclusive_run_lock(output):
+    directory = Path(output).expanduser().resolve()
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / ".backfill.lock"
+    handle = open(path, "a+", encoding="utf-8")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        handle.close()
+        raise RuntimeError(
+            f"已有历史回填进程占用目录: {directory}"
+        ) from error
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{os.getpid()}\n")
+        handle.flush()
+        yield
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
 def _read_gzip(path):
@@ -623,20 +649,21 @@ def parse_args():
 
 def main():
     args = parse_args()
-    plan = _prepare_chunks(args)
-    print(json.dumps({
-        "stage": "PLAN_READY",
-        "chunks": len(plan["chunks"]),
-        "signalDays": sum(row["signalDays"] for row in plan["chunks"]),
-        "output": str(Path(args.output).expanduser().resolve()),
-    }), flush=True)
-    if args.prepare_only:
-        return
-    for chunk in plan["chunks"]:
-        if chunk["index"] < args.from_chunk:
-            continue
-        _run_chunk(args, chunk)
-    _merge_chunks(args, plan)
+    with _exclusive_run_lock(args.output):
+        plan = _prepare_chunks(args)
+        print(json.dumps({
+            "stage": "PLAN_READY",
+            "chunks": len(plan["chunks"]),
+            "signalDays": sum(row["signalDays"] for row in plan["chunks"]),
+            "output": str(Path(args.output).expanduser().resolve()),
+        }), flush=True)
+        if args.prepare_only:
+            return
+        for chunk in plan["chunks"]:
+            if chunk["index"] < args.from_chunk:
+                continue
+            _run_chunk(args, chunk)
+        _merge_chunks(args, plan)
 
 
 if __name__ == "__main__":

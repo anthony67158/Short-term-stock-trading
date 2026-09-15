@@ -20,6 +20,15 @@ _SPEC.loader.exec_module(runner)
 
 
 class V4TushareBackfillPlanTest(unittest.TestCase):
+    def test_run_lock_rejects_concurrent_writer_and_releases_cleanly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with runner._exclusive_run_lock(directory):
+                with self.assertRaisesRegex(RuntimeError, "已有历史回填"):
+                    with runner._exclusive_run_lock(directory):
+                        pass
+            with runner._exclusive_run_lock(directory):
+                pass
+
     def test_cli_rejects_rate_above_downloader_limit(self):
         with patch.object(
             sys,
