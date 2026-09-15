@@ -1192,6 +1192,138 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/opening-lots": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Record Opening",
+        "operationId": "record_opening_api_v1_accounts__account_id__opening_lots_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpeningInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OpeningView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Opening History",
+        "operationId": "opening_history_api_v1_accounts__account_id__opening_lots_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_OpeningPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/calendar": {
       "get": {
         "tags": [
@@ -3191,6 +3323,38 @@
         ],
         "title": "Envelope[JobView]"
       },
+      "Envelope_OpeningPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpeningPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[OpeningPage]"
+      },
+      "Envelope_OpeningView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/OpeningView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[OpeningView]"
+      },
       "Envelope_PlanPage_": {
         "properties": {
           "data": {
@@ -4170,6 +4334,168 @@
         "type": "object",
         "title": "Meta"
       },
+      "OpeningInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "costBasis": {
+            "type": "string",
+            "title": "Costbasis",
+            "decimal_places": 2,
+            "ge": 0,
+            "lt": 1000000000000000000,
+            "max_digits": 20
+          },
+          "acquiredDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Acquireddate"
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectiveat"
+          },
+          "sourceKey": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Sourcekey"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Source"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "quantityShares",
+          "costBasis",
+          "acquiredDate",
+          "effectiveAt",
+          "sourceKey",
+          "source",
+          "expectedVersion"
+        ],
+        "title": "OpeningInput"
+      },
+      "OpeningPage": {
+        "properties": {
+          "lots": {
+            "items": {
+              "$ref": "#/components/schemas/OpeningView"
+            },
+            "type": "array",
+            "title": "Lots"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lots",
+          "nextCursor"
+        ],
+        "title": "OpeningPage"
+      },
+      "OpeningView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "costBasis": {
+            "type": "string",
+            "title": "Costbasis",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "acquiredDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Acquireddate"
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectiveat"
+          },
+          "sourceKey": {
+            "type": "string",
+            "title": "Sourcekey"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recordedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "instrumentId",
+          "quantityShares",
+          "costBasis",
+          "acquiredDate",
+          "effectiveAt",
+          "sourceKey",
+          "source",
+          "accountVersion",
+          "recordedAt"
+        ],
+        "title": "OpeningView"
+      },
       "PlanCancel": {
         "properties": {
           "expectedVersion": {
@@ -4715,6 +5041,11 @@
           "correctionCount": {
             "type": "integer",
             "title": "Correctioncount",
+            "default": 0
+          },
+          "openingLotCount": {
+            "type": "integer",
+            "title": "Openinglotcount",
             "default": 0
           },
           "openLotCount": {

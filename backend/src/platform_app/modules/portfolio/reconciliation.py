@@ -10,7 +10,8 @@ from platform_app.adapters.database import sessions
 from platform_app.contracts.base import Contract, Money, utcnow
 from platform_app.kernel.trading import trading_date
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionCorrection, ExecutionPlan, LotConsumption, PlanEvent, PositionLot,
+    CashEntry, Execution, ExecutionCorrection, ExecutionPlan, LotConsumption, OpeningLot,
+    PlanEvent, PositionLot,
 )
 from platform_app.modules.portfolio.plan_contracts import PlanView
 from platform_app.modules.portfolio.service import PortfolioError, owned_account
@@ -29,6 +30,7 @@ class ReconciliationView(Contract):
     replay_cash_balance: Money
     execution_count: int
     correction_count: int = 0
+    opening_lot_count: int = 0
     open_lot_count: int
     discrepancy_count: int
     discrepancies: list[Discrepancy]
@@ -49,6 +51,10 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         if len(executions) > 50_000:
             raise PortfolioError("REPLAY_LIMIT", "成交超过即时核对上限，请使用离线对账任务", 422)
         lots = list(db.scalars(select(PositionLot).where(PositionLot.account_id == account_id)))
+        openings = list(db.scalars(select(OpeningLot).where(
+            OpeningLot.account_id == account_id).order_by(OpeningLot.account_version).limit(50_001)))
+        if len(openings) > 50_000:
+            raise PortfolioError("REPLAY_LIMIT", "期初批次超过即时核对上限", 422)
         consumptions = list(db.scalars(select(LotConsumption).join(
             Execution, Execution.id == LotConsumption.sell_execution_id,
         ).where(Execution.account_id == account_id)))
@@ -78,9 +84,24 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
 
         expected_lots, expected_links, execution_deltas = {}, {}, {}
         pending_lots = defaultdict(deque)
+        opening_ids = {row.id for row in openings}
+        for row in openings:
+            expected_lots[row.id] = {
+                "instrument": row.instrument_id, "date": row.acquired_date,
+                "quantity": row.quantity_shares, "basis": row.cost_basis,
+                "sequence": row.account_version,
+            }
+            pending_lots[row.instrument_id].append(row.id)
+            check(row.id, "acquisitionBeforeSnapshot", True,
+                  row.acquired_date <= trading_date(row.effective_at))
+        last_opening_time = max((row.effective_at for row in openings), default=None)
+        last_opening_version = max((row.account_version for row in openings), default=0)
         by_id = {trade.id: trade for trade in executions}
         # This replay deliberately does not call the write-side FIFO allocator.
         for trade in executions:
+            check(trade.id, "executionAfterOpening", True,
+                  (last_opening_time is None or trade.executed_at >= last_opening_time)
+                  and trade.account_version > last_opening_version)
             gross = rounded(trade.price * trade.quantity_shares)
             fee = sum((Decimal(trade.fees[key]) for key in (
                 "commission", "stamp_tax", "transfer_fee", "other_fee")), Decimal(0))
@@ -103,11 +124,10 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
                 continue
             remaining, basis = trade.quantity_shares, Decimal(0)
             queue = pending_lots[trade.instrument_id]
-            while remaining and queue:
-                buy_id = queue[0]
+            for buy_id in list(queue):
                 lot = expected_lots[buy_id]
                 if lot["date"] >= date:
-                    break
+                    continue
                 taken = min(remaining, lot["quantity"])
                 cost = lot["basis"] if taken == lot["quantity"] else rounded(
                     lot["basis"] * taken / lot["quantity"])
@@ -115,7 +135,7 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
                 lot["quantity"] -= taken
                 lot["basis"] -= cost
                 if not lot["quantity"]:
-                    queue.popleft()
+                    queue.remove(buy_id)
                 remaining -= taken
                 basis += cost
                 if not remaining:
@@ -129,7 +149,10 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             if expected is None or actual is None:
                 check(buy_id, "lotExists", expected is not None, actual is not None)
                 continue
-            check(buy_id, "executionLink", buy_id, actual.execution_id)
+            check(buy_id, "executionLink",
+                  None if buy_id in opening_ids else buy_id, actual.execution_id)
+            check(buy_id, "openingLink",
+                  buy_id if buy_id in opening_ids else None, actual.opening_id)
             for field, column in [
                 ("quantity", "remaining_quantity"), ("basis", "remaining_basis"),
                 ("instrument", "instrument_id"), ("date", "acquired_date"), ("sequence", "sequence"),
@@ -192,6 +215,9 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         for missing_id in execution_deltas.keys() - linked:
             check(missing_id, "cashEntryExists", True, False)
         version_owners = {row.account_version: row.id for row in cash_rows}
+        for row in openings:
+            check(row.id, "uniqueVersion", False, row.account_version in version_owners)
+            version_owners[row.account_version] = row.id
         latest_events, revisions = {}, defaultdict(int)
         for event in plan_events:
             revisions[event.plan_id] += 1
@@ -240,7 +266,8 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         check(account_id, "correctedCashBalance", active_cash, actual_cash)
         return ReconciliationView(
             account_version=account.version, cash_balance=actual_cash, replay_cash_balance=replay_cash,
-            execution_count=len(executions), correction_count=len(corrections), open_lot_count=sum(
+            execution_count=len(executions), correction_count=len(corrections),
+            opening_lot_count=len(openings), open_lot_count=sum(
                 lot["quantity"] > 0 for lot in expected_lots.values()),
             discrepancy_count=count, discrepancies=issues, matches=count == 0,
         )

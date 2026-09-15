@@ -96,7 +96,9 @@ def record_cash(user_id: str, account_id: str, body: CashFlowInput, key: str) ->
                          .order_by(CashEntry.account_version.desc()).limit(1))
         if body.kind == "OPENING" and last:
             raise PortfolioError("OPENING_ALREADY_STARTED", "期初余额只能作为账户首笔资金记录")
-        if last and body.effective_at < last.effective_at:
+        from platform_app.modules.portfolio.openings import last_fact_time
+        last_time = last_fact_time(db, account_id)
+        if last_time and body.effective_at < last_time:
             raise PortfolioError("OUT_OF_ORDER_CASH_FLOW", "请按发生时间顺序录入资金记录", 422)
         amount = -body.amount if body.kind == "WITHDRAWAL" else body.amount
         total = cash_total(db, account_id) + amount

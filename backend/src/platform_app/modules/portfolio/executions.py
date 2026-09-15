@@ -62,10 +62,9 @@ def record_execution(
                 raise PortfolioError("PLAN_NOT_FOUND", "计划不存在或无权访问", 404)
             if plan.instrument_id != body.instrument_id or plan.side != body.side:
                 raise PortfolioError("PLAN_FACT_MISMATCH", "成交股票或方向与关联计划不一致", 422)
-        last = db.scalar(select(CashEntry).where(
-            CashEntry.account_id == account_id, CashEntry.kind != "REVERSAL")
-                         .order_by(CashEntry.account_version.desc()).limit(1))
-        if last and body.executed_at < last.effective_at:
+        from platform_app.modules.portfolio.openings import last_fact_time
+        last = last_fact_time(db, account_id)
+        if last and body.executed_at < last:
             raise PortfolioError("OUT_OF_ORDER_EXECUTION", "请按发生时间顺序录入成交和资金", 422)
         gross = money(body.price * body.quantity_shares)
         fees = sum((body.fees.commission, body.fees.stamp_tax,

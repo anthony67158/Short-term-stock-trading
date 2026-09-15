@@ -9,6 +9,7 @@ import { Executions } from "./Executions";
 import { Reconciliation } from "./Reconciliation";
 import { ExecutionImport } from "./ExecutionImport";
 import { Plans } from "./Plans";
+import { OpeningLots } from "./OpeningLots";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
@@ -134,6 +135,7 @@ function AccountLedger({ accountId }: { accountId: string }) {
       await cache.invalidateQueries({ queryKey: ["plans", accountId] });
       await cache.invalidateQueries({ queryKey: ["accounts"] });
     }} />}
+    <OpeningLots account={account} />
     <Executions account={account} />
     <Plans account={account} />
     <ExecutionImport account={account} />

@@ -12,7 +12,7 @@ from platform_app.modules.portfolio.correction_contracts import (
     CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
 )
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionCorrection, LotConsumption, PositionLot,
+    CashEntry, Execution, ExecutionCorrection, LotConsumption, OpeningLot, PositionLot,
 )
 from platform_app.modules.portfolio.reconciliation import reconcile
 from platform_app.modules.portfolio.service import (
@@ -50,6 +50,10 @@ def prepare(db, account, execution_id, body):
             raise PortfolioError(
                 "CORRECTION_CASH_DEPENDENCY", "冲正会使后续现金越界，请先核对依赖的成交或出金", 422)
     lots, links, pnl, instruments, sequences = {}, [], {}, {}, {}
+    for row in db.scalars(select(OpeningLot).where(
+            OpeningLot.account_id == account.id).order_by(OpeningLot.account_version)):
+        lots[row.id] = Lot(row.id, row.acquired_date, row.quantity_shares, row.cost_basis)
+        instruments[row.id], sequences[row.id] = row.instrument_id, row.account_version
     for row in trades:
         pnl[row.id] = None
         if row.id in reversed_ids:
@@ -139,9 +143,14 @@ def correct_execution(
         trade_ids = select(Execution.id).where(Execution.account_id == account_id)
         db.execute(delete(LotConsumption).where(LotConsumption.sell_execution_id.in_(trade_ids)))
         db.execute(delete(PositionLot).where(PositionLot.account_id == account_id))
+        opening_ids = set(db.scalars(select(OpeningLot.id).where(
+            OpeningLot.account_id == account_id)))
         for lot in lots.values():
             db.add(PositionLot(
-                id=lot.lot_id, execution_id=lot.lot_id, account_id=account_id,
+                id=lot.lot_id,
+                execution_id=None if lot.lot_id in opening_ids else lot.lot_id,
+                opening_id=lot.lot_id if lot.lot_id in opening_ids else None,
+                account_id=account_id,
                 instrument_id=instruments[lot.lot_id], acquired_date=lot.acquired_date,
                 remaining_quantity=lot.quantity, remaining_basis=lot.basis,
                 sequence=sequences[lot.lot_id],

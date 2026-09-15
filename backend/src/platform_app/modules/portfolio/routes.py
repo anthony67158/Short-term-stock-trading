@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, Query
 from platform_app.contracts.base import Contract, Envelope
 from platform_app.modules.identity.routes import CurrentUser
 from platform_app.modules.portfolio import (
-    corrections, executions, imports, plans, reconciliation, service,
+    corrections, executions, imports, openings, plans, reconciliation, service,
 )
 from platform_app.modules.portfolio.correction_contracts import (
     CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
@@ -18,6 +18,7 @@ from platform_app.modules.portfolio.contracts import (
 )
 from platform_app.modules.portfolio.import_contracts import ImportCommit, ImportInput, ImportView
 from platform_app.modules.portfolio.plan_contracts import PlanCancel, PlanInput, PlanPage, PlanView
+from platform_app.modules.portfolio.opening_contracts import OpeningInput, OpeningPage, OpeningView
 
 router = APIRouter(prefix="/api/v1/accounts", tags=["portfolio"])
 CommandKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=128)]
@@ -149,3 +150,17 @@ def cancel_plan(
     account_id: str, plan_id: str, body: PlanCancel, user: CurrentUser, key: CommandKey,
 ):
     return Envelope(data=plans.cancel_plan(user.id, account_id, plan_id, body, key))
+
+
+@router.post("/{account_id}/opening-lots", response_model=Envelope[OpeningView], status_code=201)
+def record_opening(account_id: str, body: OpeningInput, user: CurrentUser, key: CommandKey):
+    return Envelope(data=openings.record_opening(user.id, account_id, body, key))
+
+
+@router.get("/{account_id}/opening-lots", response_model=Envelope[OpeningPage])
+def opening_history(
+    account_id: str, user: CurrentUser,
+    cursor: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    return Envelope(data=openings.opening_history(user.id, account_id, cursor, limit))

@@ -281,6 +281,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/opening-lots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Opening History */
+        get: operations["opening_history_api_v1_accounts__account_id__opening_lots_get"];
+        put?: never;
+        /** Record Opening */
+        post: operations["record_opening_api_v1_accounts__account_id__opening_lots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/calendar": {
         parameters: {
             query?: never;
@@ -963,6 +981,16 @@ export interface components {
             data: components["schemas"]["JobView"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[OpeningPage] */
+        Envelope_OpeningPage_: {
+            data: components["schemas"]["OpeningPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[OpeningView] */
+        Envelope_OpeningView_: {
+            data: components["schemas"]["OpeningView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[PlanPage] */
         Envelope_PlanPage_: {
             data: components["schemas"]["PlanPage"];
@@ -1330,6 +1358,70 @@ export interface components {
             /** Revision */
             revision?: number | null;
         };
+        /** OpeningInput */
+        OpeningInput: {
+            /** Instrumentid */
+            instrumentId: string;
+            /** Quantityshares */
+            quantityShares: number;
+            /** Costbasis */
+            costBasis: string;
+            /**
+             * Acquireddate
+             * Format: date
+             */
+            acquiredDate: string;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /** Source */
+            source: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** OpeningPage */
+        OpeningPage: {
+            /** Lots */
+            lots: components["schemas"]["OpeningView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** OpeningView */
+        OpeningView: {
+            /** Id */
+            id: string;
+            /** Instrumentid */
+            instrumentId: string;
+            /** Quantityshares */
+            quantityShares: number;
+            /** Costbasis */
+            costBasis: string;
+            /**
+             * Acquireddate
+             * Format: date
+             */
+            acquiredDate: string;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /** Source */
+            source: string;
+            /** Accountversion */
+            accountVersion: number;
+            /**
+             * Recordedat
+             * Format: date-time
+             */
+            recordedAt: string;
+        };
         /** PlanCancel */
         PlanCancel: {
             /** Expectedversion */
@@ -1538,6 +1630,11 @@ export interface components {
              * @default 0
              */
             correctionCount: number;
+            /**
+             * Openinglotcount
+             * @default 0
+             */
+            openingLotCount: number;
             /** Openlotcount */
             openLotCount: number;
             /** Discrepancycount */
@@ -2316,6 +2413,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_PlanView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    opening_history_api_v1_accounts__account_id__opening_lots_get: {
+        parameters: {
+            query?: {
+                cursor?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OpeningPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_opening_api_v1_accounts__account_id__opening_lots_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OpeningInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_OpeningView_"];
                 };
             };
             /** @description Validation Error */
