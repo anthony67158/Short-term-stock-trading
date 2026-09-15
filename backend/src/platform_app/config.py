@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,8 +18,21 @@ class Settings(BaseSettings):
     agent_base_url: str = "https://linlongs.com"
     agent_model: str = "gpt-5.6-terra"
     agent_api_key: SecretStr = SecretStr("")
-    agent_timeout_seconds: int = 60
+    agent_timeout_seconds: int = Field(default=60, ge=5, le=90)
+    agent_enabled: bool = False
+    agent_daily_call_limit: int = Field(default=20, ge=1, le=100)
+    agent_global_daily_call_limit: int = Field(default=100, ge=1, le=1000)
     cookie_secure: bool = False
+
+    @field_validator("agent_base_url")
+    @classmethod
+    def secure_agent_origin(cls, value):
+        from urllib.parse import urlsplit
+
+        parsed = urlsplit(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("Agent endpoint requires HTTPS without inline credentials")
+        return value
 
 
 @lru_cache

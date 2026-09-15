@@ -11,9 +11,10 @@ from platform_app.config import settings
 from platform_app.contracts.base import new_id
 from platform_app.modules.identity.models import LoginSession, User
 from platform_app.modules.identity.service import create_user
-from platform_app.modules.operations.models import Outbox
+from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.market.models import Watch
 from platform_app.modules.portfolio.models import Account, CashEntry
+from platform_app.modules.research.models import Assessment, Evidence
 
 config = settings()
 if config.environment not in ("local", "test") or urlsplit(
@@ -36,5 +37,8 @@ else:
         db.execute(delete(Account).where(Account.owner_id == user.id))
         db.execute(delete(Outbox).where(Outbox.owner_id == user.id))
         db.execute(delete(Watch).where(Watch.owner_id == user.id))
+        db.execute(delete(Assessment).where(Assessment.owner_id == user.id))
+        db.execute(delete(Evidence).where(Evidence.owner_id == user.id))
+        db.execute(delete(Job).where(Job.owner_id == user.id))
         db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
         db.delete(user)

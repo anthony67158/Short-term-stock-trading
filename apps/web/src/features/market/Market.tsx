@@ -4,6 +4,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { ArrowLeft, Star } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { Button, Empty, Input } from "../../components/Controls";
+import { EvidenceResearch } from "./EvidenceResearch";
 
 const boardNames = { MAIN: "主板", STAR: "科创板", CHINEXT: "创业板", BEIJING: "北交所", UNKNOWN: "待核验" };
 
@@ -97,7 +98,7 @@ function ResearchDetail({ instrumentId }: { instrumentId?: string }) {
             <Button disabled={quote.isFetching} onClick={() => quote.refetch()}>{quote.isFetching ? "正在刷新…" : "刷新报价"}</Button>
           </>}
         </section>
-        <section className="ledger-section"><h2>投资论点与证据</h2><p className="capability-note">研究服务接入中。尚无经过引用校验的 Agent 研判，也没有可用的联合模型评估。</p></section>
+        <EvidenceResearch instrumentId={instrumentId} />
       </>}
     </div>
   </>;

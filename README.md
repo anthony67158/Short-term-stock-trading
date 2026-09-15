@@ -31,6 +31,11 @@ uv run uvicorn platform_app.entrypoints.api:app --reload --host 127.0.0.1 --port
 首次证券目录通过`uv run platform-cli sync-instruments`显式联网采集；
 当前目录不能用于历史回测股票池。
 
+研究Worker单独启动：`uv run python -m platform_app.modules.research.worker`。
+`PLATFORM_AGENT_ENABLED`默认关闭，完成供应商真实鉴权验证后才启用；
+未启用时仍可保存研究材料。调用次数、时间与材料包均有限额，
+当前研判只用于研究，不能生成生产交易动作。
+
 ## 验证
 
 ```bash

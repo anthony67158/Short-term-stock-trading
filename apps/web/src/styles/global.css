@@ -85,6 +85,23 @@ tbody tr:hover { background: var(--hover); }
 .quote-strip span { font-size: 12px; }
 .quote-strip strong { font-size: 20px; font-weight: 500; }
 .center-link { text-align: center; }
+.section-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.section-toolbar h2 { margin: 0; }
+.wide-field { grid-column: 1 / -1; }
+.evidence-form textarea { min-height: 120px; padding: var(--space-3); resize: vertical; }
+.evidence-form > p { font-size: 12px; }
+.evidence-item { padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
+.evidence-item summary { cursor: pointer; }
+.evidence-item summary span { font-size: 12px; }
+.check-field { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-3) 0; font-size: 13px; }
+.check-field input { width: 18px; height: 18px; }
+blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); padding-left: var(--space-3); }
+.evidence-text { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; color: var(--secondary); max-height: 320px; overflow-y: auto; }
+.research-question { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); margin: var(--space-6) 0; }
+.research-question .field { flex: 1 1 260px; min-width: 0; }
+.task-status { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3); background: var(--raised); }
+.assessment { padding: var(--space-6) 0; border-bottom: 1px solid var(--border); max-width: 960px; }
+.assessment p { margin-bottom: var(--space-3); }
 .empty { padding: 64px 24px; text-align: center; color: var(--secondary); }
 .empty h1, .empty h2 { color: var(--text); margin-bottom: 12px; }
 .empty p { display: flex; align-items: center; justify-content: center; gap: 8px; }

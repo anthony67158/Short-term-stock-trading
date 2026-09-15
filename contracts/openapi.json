@@ -655,6 +655,403 @@
         }
       }
     },
+    "/api/v1/research-capability": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Research Capability",
+        "operationId": "research_capability_api_v1_research_capability_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ResearchCapability_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evidence": {
+      "post": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Create Evidence",
+        "operationId": "create_evidence_api_v1_evidence_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_EvidenceView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/evidence/{evidence_id}": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Get Evidence",
+        "operationId": "get_evidence_api_v1_evidence__evidence_id__get",
+        "parameters": [
+          {
+            "name": "evidence_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Evidence Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_EvidenceView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{instrument_id}/evidence": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "List Evidence",
+        "operationId": "list_evidence_api_v1_instruments__instrument_id__evidence_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_EvidencePage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{instrument_id}/research": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "List Research",
+        "operationId": "list_research_api_v1_instruments__instrument_id__research_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+              "title": "Instrument Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_AssessmentPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/research-runs": {
+      "post": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Research Run",
+        "operationId": "research_run_api_v1_research_runs_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResearchInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JobView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Get Job",
+        "operationId": "get_job_api_v1_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JobView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/jobs/{job_id}/cancellations": {
+      "post": {
+        "tags": [
+          "research"
+        ],
+        "summary": "Cancel Job",
+        "operationId": "cancel_job_api_v1_jobs__job_id__cancellations_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JobView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -819,6 +1216,203 @@
         ],
         "title": "AccountView"
       },
+      "AssessmentOutput": {
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Claims"
+          },
+          "counterClaims": {
+            "items": {
+              "$ref": "#/components/schemas/Claim"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "title": "Counterclaims"
+          },
+          "thesisStatus": {
+            "type": "string",
+            "enum": [
+              "SUPPORTED",
+              "WEAKENED",
+              "INVALIDATED",
+              "UNCERTAIN"
+            ],
+            "title": "Thesisstatus"
+          },
+          "strategyFit": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "TREND",
+                "VALUE",
+                "QUALITY",
+                "EVENT",
+                "RECOVERY"
+              ]
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Strategyfit"
+          },
+          "uncertainties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Uncertainties"
+          },
+          "invalidation": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Invalidation"
+          },
+          "nextCheck": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "title": "Nextcheck"
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Validuntil"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "summary",
+          "claims",
+          "counterClaims",
+          "thesisStatus",
+          "strategyFit",
+          "uncertainties",
+          "invalidation",
+          "nextCheck",
+          "validUntil"
+        ],
+        "title": "AssessmentOutput"
+      },
+      "AssessmentPage": {
+        "properties": {
+          "assessments": {
+            "items": {
+              "$ref": "#/components/schemas/AssessmentView"
+            },
+            "type": "array",
+            "title": "Assessments"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "assessments",
+          "nextCursor"
+        ],
+        "title": "AssessmentPage"
+      },
+      "AssessmentView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "protocolVersion": {
+            "type": "string",
+            "title": "Protocolversion"
+          },
+          "modelId": {
+            "type": "string",
+            "title": "Modelid"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Asof"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "inputHash": {
+            "type": "string",
+            "title": "Inputhash"
+          },
+          "evidenceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidenceids"
+          },
+          "output": {
+            "$ref": "#/components/schemas/AssessmentOutput"
+          },
+          "status": {
+            "type": "string",
+            "const": "VALIDATED",
+            "title": "Status",
+            "default": "VALIDATED"
+          },
+          "usage": {
+            "type": "string",
+            "const": "RESEARCH_ONLY",
+            "title": "Usage",
+            "default": "RESEARCH_ONLY"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "jobId",
+          "instrumentId",
+          "protocolVersion",
+          "modelId",
+          "asOf",
+          "createdAt",
+          "inputHash",
+          "evidenceIds",
+          "output"
+        ],
+        "title": "AssessmentView"
+      },
       "CashEntryView": {
         "properties": {
           "id": {
@@ -948,6 +1542,42 @@
         ],
         "title": "CashPage"
       },
+      "Claim": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "OBSERVED",
+              "INFERRED",
+              "HYPOTHESIS"
+            ],
+            "title": "Kind"
+          },
+          "statement": {
+            "type": "string",
+            "maxLength": 1500,
+            "minLength": 1,
+            "title": "Statement"
+          },
+          "evidenceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Evidenceids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "statement",
+          "evidenceIds"
+        ],
+        "title": "Claim"
+      },
       "Envelope_AccountBalance_": {
         "properties": {
           "data": {
@@ -996,6 +1626,22 @@
         ],
         "title": "Envelope[AccountView]"
       },
+      "Envelope_AssessmentPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AssessmentPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[AssessmentPage]"
+      },
       "Envelope_CashEntryView_": {
         "properties": {
           "data": {
@@ -1027,6 +1673,38 @@
           "data"
         ],
         "title": "Envelope[CashPage]"
+      },
+      "Envelope_EvidencePage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EvidencePage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[EvidencePage]"
+      },
+      "Envelope_EvidenceView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EvidenceView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[EvidenceView]"
       },
       "Envelope_Health_": {
         "properties": {
@@ -1076,6 +1754,22 @@
         ],
         "title": "Envelope[InstrumentView]"
       },
+      "Envelope_JobView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/JobView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[JobView]"
+      },
       "Envelope_QuoteView_": {
         "properties": {
           "data": {
@@ -1091,6 +1785,22 @@
           "data"
         ],
         "title": "Envelope[QuoteView]"
+      },
+      "Envelope_ResearchCapability_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ResearchCapability"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ResearchCapability]"
       },
       "Envelope_UserView_": {
         "properties": {
@@ -1123,6 +1833,169 @@
           "data"
         ],
         "title": "Envelope[WatchPage]"
+      },
+      "EvidenceInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Sourceurl"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Publishedat"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 20,
+            "title": "Text"
+          },
+          "quote": {
+            "type": "string",
+            "maxLength": 3000,
+            "minLength": 10,
+            "title": "Quote"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "title",
+          "sourceUrl",
+          "publishedAt",
+          "text",
+          "quote"
+        ],
+        "title": "EvidenceInput"
+      },
+      "EvidencePage": {
+        "properties": {
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceView"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "evidence",
+          "nextCursor"
+        ],
+        "title": "EvidencePage"
+      },
+      "EvidenceView": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "maxLength": 2083,
+            "minLength": 1,
+            "format": "uri",
+            "title": "Sourceurl"
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Publishedat"
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 20000,
+            "minLength": 20,
+            "title": "Text"
+          },
+          "quote": {
+            "type": "string",
+            "maxLength": 3000,
+            "minLength": 10,
+            "title": "Quote"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "contentHash": {
+            "type": "string",
+            "title": "Contenthash"
+          },
+          "firstSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Firstseenat"
+          },
+          "availableAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Availableat"
+          },
+          "provenance": {
+            "type": "string",
+            "const": "USER_SUPPLIED",
+            "title": "Provenance"
+          },
+          "validation": {
+            "type": "string",
+            "const": "QUOTE_MATCHED",
+            "title": "Validation"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "title",
+          "sourceUrl",
+          "publishedAt",
+          "text",
+          "quote",
+          "id",
+          "contentHash",
+          "firstSeenAt",
+          "availableAt",
+          "provenance",
+          "validation"
+        ],
+        "title": "EvidenceView"
       },
       "HTTPValidationError": {
         "properties": {
@@ -1272,6 +2145,97 @@
           "isCurrent"
         ],
         "title": "InstrumentView"
+      },
+      "JobView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "SUCCEEDED",
+              "PARTIAL",
+              "FAILED",
+              "CANCELLED",
+              "EXPIRED"
+            ],
+            "title": "Status"
+          },
+          "stage": {
+            "type": "string",
+            "title": "Stage"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          },
+          "cancellationRequested": {
+            "type": "boolean",
+            "title": "Cancellationrequested"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errorcode"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "stage",
+          "createdAt",
+          "updatedAt",
+          "cancellationRequested",
+          "result",
+          "errorCode"
+        ],
+        "title": "JobView"
       },
       "LoginInput": {
         "properties": {
@@ -1480,6 +2444,69 @@
           "freshness"
         ],
         "title": "QuoteView"
+      },
+      "ResearchCapability": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "available",
+          "model",
+          "reason"
+        ],
+        "title": "ResearchCapability"
+      },
+      "ResearchInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "question": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 5,
+            "title": "Question"
+          },
+          "evidenceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Evidenceids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "question",
+          "evidenceIds"
+        ],
+        "title": "ResearchInput"
       },
       "UniverseView": {
         "properties": {

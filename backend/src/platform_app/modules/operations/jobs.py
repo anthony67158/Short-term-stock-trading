@@ -73,7 +73,7 @@ def mark_external(job: Job) -> bool:
         return result.rowcount == 1
 
 
-def finish(job: Job, result: dict | None = None, error: str | None = None) -> bool:
+def finish(job: Job, result: dict | None = None, error: str | None = None, publish=None) -> bool:
     with sessions().begin() as db:
         current = db.scalar(select(Job).where(Job.id == job.id).with_for_update())
         if (current.status != "RUNNING" or current.fencing_token != job.fencing_token
@@ -83,6 +83,9 @@ def finish(job: Job, result: dict | None = None, error: str | None = None) -> bo
             current.status = "CANCELLED"
             current.stage = "已取消"
         else:
+            # Domain publication is a short database-only callback in this fenced transaction.
+            if publish and not error:
+                result = publish(db, current)
             current.status = "FAILED" if error else "SUCCEEDED"
             current.stage = "处理失败" if error else "处理完成"
             current.result = result
