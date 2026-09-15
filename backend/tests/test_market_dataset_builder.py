@@ -674,6 +674,48 @@ def test_historical_zhonghe_listing_suspension_explains_missing_daily(tmp_path):
         }
 
 
+@pytest.mark.parametrize(
+    ("source_code", "instrument_id", "name", "list_date", "delist_date"),
+    [
+        ("600401.SH", "SH.600401", "Hareon Solar", "20030924", "20190712"),
+        ("600680.SH", "SH.600680", "Shanghai Potevio", "19931018", "20190523"),
+    ],
+)
+def test_2018_shanghai_listing_suspensions_explain_missing_daily(
+    tmp_path, source_code, instrument_id, name, list_date, delist_date
+):
+    data = responses()
+    data[("stock_basic", "D")] = [
+        {
+            **stock(source_code, name, "主板", "SSE", list_date),
+            "list_status": "D",
+            "delist_date": delist_date,
+        }
+    ]
+    trade_date = "20180529"
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+        for code in [*traded_codes, source_code]
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / f"dataset-{instrument_id}", dataset_id=f"suspension-{instrument_id}",
+        source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+
+        assert result["dailyBars"] == 3
+        assert ds.listing_status_explanations(trade_date) == {
+            instrument_id: ["SUSPENDED_LISTING"]
+        }
+
+
 def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [
