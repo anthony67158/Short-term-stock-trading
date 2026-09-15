@@ -104,6 +104,32 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await page.getByRole("button", { name: "核对账本", exact: true }).click();
     await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     await expect(page.getByText("已复算 1 笔成交 · 0 个未平批次 · 现金 9799.99 元")).toBeVisible();
+    const importCsv = [
+      "instrumentId,sourceKey,side,quantityShares,price,executedAt,commission,stampTax,transferFee,otherFee,source",
+      `SZ.000001,synthetic-csv-buy,BUY,37,10,${localTime()}+08:00,5,0,0,0,合成CSV交割`,
+    ].join("\n");
+    await page.getByLabel("交割单文件（UTF-8 CSV）").setInputFiles({
+      name: "synthetic.csv", mimeType: "text/csv", buffer: Buffer.from(importCsv),
+    });
+    await page.getByRole("button", { name: "预览交割单", exact: true }).click();
+    await expect(page.getByRole("region", { name: "交割单预览，可横向滚动" })).toContainText("待入账");
+    await expect(page.locator(".balance-value")).toHaveText("9,799.99");
+    await page.reload();
+    await expect(page.getByRole("region", { name: "交割单预览，可横向滚动" })).toContainText("synthetic-csv-buy");
+    await page.getByRole("button", { name: "确认导入全部有效成交" }).click();
+    await expect(page.getByText("交割单已入账，重复记录已跳过。")).toBeVisible();
+    await expect(page.locator(".balance-value")).toHaveText("9,424.99");
+    await page.getByLabel("交割单文件（UTF-8 CSV）").setInputFiles({
+      name: "synthetic.csv", mimeType: "text/csv", buffer: Buffer.from(importCsv),
+    });
+    await page.getByRole("button", { name: "预览交割单", exact: true }).click();
+    await expect(page.getByRole("region", { name: "交割单预览，可横向滚动" })).toContainText("重复，跳过");
+    await page.getByRole("button", { name: "确认导入全部有效成交" }).click();
+    await expect(page.getByText("交割单已入账，重复记录已跳过。")).toBeVisible();
+    await expect(page.locator(".balance-value")).toHaveText("9,424.99");
+    await page.getByRole("button", { name: "核对账本", exact: true }).click();
+    await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
+    await expect(page.getByText("已复算 2 笔成交 · 1 个未平批次 · 现金 9424.99 元")).toBeVisible();
     for (const theme of ["dark", "light"]) {
       if (theme === "light") await page.getByRole("button", { name: "切换深浅主题" }).click();
       for (const width of [390, 768, 1280, 1440]) {

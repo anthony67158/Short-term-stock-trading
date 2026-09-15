@@ -1,11 +1,13 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
+import { useSearchParams } from "react-router";
 import type { components } from "../../../../../packages/api-client/schema";
 import { api, errorMessage } from "../../lib/api";
 import { Button, Empty, Input } from "../../components/Controls";
 import { Executions } from "./Executions";
 import { Reconciliation } from "./Reconciliation";
+import { ExecutionImport } from "./ExecutionImport";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
@@ -131,6 +133,7 @@ function AccountLedger({ accountId }: { accountId: string }) {
       await cache.invalidateQueries({ queryKey: ["accounts"] });
     }} />}
     <Executions account={account} />
+    <ExecutionImport account={account} />
     <section className="ledger-section"><h2>资金流水</h2>
       {history.isPending ? <p role="status">正在读取资金流水…</p> : history.isError ? <div role="alert"><p>{errorMessage(history.error)}</p><Button onClick={() => history.refetch()}>重新读取</Button></div>
         : rows.length === 0 ? <Empty title="尚无资金记录">录入期初余额或第一笔入金，开始建立账户账本。</Empty>
@@ -145,7 +148,13 @@ function AccountLedger({ accountId }: { accountId: string }) {
 
 export function Portfolio() {
   const cache = useQueryClient();
-  const [selected, setSelected] = useState("");
+  const [params, setParams] = useSearchParams();
+  const selected = params.get("account") ?? "";
+  function setSelected(id: string) {
+    setParams((previous) => {
+      previous.set("account", id); previous.delete("import"); return previous;
+    });
+  }
   const [creating, setCreating] = useState(false);
   const accounts = useInfiniteQuery({
     queryKey: ["accounts"], initialPageParam: undefined as string | undefined,

@@ -195,6 +195,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/execution-imports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Import */
+        post: operations["preview_import_api_v1_accounts__account_id__execution_imports_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/execution-imports/{import_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Import */
+        get: operations["get_import_api_v1_accounts__account_id__execution_imports__import_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/execution-imports/{import_id}/confirmations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Import */
+        post: operations["confirm_import_api_v1_accounts__account_id__execution_imports__import_id__confirmations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/calendar": {
         parameters: {
             query?: never;
@@ -857,6 +908,11 @@ export interface components {
             data: components["schemas"]["Health"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[ImportView] */
+        Envelope_ImportView_: {
+            data: components["schemas"]["ImportView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[InstrumentPage] */
         Envelope_InstrumentPage_: {
             data: components["schemas"]["InstrumentPage"];
@@ -1062,6 +1118,62 @@ export interface components {
             status: string;
             /** Database */
             database: string;
+        };
+        /** ImportCommit */
+        ImportCommit: {
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** ImportInput */
+        ImportInput: {
+            /** Csvtext */
+            csvText: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** ImportRow */
+        ImportRow: {
+            /** Row */
+            row: number;
+            /** Sourcekey */
+            sourceKey: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "NEW" | "DUPLICATE" | "ERROR";
+            /** Message */
+            message: string;
+        };
+        /** ImportView */
+        ImportView: {
+            /** Id */
+            id: string;
+            /** Accountversion */
+            accountVersion: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "READY" | "REJECTED" | "COMMITTED";
+            /** Rows */
+            rows: components["schemas"]["ImportRow"][];
+            /** Filehash */
+            fileHash: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Expiresat
+             * Format: date-time
+             */
+            expiresAt: string;
+            /** Committedat */
+            committedAt: string | null;
+            /** Committedversion */
+            committedVersion: number | null;
         };
         /** InstrumentPage */
         InstrumentPage: {
@@ -1833,6 +1945,111 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_CorrectionPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_import_api_v1_accounts__account_id__execution_imports_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ImportView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_import_api_v1_accounts__account_id__execution_imports__import_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ImportView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_import_api_v1_accounts__account_id__execution_imports__import_id__confirmations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+                import_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportCommit"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ImportView_"];
                 };
             };
             /** @description Validation Error */

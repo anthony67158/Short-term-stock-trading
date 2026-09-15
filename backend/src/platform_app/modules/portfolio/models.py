@@ -157,3 +157,25 @@ class LotConsumption(Base):
     buy_execution_id: Mapped[str] = mapped_column(ForeignKey("executions.id"), primary_key=True)
     quantity: Mapped[int] = mapped_column(Integer)
     basis: Mapped[Decimal] = mapped_column(Numeric(20, 2))
+
+
+class ExecutionImport(Base):
+    __tablename__ = "execution_imports"
+    __table_args__ = (
+        UniqueConstraint("account_id", "command_key", name="uq_execution_imports_command"),
+        CheckConstraint("status IN ('READY','REJECTED','COMMITTED')", name="status"),
+    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
+    account_version: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16))
+    command_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    file_hash: Mapped[str] = mapped_column(String(64))
+    facts: Mapped[list] = mapped_column(JSONB)
+    rows: Mapped[list] = mapped_column(JSONB)
+    creation_result: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    committed_version: Mapped[int | None] = mapped_column(Integer)

@@ -1,4 +1,5 @@
 import hashlib
+from contextlib import nullcontext
 from decimal import Decimal
 
 from sqlalchemy import case, func, select
@@ -21,10 +22,12 @@ from platform_app.modules.portfolio.service import (
 LIMIT = Decimal("1000000000000000000")
 
 
-def record_execution(user_id: str, account_id: str, body: ExecutionInput, key: str) -> ExecutionView:
+def record_execution(
+    user_id: str, account_id: str, body: ExecutionInput, key: str, *, db_session=None,
+) -> ExecutionView:
     facts = body.model_dump_json(exclude={"expected_version"})
     fact_hash = hashlib.sha256(facts.encode()).hexdigest()
-    with sessions().begin() as db:
+    with nullcontext(db_session) if db_session is not None else sessions().begin() as db:
         account = owned_account(db, user_id, account_id, lock=True)
         command = db.get(ExecutionCommand, (account_id, key))
         if command:

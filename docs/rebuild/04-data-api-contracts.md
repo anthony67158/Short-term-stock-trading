@@ -98,6 +98,23 @@ FIFO批次、消耗关系和`realizedPnl`属于可重建投影，按原业务顺
 本切片只提供整笔作废，不提供修改价格/数量、原编号替换、入出金冲正或倒序
 历史补录；这些必须由后续原子更正/导入合同扩展，不以伪造新交割编号绕过。
 
+### 4.2 交割单CSV预览与确认
+
+`POST /accounts/{id}/execution-imports`接收UTF-8 CSV正文与账户版本，最多
+250,000字符/500数据行。固定模板列为`instrumentId,sourceKey,side,quantityShares,
+price,executedAt,commission,stampTax,transferFee,otherFee,source`，时间包含时区，
+费用为实际金额。文件须按业务时间排序；不支持任意券商列名猜测。
+
+预览在账户锁与可回滚保存点内逐笔运行实际成交写入器，回滚全部账本和outbox
+后持久化预览、文件hash、标准化事实与每行NEW/DUPLICATE/ERROR。存在错误
+则整个预览REJECTED，不允许隐式跳过错误行确认。预览有效期15分钟，刷新可
+通过`GET /accounts/{id}/execution-imports/{importId}`恢复。
+
+`POST .../{importId}/confirmations`以不可变预览ID作为业务幂等键，版本/有效期/
+归属与独立对账通过后整批原子入账，完成态COMMITTED。相同文件可重新预览，
+永久交割编号识别重复；冲正后的编号视为错误，不恢复原成交。期初持仓、
+倒序历史补录、原编号更正和各券商专有格式属于后续独立合同。
+
 ## 5. Decision 合同
 
 必填公共字段：

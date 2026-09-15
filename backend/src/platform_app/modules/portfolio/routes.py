@@ -4,7 +4,7 @@ from fastapi import APIRouter, Header, Query
 
 from platform_app.contracts.base import Contract, Envelope
 from platform_app.modules.identity.routes import CurrentUser
-from platform_app.modules.portfolio import corrections, executions, reconciliation, service
+from platform_app.modules.portfolio import corrections, executions, imports, reconciliation, service
 from platform_app.modules.portfolio.correction_contracts import (
     CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
 )
@@ -14,6 +14,7 @@ from platform_app.modules.portfolio.execution_contracts import (
 from platform_app.modules.portfolio.contracts import (
     AccountBalance, AccountInput, AccountView, CashEntryView, CashFlowInput, CashPage,
 )
+from platform_app.modules.portfolio.import_contracts import ImportCommit, ImportInput, ImportView
 
 router = APIRouter(prefix="/api/v1/accounts", tags=["portfolio"])
 CommandKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=128)]
@@ -109,3 +110,19 @@ def correction_history(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ):
     return Envelope(data=corrections.correction_history(user.id, account_id, cursor, limit))
+
+
+@router.post("/{account_id}/execution-imports", response_model=Envelope[ImportView], status_code=201)
+def preview_import(account_id: str, body: ImportInput, user: CurrentUser, key: CommandKey):
+    return Envelope(data=imports.preview_import(user.id, account_id, body, key))
+
+
+@router.get("/{account_id}/execution-imports/{import_id}", response_model=Envelope[ImportView])
+def get_import(account_id: str, import_id: str, user: CurrentUser):
+    return Envelope(data=imports.get_import(user.id, account_id, import_id))
+
+
+@router.post("/{account_id}/execution-imports/{import_id}/confirmations",
+             response_model=Envelope[ImportView])
+def confirm_import(account_id: str, import_id: str, body: ImportCommit, user: CurrentUser):
+    return Envelope(data=imports.commit_import(user.id, account_id, import_id, body))

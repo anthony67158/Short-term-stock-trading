@@ -814,6 +814,181 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/execution-imports": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Preview Import",
+        "operationId": "preview_import_api_v1_accounts__account_id__execution_imports_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ImportView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}/execution-imports/{import_id}": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Get Import",
+        "operationId": "get_import_api_v1_accounts__account_id__execution_imports__import_id__get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Import Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ImportView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}/execution-imports/{import_id}/confirmations": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Confirm Import",
+        "operationId": "confirm_import_api_v1_accounts__account_id__execution_imports__import_id__confirmations_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Import Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportCommit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ImportView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/calendar": {
       "get": {
         "tags": [
@@ -2749,6 +2924,22 @@
         ],
         "title": "Envelope[Health]"
       },
+      "Envelope_ImportView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImportView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ImportView]"
+      },
       "Envelope_InstrumentPage_": {
         "properties": {
           "data": {
@@ -3309,6 +3500,156 @@
           "database"
         ],
         "title": "Health"
+      },
+      "ImportCommit": {
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedVersion"
+        ],
+        "title": "ImportCommit"
+      },
+      "ImportInput": {
+        "properties": {
+          "csvText": {
+            "type": "string",
+            "maxLength": 250000,
+            "minLength": 1,
+            "title": "Csvtext"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "csvText",
+          "expectedVersion"
+        ],
+        "title": "ImportInput"
+      },
+      "ImportRow": {
+        "properties": {
+          "row": {
+            "type": "integer",
+            "title": "Row"
+          },
+          "sourceKey": {
+            "type": "string",
+            "title": "Sourcekey"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "NEW",
+              "DUPLICATE",
+              "ERROR"
+            ],
+            "title": "Status"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "row",
+          "sourceKey",
+          "status",
+          "message"
+        ],
+        "title": "ImportRow"
+      },
+      "ImportView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "REJECTED",
+              "COMMITTED"
+            ],
+            "title": "Status"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/ImportRow"
+            },
+            "type": "array",
+            "title": "Rows"
+          },
+          "fileHash": {
+            "type": "string",
+            "title": "Filehash"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Expiresat"
+          },
+          "committedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committedat"
+          },
+          "committedVersion": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "accountVersion",
+          "status",
+          "rows",
+          "fileHash",
+          "createdAt",
+          "expiresAt",
+          "committedAt",
+          "committedVersion"
+        ],
+        "title": "ImportView"
       },
       "InstrumentPage": {
         "properties": {
