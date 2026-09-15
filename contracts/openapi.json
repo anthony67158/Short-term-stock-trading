@@ -2869,6 +2869,16 @@
             "minimum": 1.0,
             "title": "Expectedversion"
           },
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplacementFact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "previewHash": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
@@ -2897,6 +2907,16 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Expectedversion"
+          },
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplacementFact"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -2979,6 +2999,16 @@
           "previewHash": {
             "type": "string",
             "title": "Previewhash"
+          },
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplacementFact"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -3028,6 +3058,16 @@
             "title": "Reversalamount",
             "decimal_places": 2,
             "max_digits": 20
+          },
+          "replacement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplacementFact"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -5143,6 +5183,35 @@
           "matches"
         ],
         "title": "ReconciliationView"
+      },
+      "ReplacementFact": {
+        "properties": {
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "price": {
+            "type": "string",
+            "title": "Price",
+            "decimal_places": 4,
+            "gt": 0,
+            "max_digits": 18
+          },
+          "fees": {
+            "$ref": "#/components/schemas/ActualFees"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "quantityShares",
+          "price",
+          "fees"
+        ],
+        "title": "ReplacementFact"
       },
       "ResearchCapability": {
         "properties": {

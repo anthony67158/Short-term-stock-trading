@@ -1,4 +1,4 @@
-"""Append-only voids with a complete, atomic projection rebuild."""
+"""Append-only voids/replacements with a complete, atomic projection rebuild."""
 import hashlib
 from dataclasses import replace
 from decimal import Decimal
@@ -11,6 +11,7 @@ from platform_app.modules.operations.models import Outbox
 from platform_app.modules.portfolio.correction_contracts import (
     CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
 )
+from platform_app.modules.portfolio.effective_executions import apply_replacement, effective_trades
 from platform_app.modules.portfolio.models import (
     CashEntry, Execution, ExecutionCorrection, LotConsumption, OpeningLot, PositionLot,
 )
@@ -34,18 +35,32 @@ def prepare(db, account, execution_id, body):
         raise PortfolioError("EXECUTION_REVERSED", "此成交已冲正，请查阅冲正记录")
     if not reconcile(account.owner_id, account.id, db_session=db).matches:
         raise PortfolioError("LEDGER_MISMATCH", "账本存在核对差异，请先处理差异再冲正", 422)
-    reversed_ids.add(execution_id)
     cash = list(db.scalars(select(CashEntry).where(
         CashEntry.account_id == account.id).order_by(CashEntry.account_version).limit(50_001)))
     trades = list(db.scalars(select(Execution).where(
         Execution.account_id == account.id).order_by(Execution.account_version).limit(50_001)))
     if max(len(cash), len(trades)) > 50_000:
         raise PortfolioError("REPLAY_LIMIT", "账本超过即时冲正上限，请使用离线处理", 422)
+    active = {row.id: row for row in effective_trades(db, account.id)}
+    replacement = apply_replacement(trade, body.replacement)
+    if body.replacement is None:
+        active.pop(execution_id)
+    else:
+        if replacement.gross_amount <= 0 or max(
+                replacement.gross_amount, replacement.total_fees,
+                abs(replacement.cash_delta)) >= LIMIT:
+            raise PortfolioError("AMOUNT_RANGE", "替换成交金额或费用超出支持范围", 422)
+        active[execution_id] = replacement
+    adjustment = (replacement.cash_delta if body.replacement is not None else Decimal(0)
+                  ) - trade.cash_delta
     balance = Decimal(0)
     for row in cash:
-        if row.kind == "REVERSAL" or row.execution_id in reversed_ids:
+        if row.kind == "REVERSAL":
             continue
-        balance += row.amount
+        if row.kind == "EXECUTION":
+            balance += active[row.execution_id].cash_delta if row.execution_id in active else 0
+        else:
+            balance += row.amount
         if not 0 <= balance < LIMIT:
             raise PortfolioError(
                 "CORRECTION_CASH_DEPENDENCY", "冲正会使后续现金越界，请先核对依赖的成交或出金", 422)
@@ -54,10 +69,11 @@ def prepare(db, account, execution_id, body):
             OpeningLot.account_id == account.id).order_by(OpeningLot.account_version)):
         lots[row.id] = Lot(row.id, row.acquired_date, row.quantity_shares, row.cost_basis)
         instruments[row.id], sequences[row.id] = row.instrument_id, row.account_version
-    for row in trades:
-        pnl[row.id] = None
-        if row.id in reversed_ids:
+    for original in trades:
+        pnl[original.id] = None
+        if original.id not in active:
             continue
+        row = active[original.id]
         date = trading_date(row.executed_at)
         if row.side == "BUY":
             lots[row.id] = Lot(row.id, date, row.quantity_shares, -row.cash_delta)
@@ -85,21 +101,22 @@ def prepare(db, account, execution_id, body):
             basis += allocation.basis
         pnl[row.id] = row.cash_delta - basis
     before = cash_total(db, account.id)
-    if balance != before - trade.cash_delta:
+    if balance != before + adjustment:
         raise PortfolioError("LEDGER_MISMATCH", "现金分录不一致，请先对账", 422)
     fields = dict(
         execution_id=trade.id, account_version=account.version,
-        cash_before=before, cash_after=balance, reversal_amount=-trade.cash_delta,
+        cash_before=before, cash_after=balance, reversal_amount=adjustment,
         open_shares_before=sum(db.scalars(select(PositionLot.remaining_quantity).where(
             PositionLot.account_id == account.id))),
         open_shares_after=sum(lot.quantity for lot in lots.values()),
         recalculated_sales=sum(row.side == "SELL" and row.realized_pnl != pnl[row.id]
-                               for row in trades),
+                               for row in trades), replacement=body.replacement,
     )
     preview = CorrectionPreview(**fields, preview_hash="pending")
     # Bind confirmation to the account version, reason, target and monetary impact.
     preview.preview_hash = fingerprint(CorrectionInput.model_validate(
-        {"reason": body.reason, "expectedVersion": body.expected_version}
+        {"reason": body.reason, "expectedVersion": body.expected_version,
+         "replacement": body.replacement}
     )) + ":" + fingerprint(preview)
     preview.preview_hash = hashlib.sha256(preview.preview_hash.encode()).hexdigest()
     return preview, lots, links, pnl, instruments, sequences, trades
@@ -131,6 +148,7 @@ def correct_execution(
             account_id=account_id, execution_id=execution_id, actor_id=user_id,
             reason=body.reason, command_key=key, request_hash=fingerprint(body),
             account_version=account.version, reversal_amount=preview.reversal_amount,
+            replacement=body.replacement.model_dump(mode="json") if body.replacement else None,
         )
         db.add(correction)
         db.flush()

@@ -825,6 +825,7 @@ export interface components {
             reason: string;
             /** Expectedversion */
             expectedVersion: number;
+            replacement?: components["schemas"]["ReplacementFact"] | null;
             /** Previewhash */
             previewHash: string;
         };
@@ -834,6 +835,7 @@ export interface components {
             reason: string;
             /** Expectedversion */
             expectedVersion: number;
+            replacement?: components["schemas"]["ReplacementFact"] | null;
         };
         /** CorrectionPage */
         CorrectionPage: {
@@ -862,6 +864,7 @@ export interface components {
             recalculatedSales: number;
             /** Previewhash */
             previewHash: string;
+            replacement?: components["schemas"]["ReplacementFact"] | null;
         };
         /** CorrectionView */
         CorrectionView: {
@@ -882,6 +885,7 @@ export interface components {
             accountVersion: number;
             /** Reversalamount */
             reversalAmount: string;
+            replacement?: components["schemas"]["ReplacementFact"] | null;
         };
         /** Discrepancy */
         Discrepancy: {
@@ -1658,6 +1662,14 @@ export interface components {
             scope: string;
             /** Checkedat */
             checkedAt?: string;
+        };
+        /** ReplacementFact */
+        ReplacementFact: {
+            /** Quantityshares */
+            quantityShares: number;
+            /** Price */
+            price: string;
+            fees: components["schemas"]["ActualFees"];
         };
         /** ResearchCapability */
         ResearchCapability: {

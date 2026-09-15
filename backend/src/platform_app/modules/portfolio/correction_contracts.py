@@ -1,11 +1,21 @@
+from typing import Annotated
+
 from pydantic import AwareDatetime, Field
 
-from platform_app.contracts.base import Contract, Money
+from platform_app.contracts.base import Contract, Money, Price, Quantity
+from platform_app.modules.portfolio.execution_contracts import ActualFees
+
+
+class ReplacementFact(Contract):
+    quantity_shares: Annotated[Quantity, Field(gt=0)]
+    price: Price
+    fees: ActualFees
 
 
 class CorrectionInput(Contract):
     reason: str = Field(min_length=1, max_length=500, pattern=r"\S")
     expected_version: int = Field(strict=True, ge=1)
+    replacement: ReplacementFact | None = None
 
 
 class CorrectionCommit(CorrectionInput):
@@ -22,6 +32,7 @@ class CorrectionPreview(Contract):
     open_shares_after: int
     recalculated_sales: int
     preview_hash: str
+    replacement: ReplacementFact | None = None
 
 
 class CorrectionView(Contract):
@@ -32,6 +43,7 @@ class CorrectionView(Contract):
     recorded_at: AwareDatetime
     account_version: int
     reversal_amount: Money
+    replacement: ReplacementFact | None = None
 
 
 class CorrectionPage(Contract):

@@ -2,6 +2,7 @@
 from collections import defaultdict, deque
 from contextlib import nullcontext
 from decimal import ROUND_HALF_UP, Decimal
+from types import SimpleNamespace
 
 from pydantic import Field
 from sqlalchemy import select
@@ -61,7 +62,9 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         corrections = list(db.scalars(select(ExecutionCorrection).where(
             ExecutionCorrection.account_id == account_id)))
         by_correction = {row.id: row for row in corrections}
-        reversed_ids = {row.execution_id for row in corrections}
+        reversed_ids = {row.execution_id for row in corrections if row.replacement is None}
+        replacements = {row.execution_id: row.replacement for row in corrections
+                        if row.replacement is not None}
         plan_events = list(db.scalars(select(PlanEvent).where(
             PlanEvent.account_id == account_id).order_by(
                 PlanEvent.account_version, PlanEvent.revision).limit(50_001)))
@@ -83,6 +86,7 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
         expected_lots, expected_links, execution_deltas = {}, {}, {}
+        corrected_deltas, corrected_quantities, corrected_fees = {}, {}, {}
         pending_lots = defaultdict(deque)
         opening_ids = {row.id for row in openings}
         for row in openings:
@@ -113,6 +117,24 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             if trade.id in reversed_ids:
                 check(trade.id, "realizedPnl", None, trade.realized_pnl)
                 continue
+            replacement = replacements.get(trade.id)
+            if replacement is not None:
+                # Independently decode and recompute; do not reuse write-side projection helpers.
+                quantity = replacement["quantity_shares"]
+                price = Decimal(replacement["price"])
+                fee = sum((Decimal(replacement["fees"][key]) for key in (
+                    "commission", "stamp_tax", "transfer_fee", "other_fee")), Decimal(0))
+                gross = rounded(price * quantity)
+                delta = -gross - fee if trade.side == "BUY" else gross - fee
+                trade = SimpleNamespace(
+                    **{column.name: getattr(trade, column.name)
+                       for column in Execution.__table__.columns
+                       if column.name != "quantity_shares"},
+                    quantity_shares=quantity,
+                )
+            corrected_deltas[trade.id] = delta
+            corrected_quantities[trade.id] = trade.quantity_shares
+            corrected_fees[trade.id] = fee
             date = trading_date(trade.executed_at)
             if trade.side == "BUY":
                 expected_lots[trade.id] = {
@@ -184,15 +206,15 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
                 if trade:
                     check(row.id, "executionVersion", trade.account_version, row.account_version)
                     check(row.id, "executionTime", trade.executed_at, row.effective_at)
-                if row.execution_id not in reversed_ids and expected is not None:
-                    active_cash += expected
+                active_cash += corrected_deltas.get(row.execution_id, Decimal(0))
             elif row.kind == "REVERSAL":
                 reversed_links.add(row.correction_id)
                 correction = by_correction.get(row.correction_id)
                 check(row.id, "correctionExists", True, correction is not None)
                 if correction:
                     original_delta = execution_deltas.get(correction.execution_id)
-                    expected = -original_delta if original_delta is not None else None
+                    expected = (corrected_deltas.get(correction.execution_id, Decimal(0))
+                                - original_delta if original_delta is not None else None)
                     check(row.id, "reversalCash", expected, row.amount)
                     check(row.id, "reversalFact", expected, correction.reversal_amount)
                     check(row.id, "correctionVersion", correction.account_version,
@@ -242,10 +264,10 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
                       PlanView.model_validate(plan))
             linked_trades = [trade for trade in executions
                              if trade.plan_id == plan.id and trade.id not in reversed_ids]
-            shares = sum(trade.quantity_shares for trade in linked_trades)
+            shares = sum(corrected_quantities[trade.id] for trade in linked_trades)
             check(plan.id, "recordedShares", shares, plan.recorded_shares)
             remaining = max(0, plan.quantity_shares - shares)
-            fees = sum((trade.total_fees for trade in linked_trades), Decimal(0))
+            fees = sum((corrected_fees[trade.id] for trade in linked_trades), Decimal(0))
             active = plan.status in ("CONFIRMED", "PARTIALLY_RECORDED")
             reserved_cash = rounded(remaining * plan.limit_price) + max(
                 Decimal(0), plan.fee_budget - fees) if remaining and active and (

@@ -8,8 +8,9 @@ from platform_app.contracts.base import new_id, utcnow
 from platform_app.kernel.trading import money, quantity_rule, trading_date, validate_order_quantity
 from platform_app.modules.market.models import Instrument
 from platform_app.modules.operations.models import Outbox
+from platform_app.modules.portfolio.effective_executions import effective_trades
 from platform_app.modules.portfolio.models import (
-    Account, Execution, ExecutionCorrection, ExecutionPlan, PlanEvent, PositionLot,
+    Account, ExecutionPlan, PlanEvent, PositionLot,
 )
 from platform_app.modules.portfolio.plan_contracts import PlanCancel, PlanInput, PlanPage, PlanView
 from platform_app.modules.portfolio.service import PortfolioError, cash_total, fingerprint, owned_account
@@ -135,11 +136,7 @@ def refresh_reservations(db, account, changed_plan_id=None):
     now = utcnow()
     if changed_plan_id:
         plan = db.get(ExecutionPlan, changed_plan_id)
-        reversed_ids = select(ExecutionCorrection.execution_id).where(
-            ExecutionCorrection.account_id == account.id)
-        trades = list(db.scalars(select(Execution).where(
-            Execution.account_id == account.id, Execution.plan_id == plan.id,
-            Execution.id.not_in(reversed_ids))))
+        trades = [trade for trade in effective_trades(db, account.id) if trade.plan_id == plan.id]
         plan.recorded_shares = sum(trade.quantity_shares for trade in trades)
         remaining = max(0, plan.quantity_shares - plan.recorded_shares)
         fees = sum((trade.total_fees for trade in trades), Decimal(0))

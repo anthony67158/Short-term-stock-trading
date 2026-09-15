@@ -184,6 +184,7 @@ class ExecutionCorrection(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     account_version: Mapped[int] = mapped_column(Integer)
     reversal_amount: Mapped[Decimal] = mapped_column(Numeric(20, 2))
+    replacement: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
 
 class LotConsumption(Base):
