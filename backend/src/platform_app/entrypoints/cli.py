@@ -1,6 +1,7 @@
 import argparse
 import getpass
 import json
+import os
 import re
 from pathlib import Path
 
@@ -15,11 +16,18 @@ def external_dataset_root(value: Path) -> Path:
     return target
 
 
+def cross_source_sample(value: str) -> tuple[str, str]:
+    if not re.fullmatch(r"(SH|SZ|BJ)\.\d{6}@\d{8}", value):
+        raise argparse.ArgumentTypeError("sample must be INSTRUMENT_ID@YYYYMMDD")
+    instrument_id, trade_date = value.split("@", maxsplit=1)
+    return instrument_id, trade_date
+
+
 def main():
     parser = argparse.ArgumentParser(description="A股投资平台")
     parser.add_argument("command", choices=[
         "export-contracts", "health", "create-user", "sync-instruments", "audit-market-archive",
-        "build-market-dataset",
+        "audit-market-cross-source", "build-market-dataset",
     ])
     parser.add_argument("--username")
     parser.add_argument("--archive-root", action="append", type=Path)
@@ -31,6 +39,7 @@ def main():
     parser.add_argument("--end-date")
     parser.add_argument("--stage", choices=["reference", "names", "daily", "minute", "seal"])
     parser.add_argument("--instrument-id", action="append")
+    parser.add_argument("--sample", action="append", type=cross_source_sample)
     args = parser.parse_args()
     if args.command == "export-contracts":
         from platform_app.entrypoints.api import app
@@ -58,6 +67,27 @@ def main():
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
         print(json.dumps({"chunks": report["chunkCount"], "from": report["from"],
                           "to": report["to"], "productionEligible": False}))
+    elif args.command == "audit-market-cross-source":
+        from platform_app.modules.experiments.market_cross_source_audit import (
+            audit_cross_sources,
+        )
+
+        if not args.dataset_root or not args.output or not args.sample:
+            parser.error("dataset-root, output and sample are required")
+        try:
+            dataset_root = external_dataset_root(args.dataset_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        report = audit_cross_sources(dataset_root, args.sample)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        temporary = args.output.with_suffix(args.output.suffix + ".tmp")
+        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        os.replace(temporary, args.output)
+        print(json.dumps({
+            "samples": report["summary"]["samples"],
+            "passed": report["passed"],
+            "reportSha256": report["reportSha256"],
+        }))
     elif args.command == "build-market-dataset":
         from platform_app.adapters.market_tushare import TushareClient
         from platform_app.modules.experiments.market_dataset import MarketDataset

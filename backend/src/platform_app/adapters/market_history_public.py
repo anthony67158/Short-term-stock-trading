@@ -32,6 +32,10 @@ def _date(value: str) -> str:
         raise PublicHistoryError("INVALID_PUBLIC_HISTORY_DATE") from exc
 
 
+def _tencent_volume_multiplier(instrument_id: str) -> int:
+    return 1 if instrument_id.startswith(("SH.688", "SH.689")) else 100
+
+
 def _bar(
     *,
     trade_date: str,
@@ -170,7 +174,7 @@ class TencentDailyClient:
                     high=row[3],
                     low=row[4],
                     volume=row[5],
-                    volume_multiplier=100,
+                    volume_multiplier=_tencent_volume_multiplier(instrument_id),
                 )
             )
         keyed = {row["tradeDate"]: row for row in normalized}

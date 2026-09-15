@@ -80,6 +80,37 @@ def test_tencent_daily_client_converts_lots_to_shares():
     assert rows["20260915"]["high"] == "11.880"
 
 
+def test_tencent_daily_client_keeps_star_market_volume_in_shares():
+    client = TencentDailyClient(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "code": 0,
+                    "data": {
+                        "sh688001": {
+                            "day": [
+                                [
+                                    "2022-11-15",
+                                    "29.380",
+                                    "30.700",
+                                    "30.770",
+                                    "29.190",
+                                    "1718381.000",
+                                ]
+                            ]
+                        }
+                    },
+                },
+            )
+        )
+    )
+
+    rows = client.bars("SH.688001", "20221115", "20221115")
+
+    assert rows["20221115"]["volumeShares"] == "1718381.000"
+
+
 def test_public_daily_clients_reject_duplicate_dates_and_invalid_shapes():
     sina = SinaDailyClient(
         transport=httpx.MockTransport(

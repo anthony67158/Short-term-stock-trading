@@ -125,6 +125,24 @@ uv run platform-cli build-market-dataset \
   --instrument-id BJ.920000
 ```
 
+## 独立公开源日线交叉核验
+
+- 新增只读`audit-market-cross-source`入口，读取规范SQLite中的指定证券日，
+  分别访问新浪未复权日K和腾讯未复权日K，比较开高低收及成交股数。价格要求
+  精确一致；腾讯以手提供的沪深主板/创业板成交量换算为股，科创板原字段已是股，
+  成交量差必须小于100股。报告保存源行hash、逐字段结果和总报告hash。
+- 真实报告
+  `/Users/bytedance/.local/share/stock-platform/a-share-20160101-20260915-v4/cross-source-audit-2022-2026.json`
+  覆盖2022-11-15和2026-09-15两个年份、主板/创业板/科创板/北交所共8个样本，
+  8/8通过。报告SHA-256为
+  `69e82303a29b832cccf6c80794e467c4c53189c114728b4d46ee2f2fe1dc74d8`。
+- 新浪8个样本均返回且OHLC、股数与规范库一致。腾讯6个沪深样本均返回，
+  OHLC一致，成交量差为0～37股；腾讯两个北交所样本均未返回历史行，因此
+  北交所要求新浪单独来源通过，并在报告中保留`DATE_NOT_RETURNED`限制。
+- 两个公开端点都未提供本次可独立比较的成交额，且这只是分层抽样，不是逐行
+  双源证明。全量下载完成后仍须运行规范库自身的全日期覆盖、唯一性、生命周期、
+  复权和SQLite完整性审计；公开端点不能替代主数据源。
+
 实现依据：
 
 - Tushare `stock_basic`：https://tushare.pro/document/2?doc_id=25
