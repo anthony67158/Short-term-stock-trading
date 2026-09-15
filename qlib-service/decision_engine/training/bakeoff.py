@@ -298,10 +298,17 @@ def model_family(name, estimators, threads, seed):
 
 
 def _probability(model, X):
-    values = np.asarray(model.predict_proba(X), dtype=np.float64)
-    if values.ndim != 2 or values.shape[1] != 2:
-        raise ValueError("POC分类模型概率维度无效")
-    return np.clip(values[:, 1], 1e-8, 1 - 1e-8)
+    if hasattr(model, "predict_proba"):
+        values = np.asarray(model.predict_proba(X), dtype=np.float64)
+        if values.ndim != 2 or values.shape[1] != 2:
+            raise ValueError("POC分类模型概率维度无效")
+        probabilities = values[:, 1]
+    else:
+        raw = np.asarray(model.predict(X), dtype=np.float64)
+        if raw.ndim != 1:
+            raise ValueError("POC分类模型原始分数维度无效")
+        probabilities = 1 / (1 + np.exp(-np.clip(raw, -30, 30)))
+    return np.clip(probabilities, 1e-8, 1 - 1e-8)
 
 
 def constant_probability_metrics(train_labels, validation_labels):

@@ -29,9 +29,26 @@ from decision_engine.training.review_ensemble import (  # noqa: E402
     _select_opportunity_policy,
     train_review_ensemble,
 )
+from decision_engine.training.bakeoff import _probability  # noqa: E402
 
 
 class DecisionReviewTrainingTest(unittest.TestCase):
+    def test_probability_accepts_json_model_raw_logits(self):
+        class JsonModel:
+            @staticmethod
+            def predict(_matrix):
+                return np.asarray([-2.0, 0.0, 2.0])
+
+        probabilities = _probability(
+            JsonModel(),
+            np.zeros((3, 1)),
+        )
+
+        np.testing.assert_allclose(
+            probabilities,
+            [0.119202922, 0.5, 0.880797078],
+        )
+
     def test_v4_policy_search_never_allows_negative_expected_net_r(self):
         self.assertTrue(POLICY_MINIMUM_EXPECTED_R)
         self.assertGreaterEqual(min(POLICY_MINIMUM_EXPECTED_R), 0.0)
