@@ -9,10 +9,14 @@ from platform_app.adapters.market_tushare import (
     HistoricalMarketError,
     TushareClient,
     instrument_parts,
+    normalize_adjustment_factor,
     normalize_bse_mapping,
     normalize_daily,
     normalize_instrument,
     normalize_minute,
+    normalize_name_change,
+    normalize_suspension,
+    normalize_trade_calendar,
     validate_endpoint,
 )
 from platform_app.config import settings
@@ -92,6 +96,54 @@ def test_bse_mapping_preserves_old_code_under_stable_920_identity():
             "name": "Bad", "o_code": "839729.BJ",
             "n_code": "300001.SZ", "list_date": "20200727",
         }, available_at)
+
+
+def test_point_in_time_facts_normalize_with_provenance():
+    available_at = "2026-09-15T16:00:00+08:00"
+    aliases = {"839729.BJ": "920729.BJ"}
+    calendar = normalize_trade_calendar({
+        "exchange": "SSE", "cal_date": "20260915", "is_open": "1",
+        "pretrade_date": "20260914",
+    }, available_at)
+    assert calendar["is_open"] == 1
+    assert calendar["previous_open_date"] == "20260914"
+
+    factor = normalize_adjustment_factor({
+        "ts_code": "839729.BJ", "trade_date": "20260915", "adj_factor": "1.2345",
+    }, aliases, available_at)
+    assert factor["instrument_id"] == "BJ.920729"
+    assert factor["source_code"] == "839729.BJ"
+    assert factor["factor"] == "1.2345"
+
+    suspension = normalize_suspension({
+        "ts_code": "839729.BJ", "trade_date": "20260915",
+        "suspend_type": "S", "suspend_timing": None,
+    }, aliases, available_at)
+    assert suspension["suspend_timing"] == "ALL_DAY"
+
+    change = normalize_name_change({
+        "ts_code": "839729.BJ", "name": "ST Synthetic",
+        "start_date": "20260901", "end_date": None,
+        "ann_date": "20260831", "change_reason": "ST",
+    }, aliases, available_at)
+    assert change["name"] == "ST Synthetic"
+    assert change["end_date"] is None
+
+
+def test_daily_and_minute_apply_aliases_without_losing_source_code():
+    aliases = {"839729.BJ": "920729.BJ"}
+    daily = normalize_daily({
+        "ts_code": "839729.BJ", "trade_date": "20260915",
+        "open": "10", "high": "11", "low": "9", "close": "10",
+        "pre_close": "10", "vol": "1", "amount": "1",
+    }, aliases)
+    minute = normalize_minute({
+        "ts_code": "839729.BJ", "trade_time": "2026-09-15 09:35:00",
+        "open": "10", "high": "11", "low": "9", "close": "10",
+        "vol": "100", "amount": "1000",
+    }, "BJ.920729", aliases)
+    assert daily["instrumentId"] == minute["instrumentId"] == "BJ.920729"
+    assert daily["sourceCode"] == minute["sourceCode"] == "839729.BJ"
 
 
 def test_endpoint_allowlist_and_protocol_response(monkeypatch):

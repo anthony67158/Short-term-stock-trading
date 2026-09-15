@@ -1,5 +1,7 @@
 """Strict Tushare-compatible historical market data transport and normalization."""
 
+import hashlib
+import json
 import re
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -169,17 +171,22 @@ def normalize_instrument(row: dict, aliases: dict[str, str], available_at: str) 
 
 
 def _row_sha256(row: dict) -> str:
-    import hashlib
-    import json
-
     payload = json.dumps(
         row, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode()
     return hashlib.sha256(payload).hexdigest()
 
 
-def normalize_daily(row: dict) -> dict:
-    code, exchange, board = instrument_parts(row.get("ts_code"))
+def canonical_instrument(value: str, aliases: dict[str, str] | None = None) -> tuple[str, str]:
+    source_code = str(value or "").upper()
+    canonical_code = (aliases or {}).get(source_code, source_code)
+    code, exchange, _board = instrument_parts(canonical_code)
+    return source_code, f"{exchange}.{code}"
+
+
+def normalize_daily(row: dict, aliases: dict[str, str] | None = None) -> dict:
+    source_code, instrument_id = canonical_instrument(row.get("ts_code"), aliases)
+    _code, _exchange, board = instrument_parts((aliases or {}).get(source_code, source_code))
     date = str(row.get("trade_date") or "")
     if not re.fullmatch(r"\d{8}", date):
         raise HistoricalMarketError("INVALID_TRADE_DATE")
@@ -198,7 +205,8 @@ def normalize_daily(row: dict) -> dict:
     ):
         raise HistoricalMarketError("INVALID_OHLC")
     return {
-        "instrumentId": f"{exchange}.{code}",
+        "instrumentId": instrument_id,
+        "sourceCode": source_code,
         "tradeDate": date,
         "board": board,
         **{name: format(value, "f") for name, value in prices.items()},
@@ -206,12 +214,16 @@ def normalize_daily(row: dict) -> dict:
         "volumeShares": scaled_decimal_text(row.get("vol"), 100),
         "amountCny": scaled_decimal_text(row.get("amount"), 1000),
         "adjustment": "RAW",
+        "sourceRowSha256": _row_sha256(row),
     }
 
 
-def normalize_minute(row: dict, expected_instrument: str) -> dict:
-    code, exchange, _board = instrument_parts(row.get("ts_code"))
-    instrument_id = f"{exchange}.{code}"
+def normalize_minute(
+    row: dict,
+    expected_instrument: str,
+    aliases: dict[str, str] | None = None,
+) -> dict:
+    source_code, instrument_id = canonical_instrument(row.get("ts_code"), aliases)
     if instrument_id != expected_instrument:
         raise HistoricalMarketError("MINUTE_INSTRUMENT_MISMATCH")
     timestamp = str(row.get("trade_time") or "")
@@ -234,6 +246,7 @@ def normalize_minute(row: dict, expected_instrument: str) -> dict:
         raise HistoricalMarketError("INVALID_OHLC")
     return {
         "instrumentId": instrument_id,
+        "sourceCode": source_code,
         "barEndShanghai": timestamp,
         **{name: format(value, "f") for name, value in prices.items()},
         # Tushare stk_mins already uses shares and CNY.
@@ -241,6 +254,82 @@ def normalize_minute(row: dict, expected_instrument: str) -> dict:
         "amountCny": decimal_text(row.get("amount"), nonnegative=True),
         "frequency": "5min",
         "adjustment": "RAW",
+        "sourceRowSha256": _row_sha256(row),
+    }
+
+
+def normalize_trade_calendar(row: dict, available_at: str) -> dict:
+    exchange = str(row.get("exchange") or "")
+    if exchange not in {"SSE", "SZSE"}:
+        raise HistoricalMarketError("INVALID_CALENDAR_EXCHANGE")
+    is_open = str(row.get("is_open") or "")
+    if is_open not in {"0", "1"}:
+        raise HistoricalMarketError("INVALID_CALENDAR_STATE")
+    return {
+        "exchange": exchange,
+        "cal_date": date_text(row.get("cal_date")),
+        "is_open": int(is_open),
+        "previous_open_date": date_text(row.get("pretrade_date"), optional=True),
+        "source": "TUSHARE_COMPATIBLE",
+        "available_at": available_at_text(available_at),
+        "source_row_sha256": _row_sha256(row),
+    }
+
+
+def normalize_adjustment_factor(
+    row: dict,
+    aliases: dict[str, str],
+    available_at: str,
+) -> dict:
+    source_code, instrument_id = canonical_instrument(row.get("ts_code"), aliases)
+    return {
+        "instrument_id": instrument_id,
+        "source_code": source_code,
+        "trade_date": date_text(row.get("trade_date")),
+        "factor": decimal_text(row.get("adj_factor"), positive=True),
+        "source": "TUSHARE_COMPATIBLE",
+        "available_at": available_at_text(available_at),
+        "source_row_sha256": _row_sha256(row),
+    }
+
+
+def normalize_suspension(row: dict, aliases: dict[str, str], available_at: str) -> dict:
+    source_code, instrument_id = canonical_instrument(row.get("ts_code"), aliases)
+    suspend_type = str(row.get("suspend_type") or "")
+    if suspend_type not in {"S", "R"}:
+        raise HistoricalMarketError("INVALID_SUSPEND_TYPE")
+    return {
+        "instrument_id": instrument_id,
+        "source_code": source_code,
+        "trade_date": date_text(row.get("trade_date")),
+        "suspend_type": suspend_type,
+        "suspend_timing": str(row.get("suspend_timing") or "ALL_DAY"),
+        "source": "TUSHARE_COMPATIBLE",
+        "available_at": available_at_text(available_at),
+        "source_row_sha256": _row_sha256(row),
+    }
+
+
+def normalize_name_change(row: dict, aliases: dict[str, str], available_at: str) -> dict:
+    source_code, instrument_id = canonical_instrument(row.get("ts_code"), aliases)
+    name = str(row.get("name") or "").strip()
+    if not name:
+        raise HistoricalMarketError("INVALID_INSTRUMENT_NAME")
+    start_date = date_text(row.get("start_date"))
+    end_date = date_text(row.get("end_date"), optional=True)
+    if end_date and end_date < start_date:
+        raise HistoricalMarketError("INVALID_NAME_RANGE")
+    return {
+        "instrument_id": instrument_id,
+        "source_code": source_code,
+        "name": name,
+        "start_date": start_date,
+        "end_date": end_date,
+        "announced_date": date_text(row.get("ann_date"), optional=True),
+        "reason": str(row.get("change_reason") or "") or None,
+        "source": "TUSHARE_COMPATIBLE",
+        "available_at": available_at_text(available_at),
+        "source_row_sha256": _row_sha256(row),
     }
 
 
