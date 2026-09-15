@@ -12,6 +12,7 @@ from platform_app.contracts.base import new_id
 from platform_app.modules.identity.models import LoginSession, User
 from platform_app.modules.identity.service import create_user
 from platform_app.modules.operations.models import Outbox
+from platform_app.modules.market.models import Watch
 from platform_app.modules.portfolio.models import Account, CashEntry
 
 config = settings()
@@ -34,5 +35,6 @@ else:
         db.execute(delete(CashEntry).where(CashEntry.account_id.in_(account_ids)))
         db.execute(delete(Account).where(Account.owner_id == user.id))
         db.execute(delete(Outbox).where(Outbox.owner_id == user.id))
+        db.execute(delete(Watch).where(Watch.owner_id == user.id))
         db.execute(delete(LoginSession).where(LoginSession.user_id == user.id))
         db.delete(user)

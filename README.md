@@ -22,11 +22,14 @@ pnpm install
 cd backend
 uv sync --python 3.12
 uv run alembic upgrade head
-uv run uvicorn platform_app.entrypoints.api:app --host 127.0.0.1 --port 8000
+uv run uvicorn platform_app.entrypoints.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
 另开终端在根目录执行 `pnpm dev`，浏览器访问 `http://localhost:5173`。
-创建账户使用后端 CLI（密码交互输入），不在前端内置默认密码。
+创建登录用户使用`uv run platform-cli create-user`（密码交互输入），
+投资账户在“组合与执行”中创建，不在前端内置默认密码。
+首次证券目录通过`uv run platform-cli sync-instruments`显式联网采集；
+当前目录不能用于历史回测股票池。
 
 ## 验证
 
@@ -37,6 +40,10 @@ pnpm build
 pnpm lint
 pnpm test:backend
 ```
+
+启动本地前后端、同步证券目录后，可执行`pnpm exec playwright install chromium`
+与`pnpm test:e2e`。该浏览器场景使用临时合成账户，当前包含真实公开报价访问，
+不属于默认离线CI；截图与报告在忽略目录`test-results/`、`playwright-report/`。
 
 后端集成测试需要隔离 PostgreSQL；只创建和清理带随机标识的合成测试记录，
 不连接旧生产账户。云端切流需完成联合模型验证及真实账本迁移对账。

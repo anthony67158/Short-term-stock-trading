@@ -366,6 +366,295 @@
         }
       }
     },
+    "/api/v1/instruments": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "List Instruments",
+        "operationId": "list_instruments_api_v1_instruments_get",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 80,
+              "default": "",
+              "title": "Query"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(SH|SZ|BJ)\\.\\d{6}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_InstrumentPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{instrument_id}": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Get Instrument",
+        "operationId": "get_instrument_api_v1_instruments__instrument_id__get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+              "title": "Instrument Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_InstrumentView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/instruments/{instrument_id}/quotes": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Get Quote",
+        "operationId": "get_quote_api_v1_instruments__instrument_id__quotes_get",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+              "title": "Instrument Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_QuoteView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchlists": {
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Get Watches",
+        "operationId": "get_watches_api_v1_watchlists_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(SH|SZ|BJ)\\.\\d{6}$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_WatchPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Add Watch",
+        "operationId": "add_watch_api_v1_watchlists_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/watchlists/{instrument_id}": {
+      "delete": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Remove Watch",
+        "operationId": "remove_watch_api_v1_watchlists__instrument_id__delete",
+        "parameters": [
+          {
+            "name": "instrument_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+              "title": "Instrument Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -755,6 +1044,54 @@
         ],
         "title": "Envelope[Health]"
       },
+      "Envelope_InstrumentPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/InstrumentPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[InstrumentPage]"
+      },
+      "Envelope_InstrumentView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/InstrumentView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[InstrumentView]"
+      },
+      "Envelope_QuoteView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/QuoteView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[QuoteView]"
+      },
       "Envelope_UserView_": {
         "properties": {
           "data": {
@@ -770,6 +1107,22 @@
           "data"
         ],
         "title": "Envelope[UserView]"
+      },
+      "Envelope_WatchPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WatchPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[WatchPage]"
       },
       "HTTPValidationError": {
         "properties": {
@@ -802,6 +1155,123 @@
           "database"
         ],
         "title": "Health"
+      },
+      "InstrumentPage": {
+        "properties": {
+          "instruments": {
+            "items": {
+              "$ref": "#/components/schemas/InstrumentView"
+            },
+            "type": "array",
+            "title": "Instruments"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          },
+          "universe": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UniverseView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instruments",
+          "nextCursor",
+          "universe"
+        ],
+        "title": "InstrumentPage"
+      },
+      "InstrumentView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "exchange": {
+            "type": "string",
+            "enum": [
+              "SH",
+              "SZ",
+              "BJ"
+            ],
+            "title": "Exchange"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "board": {
+            "type": "string",
+            "enum": [
+              "MAIN",
+              "STAR",
+              "CHINEXT",
+              "BEIJING",
+              "UNKNOWN"
+            ],
+            "title": "Board"
+          },
+          "firstSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Firstseenat"
+          },
+          "lastSeenAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Lastseenat"
+          },
+          "isCurrent": {
+            "type": "boolean",
+            "title": "Iscurrent"
+          },
+          "executionSupported": {
+            "type": "boolean",
+            "title": "Executionsupported",
+            "default": false
+          },
+          "historyStatus": {
+            "type": "string",
+            "const": "CURRENT_ONLY",
+            "title": "Historystatus",
+            "default": "CURRENT_ONLY"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "code",
+          "exchange",
+          "name",
+          "board",
+          "firstSeenAt",
+          "lastSeenAt",
+          "isCurrent"
+        ],
+        "title": "InstrumentView"
       },
       "LoginInput": {
         "properties": {
@@ -854,6 +1324,202 @@
         "additionalProperties": false,
         "type": "object",
         "title": "Meta"
+      },
+      "QuoteView": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 4,
+                "gt": 0,
+                "max_digits": 18
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "previousClose": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 4,
+                "gt": 0,
+                "max_digits": 18
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousclose"
+          },
+          "open": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 4,
+                "gt": 0,
+                "max_digits": 18
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open"
+          },
+          "high": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 4,
+                "gt": 0,
+                "max_digits": 18
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High"
+          },
+          "low": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 4,
+                "gt": 0,
+                "max_digits": 18
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low"
+          },
+          "changeRatio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Changeratio"
+          },
+          "quotedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Quotedat"
+          },
+          "receivedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Receivedat"
+          },
+          "source": {
+            "type": "string",
+            "const": "腾讯财经",
+            "title": "Source",
+            "default": "腾讯财经"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "title": "Sourceurl"
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "RECENT",
+              "STALE"
+            ],
+            "title": "Freshness"
+          },
+          "missingReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missingreason"
+          },
+          "executionEligible": {
+            "type": "boolean",
+            "const": false,
+            "title": "Executioneligible",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "name",
+          "price",
+          "previousClose",
+          "open",
+          "high",
+          "low",
+          "changeRatio",
+          "quotedAt",
+          "receivedAt",
+          "sourceUrl",
+          "freshness"
+        ],
+        "title": "QuoteView"
+      },
+      "UniverseView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "sourceUrl": {
+            "type": "string",
+            "title": "Sourceurl"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "contentHash": {
+            "type": "string",
+            "title": "Contenthash"
+          },
+          "acquiredAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Acquiredat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "sourceUrl",
+          "count",
+          "contentHash",
+          "acquiredAt"
+        ],
+        "title": "UniverseView"
       },
       "UserView": {
         "properties": {
@@ -913,6 +1579,50 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WatchInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId"
+        ],
+        "title": "WatchInput"
+      },
+      "WatchPage": {
+        "properties": {
+          "instruments": {
+            "items": {
+              "$ref": "#/components/schemas/InstrumentView"
+            },
+            "type": "array",
+            "title": "Instruments"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instruments",
+          "nextCursor"
+        ],
+        "title": "WatchPage"
       }
     }
   }

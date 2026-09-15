@@ -13,10 +13,13 @@ from platform_app.modules.identity.routes import router as identity_router
 from platform_app.modules.identity.service import IdentityError
 from platform_app.modules.portfolio.routes import router as portfolio_router
 from platform_app.modules.portfolio.service import PortfolioError
+from platform_app.modules.market.routes import router as market_router
+from platform_app.adapters.market_public import MarketError
 
 app = FastAPI(title="A股投资平台", version="0.1.0")
 app.include_router(identity_router)
 app.include_router(portfolio_router)
+app.include_router(market_router)
 
 
 @app.middleware("http")
@@ -39,6 +42,7 @@ async def request_boundary(request: Request, call_next):
 
 @app.exception_handler(IdentityError)
 @app.exception_handler(PortfolioError)
+@app.exception_handler(MarketError)
 async def identity_error(_request, exc):
     return error_response(exc.code, exc.message, exc.status)
 

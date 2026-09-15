@@ -58,6 +58,23 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
       }
     }
     expect(errors).toEqual([]);
+    await page.getByRole("link", { name: "市场与选股", exact: true }).click();
+    await page.getByRole("searchbox", { name: "搜索股票" }).fill("000001");
+    await page.getByRole("button", { name: "搜索", exact: true }).click();
+    await page.getByRole("link", { name: "平安银行", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "行情快照" })).toBeVisible();
+    await expect(page.locator(".quote-strip strong").first()).not.toBeEmpty({ timeout: 15_000 });
+    await page.getByRole("button", { name: "加入关注", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "已加入关注" })).toBeVisible();
+    await page.getByRole("link", { name: "返回市场" }).click();
+    await page.getByRole("button", { name: "我的关注" }).click();
+    await expect(page.getByRole("link", { name: "平安银行", exact: true })).toBeVisible();
+    await page.reload();
+    await page.getByRole("button", { name: "我的关注" }).click();
+    await page.getByRole("link", { name: "平安银行", exact: true }).click();
+    await page.getByRole("button", { name: "移出关注", exact: true }).click();
+    await expect(page.getByRole("status").filter({ hasText: "已移出关注" })).toBeVisible();
+    expect(errors).toEqual([]);
     await page.getByRole("button", { name: "退出登录" }).click();
     await expect(page.getByRole("button", { name: "登录工作区" })).toBeVisible();
     await expect(page.getByText("合成期初凭据", { exact: true })).toHaveCount(0);

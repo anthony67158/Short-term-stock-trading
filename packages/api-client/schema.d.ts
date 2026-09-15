@@ -92,6 +92,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/instruments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Instruments */
+        get: operations["list_instruments_api_v1_instruments_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments/{instrument_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Instrument */
+        get: operations["get_instrument_api_v1_instruments__instrument_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/instruments/{instrument_id}/quotes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Quote */
+        get: operations["get_quote_api_v1_instruments__instrument_id__quotes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watchlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Watches */
+        get: operations["get_watches_api_v1_watchlists_get"];
+        put?: never;
+        /** Add Watch */
+        post: operations["add_watch_api_v1_watchlists_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watchlists/{instrument_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Watch */
+        delete: operations["remove_watch_api_v1_watchlists__instrument_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -253,9 +339,29 @@ export interface components {
             data: components["schemas"]["Health"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[InstrumentPage] */
+        Envelope_InstrumentPage_: {
+            data: components["schemas"]["InstrumentPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[InstrumentView] */
+        Envelope_InstrumentView_: {
+            data: components["schemas"]["InstrumentView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[QuoteView] */
+        Envelope_QuoteView_: {
+            data: components["schemas"]["QuoteView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[UserView] */
         Envelope_UserView_: {
             data: components["schemas"]["UserView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[WatchPage] */
+        Envelope_WatchPage_: {
+            data: components["schemas"]["WatchPage"];
             meta?: components["schemas"]["Meta"];
         };
         /** HTTPValidationError */
@@ -269,6 +375,56 @@ export interface components {
             status: string;
             /** Database */
             database: string;
+        };
+        /** InstrumentPage */
+        InstrumentPage: {
+            /** Instruments */
+            instruments: components["schemas"]["InstrumentView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+            universe: components["schemas"]["UniverseView"] | null;
+        };
+        /** InstrumentView */
+        InstrumentView: {
+            /** Id */
+            id: string;
+            /** Code */
+            code: string;
+            /**
+             * Exchange
+             * @enum {string}
+             */
+            exchange: "SH" | "SZ" | "BJ";
+            /** Name */
+            name: string;
+            /**
+             * Board
+             * @enum {string}
+             */
+            board: "MAIN" | "STAR" | "CHINEXT" | "BEIJING" | "UNKNOWN";
+            /**
+             * Firstseenat
+             * Format: date-time
+             */
+            firstSeenAt: string;
+            /**
+             * Lastseenat
+             * Format: date-time
+             */
+            lastSeenAt: string;
+            /** Iscurrent */
+            isCurrent: boolean;
+            /**
+             * Executionsupported
+             * @default false
+             */
+            executionSupported: boolean;
+            /**
+             * Historystatus
+             * @default CURRENT_ONLY
+             * @constant
+             */
+            historyStatus: "CURRENT_ONLY";
         };
         /** LoginInput */
         LoginInput: {
@@ -292,6 +448,74 @@ export interface components {
             /** Revision */
             revision?: number | null;
         };
+        /** QuoteView */
+        QuoteView: {
+            /** Instrumentid */
+            instrumentId: string;
+            /** Name */
+            name: string;
+            /** Price */
+            price: string | null;
+            /** Previousclose */
+            previousClose: string | null;
+            /** Open */
+            open: string | null;
+            /** High */
+            high: string | null;
+            /** Low */
+            low: string | null;
+            /** Changeratio */
+            changeRatio: string | null;
+            /**
+             * Quotedat
+             * Format: date-time
+             */
+            quotedAt: string;
+            /**
+             * Receivedat
+             * Format: date-time
+             */
+            receivedAt: string;
+            /**
+             * Source
+             * @default 腾讯财经
+             * @constant
+             */
+            source: "腾讯财经";
+            /** Sourceurl */
+            sourceUrl: string;
+            /**
+             * Freshness
+             * @enum {string}
+             */
+            freshness: "RECENT" | "STALE";
+            /** Missingreason */
+            missingReason?: string | null;
+            /**
+             * Executioneligible
+             * @default false
+             * @constant
+             */
+            executionEligible: false;
+        };
+        /** UniverseView */
+        UniverseView: {
+            /** Id */
+            id: string;
+            /** Source */
+            source: string;
+            /** Sourceurl */
+            sourceUrl: string;
+            /** Count */
+            count: number;
+            /** Contenthash */
+            contentHash: string;
+            /**
+             * Acquiredat
+             * Format: date-time
+             */
+            acquiredAt: string;
+        };
         /** UserView */
         UserView: {
             /** Id */
@@ -311,6 +535,18 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WatchInput */
+        WatchInput: {
+            /** Instrumentid */
+            instrumentId: string;
+        };
+        /** WatchPage */
+        WatchPage: {
+            /** Instruments */
+            instruments: components["schemas"]["InstrumentView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
         };
     };
     responses: never;
@@ -549,6 +785,193 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Envelope_CashEntryView_"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_instruments_api_v1_instruments_get: {
+        parameters: {
+            query?: {
+                query?: string;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_InstrumentPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_instrument_api_v1_instruments__instrument_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_InstrumentView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quote_api_v1_instruments__instrument_id__quotes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_QuoteView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_watches_api_v1_watchlists_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_WatchPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_watch_api_v1_watchlists_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_watch_api_v1_watchlists__instrument_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

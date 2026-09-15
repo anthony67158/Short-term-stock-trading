@@ -6,7 +6,9 @@ from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description="A股投资平台")
-    parser.add_argument("command", choices=["export-contracts", "health", "create-user"])
+    parser.add_argument("command", choices=[
+        "export-contracts", "health", "create-user", "sync-instruments",
+    ])
     parser.add_argument("--username")
     args = parser.parse_args()
     if args.command == "export-contracts":
@@ -21,6 +23,10 @@ def main():
         from platform_app.entrypoints.api import health
 
         print(health().model_dump_json(by_alias=True))
+    elif args.command == "sync-instruments":
+        from platform_app.modules.market.service import sync_universe
+
+        print(sync_universe().model_dump_json(by_alias=True))
     elif args.command == "create-user":
         from platform_app.modules.identity.service import create_user
 

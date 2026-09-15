@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { Button, Empty } from "../components/Controls";
 import { Login } from "./Login";
 import { Portfolio } from "../features/portfolio/Portfolio";
+import { Market, Research } from "../features/market/Market";
 import "../styles/global.css";
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 15_000 } } });
@@ -64,7 +65,10 @@ function Workspace() {
     </aside>
     <main id="main" className="workspace"><Routes>
       <Route path="/portfolio" element={<Portfolio />} />
-      {navigation.filter(({ path }) => path !== "/portfolio").map(({ path, label }) => <Route key={path} path={path} element={<>
+      <Route path="/market" element={<Market />} />
+      <Route path="/research" element={<Research />} />
+      <Route path="/research/:instrumentId" element={<Research />} />
+      {navigation.filter(({ path }) => !["/portfolio", "/market", "/research"].includes(path)).map(({ path, label }) => <Route key={path} path={path} element={<>
         <header className="workspace-header"><h1>{label}</h1><span className="secondary">研究与账户工作区</span></header>
         <div className="workspace-content"><Empty title="此工作区正在建设"><CircleHelp size={20} />模块接入后将在这里展示真实数据与任务结果。</Empty></div>
       </>} />)}
