@@ -7,9 +7,12 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description="A股投资平台")
     parser.add_argument("command", choices=[
-        "export-contracts", "health", "create-user", "sync-instruments",
+        "export-contracts", "health", "create-user", "sync-instruments", "audit-market-archive",
     ])
     parser.add_argument("--username")
+    parser.add_argument("--archive-root", action="append", type=Path)
+    parser.add_argument("--securities-file", type=Path)
+    parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.command == "export-contracts":
         from platform_app.entrypoints.api import app
@@ -27,6 +30,16 @@ def main():
         from platform_app.modules.market.service import sync_universe
 
         print(sync_universe().model_dump_json(by_alias=True))
+    elif args.command == "audit-market-archive":
+        from platform_app.modules.experiments.dataset_audit import audit_roots
+
+        if not args.archive_root or not args.output:
+            parser.error("archive-root and output are required")
+        report = audit_roots(args.archive_root, args.securities_file)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        print(json.dumps({"chunks": report["chunkCount"], "from": report["from"],
+                          "to": report["to"], "productionEligible": False}))
     elif args.command == "create-user":
         from platform_app.modules.identity.service import create_user
 
