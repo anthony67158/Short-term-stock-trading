@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import gzip
+import hashlib
 import json
 import math
 import os
@@ -55,6 +56,14 @@ def _open_json(path):
     opener = gzip.open if str(path).endswith(".gz") else open
     with opener(path, "rt", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _finite(value):
@@ -311,10 +320,16 @@ def main():
     parser.add_argument("--report")
     args = parser.parse_args()
 
+    alpha_snapshot = os.path.abspath(
+        os.path.expanduser(args.alpha_snapshot),
+    )
+    alpha_snapshot_sha256 = _sha256_file(alpha_snapshot)
     payload = build_v4_outcomes(
         _open_json(args.outcomes),
-        _open_json(args.alpha_snapshot),
+        _open_json(alpha_snapshot),
     )
+    payload["source"]["alphaSnapshotSha256"] = alpha_snapshot_sha256
+    payload["summary"]["alphaSnapshotSha256"] = alpha_snapshot_sha256
     _write_json(args.output, payload)
     if args.report:
         _write_json(args.report, payload["summary"])

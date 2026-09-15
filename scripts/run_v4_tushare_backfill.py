@@ -172,6 +172,34 @@ def _sha256_file(path):
     return digest.hexdigest()
 
 
+def _alpha_snapshot_sha256(args):
+    cached = getattr(args, "_alpha_snapshot_sha256", None)
+    if cached:
+        return cached
+    path = Path(args.alpha_snapshot).expanduser().resolve()
+    if not path.is_file():
+        raise RuntimeError(f"缺少无前视Alpha快照: {path}")
+    digest = _sha256_file(path)
+    setattr(args, "_alpha_snapshot_sha256", digest)
+    return digest
+
+
+def _v4_cache_matches_alpha(args, directory):
+    outcome = directory / "opportunity-outcomes-v4.json.gz"
+    report = directory / "v4-report.json"
+    if not outcome.is_file() or not report.is_file():
+        return False
+    try:
+        with open(report, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, ValueError):
+        return False
+    return (
+        payload.get("alphaSnapshotSha256")
+        == _alpha_snapshot_sha256(args)
+    )
+
+
 def _write_chunk_audit(directory):
     minute_files = sorted((directory / "minutes").glob("*.json.gz"))
     required = [
@@ -378,12 +406,23 @@ def _run_chunk(args, chunk):
     v4_outcome = directory / "opportunity-outcomes-v4.json.gz"
     if outcome.is_file() and outcome.stat().st_size > 1024:
         refresh_v4 = bool(getattr(args, "refresh_v4", False))
-        if refresh_v4 or not v4_outcome.is_file():
+        cache_matches_alpha = (
+            not refresh_v4
+            and _v4_cache_matches_alpha(args, directory)
+        )
+        if not cache_matches_alpha:
             _build_v4_chunk(args, directory)
-        if refresh_v4 or not (directory / "audit.json").is_file():
+        if (
+            not cache_matches_alpha
+            or not (directory / "audit.json").is_file()
+        ):
             _write_chunk_audit(directory)
         print(json.dumps({
-            "stage": "CHUNK_REBUILT" if refresh_v4 else "CHUNK_CACHED",
+            "stage": (
+                "CHUNK_CACHED"
+                if cache_matches_alpha
+                else "CHUNK_REBUILT"
+            ),
             **chunk,
             "output": str(v4_outcome),
         }), flush=True)

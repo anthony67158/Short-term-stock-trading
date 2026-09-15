@@ -1,7 +1,10 @@
 import importlib.util
+import json
 import os
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -59,6 +62,46 @@ def alpha(date, code="600001"):
 
 
 class BuildV4ReviewOutcomesTest(unittest.TestCase):
+    def test_main_records_alpha_snapshot_hash_in_output_and_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            outcomes_path = os.path.join(directory, "outcomes.json")
+            alpha_path = os.path.join(directory, "alpha.json")
+            output_path = os.path.join(directory, "v4.json")
+            report_path = os.path.join(directory, "report.json")
+            with open(outcomes_path, "w", encoding="utf-8") as handle:
+                json.dump({"outcomes": [outcome()]}, handle)
+            with open(alpha_path, "w", encoding="utf-8") as handle:
+                json.dump({"rows": [alpha("20260910")]}, handle)
+
+            with patch.object(
+                sys,
+                "argv",
+                [
+                    "build_v4_review_outcomes.py",
+                    "--outcomes",
+                    outcomes_path,
+                    "--alpha-snapshot",
+                    alpha_path,
+                    "--output",
+                    output_path,
+                    "--report",
+                    report_path,
+                ],
+            ):
+                builder.main()
+
+            expected = builder._sha256_file(alpha_path)
+            with open(output_path, encoding="utf-8") as handle:
+                output = json.load(handle)
+            with open(report_path, encoding="utf-8") as handle:
+                report = json.load(handle)
+
+        self.assertEqual(
+            output["source"]["alphaSnapshotSha256"],
+            expected,
+        )
+        self.assertEqual(report["alphaSnapshotSha256"], expected)
+
     def test_close_uses_same_day_alpha_and_emits_176_features(self):
         value, reason = builder.augment_outcome(
             outcome(mode="CLOSE"),

@@ -311,6 +311,47 @@ class V4TushareBackfillPlanTest(unittest.TestCase):
             build.assert_called_once()
             audit.assert_called_once()
 
+    def test_changed_alpha_snapshot_rebuilds_cached_chunk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            chunk = os.path.join(directory, "chunk-01")
+            os.makedirs(chunk)
+            alpha_path = os.path.join(directory, "alpha.json.gz")
+            with open(alpha_path, "wb") as handle:
+                handle.write(b"current-alpha")
+            for filename in (
+                "opportunity-outcomes-combined.json",
+                "opportunity-outcomes-v4.json.gz",
+                "audit.json",
+            ):
+                with open(
+                    os.path.join(chunk, filename),
+                    "wb",
+                ) as handle:
+                    handle.write(b"x" * 2048)
+            with open(
+                os.path.join(chunk, "v4-report.json"),
+                "w",
+                encoding="utf-8",
+            ) as handle:
+                json.dump({"alphaSnapshotSha256": "stale"}, handle)
+            args = Namespace(
+                output=directory,
+                alpha_snapshot=alpha_path,
+                refresh_v4=False,
+            )
+
+            with patch.object(
+                runner,
+                "_build_v4_chunk",
+            ) as build, patch.object(
+                runner,
+                "_write_chunk_audit",
+            ) as audit:
+                runner._run_chunk(args, {"index": 1})
+
+            build.assert_called_once()
+            audit.assert_called_once()
+
     def test_merge_uses_v4_chunk_outputs(self):
         with tempfile.TemporaryDirectory() as directory:
             for index in (1, 2):
