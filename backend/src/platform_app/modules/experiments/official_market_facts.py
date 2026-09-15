@@ -41,6 +41,17 @@ OFFICIAL_CODE_MIGRATIONS = (
 
 OFFICIAL_LISTING_STATUS_PERIODS = (
     {
+        "instrument_id": "SH.600732",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20160408",
+        "effective_to": "20170606",
+        "source_urls": (
+            "http://www.sse.com.cn/disclosure/announcement/general/c/c_20160401_4071753.shtml",
+            "http://static.sse.com.cn/disclosure/listedinfo/announcement/"
+            "c/2017-06-06/600732_20170606_1.pdf",
+        ),
+    },
+    {
         "instrument_id": "SH.600656",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20150528",

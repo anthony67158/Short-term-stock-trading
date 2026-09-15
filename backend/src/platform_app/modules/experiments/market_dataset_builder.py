@@ -219,6 +219,38 @@ class MarketDatasetBuilder:
             for row in rows
         }
 
+    def sync_official_listing_statuses(self) -> dict:
+        known_ids = {
+            row["instrument_id"]
+            for row in self.dataset.db.execute("SELECT instrument_id FROM instruments")
+        }
+        observed_at = self.observed_at()
+        rows = _listing_status_rows(known_ids, observed_at)
+        payload = [
+            {key: value for key, value in row.items() if key != "evidence_observed_at"}
+            for row in rows
+        ]
+        facts_hash = canonical_sha256(payload)
+        partition_key = f"listing-status-periods:{facts_hash}"
+        if self.dataset.has_checkpoint("official_market_facts", partition_key):
+            return {"status": "SKIPPED", "listingStatusPeriods": len(rows)}
+        self.dataset.write_facts(
+            "listing_status_periods",
+            rows,
+            key_fields=("instrument_id", "status", "effective_from"),
+            ignored_on_replay=("evidence_observed_at",),
+        )
+        self.dataset.checkpoint(
+            "official_market_facts",
+            partition_key,
+            payload,
+            source="OFFICIAL_EXCHANGE",
+            first_seen_at=observed_at,
+            available_at=observed_at,
+            availability_method="DIRECT_OBSERVATION",
+        )
+        return {"status": "COMPLETED", "listingStatusPeriods": len(rows)}
+
     def sync_reference(self, start_date: str, end_date: str) -> dict:
         if self.dataset.has_checkpoint("reference", f"{start_date}:{end_date}"):
             return {"status": "SKIPPED"}
@@ -315,6 +347,7 @@ class MarketDatasetBuilder:
         }
 
     def sync_daily_partition(self, trade_date: str) -> dict:
+        self.sync_official_listing_statuses()
         if self.dataset.has_checkpoint("daily", trade_date):
             return {"status": "SKIPPED", "tradeDate": trade_date}
         observed_at = self.observed_at()

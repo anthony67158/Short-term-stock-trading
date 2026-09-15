@@ -234,6 +234,40 @@ def test_historical_listing_status_and_pre_bse_rows_explain_coverage(tmp_path):
         assert details["listingStatusExplanations"] == ["SH.600656", "SZ.000033"]
 
 
+def test_daily_sync_repairs_new_official_listing_status_facts(tmp_path):
+    data = responses()
+    data[("stock_basic", "L")].append(
+        stock("600732.SH", "Suspended Shanghai", "主板", "SSE", "19960816")
+    )
+    trade_date = "20160408"
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+        for code in [*traded_codes, "600732.SH"]
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="resumed-official-facts", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+        ds.db.execute("DELETE FROM listing_status_periods WHERE instrument_id = 'SH.600732'")
+        ds.db.commit()
+
+        result = builder.sync_daily_partition(trade_date)
+
+        assert result["dailyBars"] == 3
+        assert ds.listing_status_explanations(trade_date) == {"SH.600732": ["SUSPENDED_LISTING"]}
+        assert (
+            ds.db.execute(
+                "SELECT COUNT(*) FROM sync_checkpoints WHERE stream = 'official_market_facts'"
+            ).fetchone()[0]
+            == 1
+        )
+
+
 def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [
