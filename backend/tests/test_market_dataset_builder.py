@@ -787,6 +787,15 @@ def test_historical_tianxiang_listing_suspension_explains_missing_daily(tmp_path
             "20210315",
         ),
         (
+            "600614.SH",
+            "SH.600614",
+            "Pengqi",
+            "19920828",
+            "20210721",
+            "20200717",
+            "20210602",
+        ),
+        (
             "000760.SZ",
             "SZ.000760",
             "Steyr",
