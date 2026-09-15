@@ -399,4 +399,13 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
             "2021-07-16/26041616-c4cf-4c32-8652-2eec5262386b.PDF",
         ),
     },
+    {
+        "instrument_id": "SZ.300431",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20200708",
+        "effective_to": "20200921",
+        "source_urls": (
+            "http://www.szse.cn/www/disclosure/notice/t20200828_581149.html",
+        ),
+    },
 )

@@ -795,6 +795,15 @@ def test_historical_tianxiang_listing_suspension_explains_missing_daily(tmp_path
             "20200706",
             "20210610",
         ),
+        (
+            "300431.SZ",
+            "SZ.300431",
+            "Baofeng",
+            "20150324",
+            "20201110",
+            "20200708",
+            "20200921",
+        ),
     ],
 )
 def test_historical_2020_listing_suspensions_explain_missing_daily(
