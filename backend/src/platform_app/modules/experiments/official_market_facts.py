@@ -39,6 +39,27 @@ OFFICIAL_CODE_MIGRATIONS = (
     },
 )
 
+OFFICIAL_RETIRED_SOURCE_CODES = (
+    {
+        "source_code": "600087.SH",
+        "retired_from": "20140605",
+        "reason": "DELISTED",
+        "source_urls": (
+            "http://www.sse.com.cn/regulation/supervision/dynamic/"
+            "c/c_20240321_5736672.shtml",
+        ),
+    },
+    {
+        "source_code": "601268.SH",
+        "retired_from": "20150521",
+        "reason": "DELISTED",
+        "source_urls": (
+            "http://www.sse.com.cn/aboutus/mediacenter/hotandd/"
+            "c/c_20150912_3988860.shtml",
+        ),
+    },
+)
+
 OFFICIAL_LISTING_STATUS_PERIODS = (
     {
         "instrument_id": "SZ.000950",

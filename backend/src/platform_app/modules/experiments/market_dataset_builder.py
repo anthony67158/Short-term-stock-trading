@@ -2,7 +2,7 @@
 
 import json
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from platform_app.adapters.market_tushare import (
     BSE_MAPPING_FIELDS,
@@ -24,6 +24,7 @@ from platform_app.adapters.market_tushare import (
 from platform_app.modules.experiments.official_market_facts import (
     OFFICIAL_CODE_MIGRATIONS,
     OFFICIAL_LISTING_STATUS_PERIODS,
+    OFFICIAL_RETIRED_SOURCE_CODES,
 )
 from platform_app.modules.experiments.market_dataset import (
     MarketDataset,
@@ -40,6 +41,7 @@ NAME_CHANGE_PAGE_SIZE = 5000
 MINUTE_AMOUNT_TOLERANCE_RATE = Decimal("0.0005")
 MINUTE_AMOUNT_TOLERANCE_CNY = Decimal("2")
 MINUTE_VOLUME_TOLERANCE_SHARES = Decimal("100")
+ALIAS_DECIMAL_TOLERANCE = Decimal("0.0005")
 
 
 def _observed_at() -> str:
@@ -123,6 +125,40 @@ def _minute_aggregation(rows: list[dict], daily: dict) -> dict:
     }
 
 
+def _filter_non_a_share_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    kept = []
+    discarded = []
+    for row in rows:
+        source_code = str(row.get("ts_code") or "").upper()
+        code, separator, exchange = source_code.partition(".")
+        is_b_share = (
+            separator == "."
+            and len(code) == 6
+            and code.isdigit()
+            and (
+                (exchange == "SH" and code.startswith("900"))
+                or (exchange == "SZ" and code.startswith("200"))
+            )
+        )
+        (discarded if is_b_share else kept).append(row)
+    return kept, discarded
+
+
+def _filter_retired_source_rows(
+    rows: list[dict], trade_date: str
+) -> tuple[list[dict], list[dict]]:
+    retired_from = {
+        fact["source_code"]: fact["retired_from"] for fact in OFFICIAL_RETIRED_SOURCE_CODES
+    }
+    kept = []
+    discarded = []
+    for row in rows:
+        source_code = str(row.get("ts_code") or "").upper()
+        is_retired = source_code in retired_from and trade_date >= retired_from[source_code]
+        (discarded if is_retired else kept).append(row)
+    return kept, discarded
+
+
 def _filter_pre_listing_bse_rows(
     rows: list[dict],
     *,
@@ -195,6 +231,7 @@ def _deduplicate_alias_rows(
     *,
     key,
     preferred_source_code,
+    decimal_fields: frozenset[str] = frozenset(),
 ) -> tuple[list[dict], list[dict]]:
     grouped: dict[tuple, list[dict]] = {}
     for row in rows:
@@ -218,7 +255,25 @@ def _deduplicate_alias_rows(
             {field: value for field, value in row.items() if field not in ignored}
             for row in candidates
         ]
-        if any(row != comparable[0] for row in comparable[1:]):
+        reference = comparable[0]
+        conflicts = []
+        for candidate in comparable[1:]:
+            for field in reference.keys() | candidate.keys():
+                if reference.get(field) == candidate.get(field):
+                    continue
+                if field in decimal_fields:
+                    left = Decimal(str(reference.get(field)))
+                    right = Decimal(str(candidate.get(field)))
+                    shared_exponent = max(left.as_tuple().exponent, right.as_tuple().exponent)
+                    quantum = Decimal(1).scaleb(shared_exponent)
+                    if (
+                        abs(left - right) <= ALIAS_DECIMAL_TOLERANCE
+                        and left.quantize(quantum, rounding=ROUND_HALF_UP)
+                        == right.quantize(quantum, rounding=ROUND_HALF_UP)
+                    ):
+                        continue
+                conflicts.append(field)
+        if conflicts:
             raise MarketDatasetError("UPSTREAM_ALIAS_VALUE_CONFLICT")
         preferred = preferred_source_code(item_key[0], item_key[1])
         selected = [
@@ -525,6 +580,8 @@ class MarketDatasetBuilder:
         )
         if len(raw_daily) >= 6000:
             raise MarketDatasetError("DAILY_MAY_BE_TRUNCATED")
+        raw_daily, retired_daily = _filter_retired_source_rows(raw_daily, trade_date)
+        raw_daily, non_a_share_daily = _filter_non_a_share_rows(raw_daily)
         raw_daily, pre_listing_daily = _filter_pre_listing_bse_rows(
             raw_daily,
             trade_date=trade_date,
@@ -542,6 +599,8 @@ class MarketDatasetBuilder:
             self.client.rows("adj_factor", {"trade_date": trade_date}, ADJUSTMENT_FIELDS),
             trade_date,
         )
+        raw_factors, retired_factors = _filter_retired_source_rows(raw_factors, trade_date)
+        raw_factors, non_a_share_factors = _filter_non_a_share_rows(raw_factors)
         raw_factors, pre_listing_factors = _filter_pre_listing_bse_rows(
             raw_factors,
             trade_date=trade_date,
@@ -565,12 +624,17 @@ class MarketDatasetBuilder:
             factors,
             key=lambda row: (row["instrument_id"], row["trade_date"]),
             preferred_source_code=self.dataset.source_code_for_date,
+            decimal_fields=frozenset({"factor"}),
         )
 
         raw_suspensions = _validate_partition_rows(
             self.client.rows("suspend_d", {"trade_date": trade_date}, SUSPENSION_FIELDS),
             trade_date,
         )
+        raw_suspensions, retired_suspensions = _filter_retired_source_rows(
+            raw_suspensions, trade_date
+        )
+        raw_suspensions, non_a_share_suspensions = _filter_non_a_share_rows(raw_suspensions)
         raw_suspensions, pre_listing_suspensions = _filter_pre_listing_bse_rows(
             raw_suspensions,
             trade_date=trade_date,
@@ -635,6 +699,16 @@ class MarketDatasetBuilder:
             available_at=available_at,
             availability_method="RECONSTRUCTED_FROM_VENDOR_SCHEDULE",
             details={
+                "discardedRetiredSourceRows": {
+                    "daily": _discard_audit(retired_daily),
+                    "adjustmentFactors": _discard_audit(retired_factors),
+                    "suspensions": _discard_audit(retired_suspensions),
+                },
+                "discardedNonAShareRows": {
+                    "daily": _discard_audit(non_a_share_daily),
+                    "adjustmentFactors": _discard_audit(non_a_share_factors),
+                    "suspensions": _discard_audit(non_a_share_suspensions),
+                },
                 "discardedPreListingBseRows": {
                     "daily": _discard_audit(pre_listing_daily),
                     "adjustmentFactors": _discard_audit(pre_listing_factors),
@@ -655,6 +729,19 @@ class MarketDatasetBuilder:
             "dailyBars": len(daily),
             "adjustmentFactors": len(factors),
             "suspensions": len(suspensions),
+            "discardedRetiredSourceRows": sum(
+                map(len, (retired_daily, retired_factors, retired_suspensions))
+            ),
+            "discardedNonAShareRows": sum(
+                map(
+                    len,
+                    (
+                        non_a_share_daily,
+                        non_a_share_factors,
+                        non_a_share_suspensions,
+                    ),
+                )
+            ),
             "discardedPreListingBseRows": sum(
                 map(
                     len,

@@ -816,6 +816,81 @@ def test_builder_discards_future_bse_backfill_from_all_daily_streams(tmp_path):
         assert result["dailyBars"] == 4
 
 
+def test_builder_audits_non_a_share_rows(tmp_path):
+    data = responses()
+    trade_date = "20260915"
+    data[("daily", trade_date)].append(bar("900906.SH", trade_date))
+    data[("adj_factor", trade_date)].append(
+        {"ts_code": "900930.SH", "trade_date": trade_date, "adj_factor": "1"}
+    )
+    data[("suspend_d", trade_date)].append(
+        {
+            "ts_code": "200002.SZ",
+            "trade_date": trade_date,
+            "suspend_type": "S",
+            "suspend_timing": None,
+        }
+    )
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="non-a-share-filter", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+        details = json.loads(
+            ds.db.execute(
+                "SELECT details_json FROM sync_checkpoints "
+                "WHERE stream = 'daily' AND partition_key = ?",
+                (trade_date,),
+            ).fetchone()[0]
+        )
+
+        assert result["discardedNonAShareRows"] == 3
+        assert details["discardedNonAShareRows"]["daily"]["count"] == 1
+        assert details["discardedNonAShareRows"]["adjustmentFactors"]["count"] == 1
+        assert details["discardedNonAShareRows"]["suspensions"]["count"] == 1
+        assert len(details["discardedNonAShareRows"]["daily"]["sourceRowsSha256"]) == 64
+
+
+def test_builder_audits_rows_for_officially_retired_source_codes(tmp_path):
+    data = responses()
+    trade_date = "20260915"
+    data[("daily", trade_date)].append(bar("600087.SH", trade_date))
+    data[("adj_factor", trade_date)].append(
+        {"ts_code": "601268.SH", "trade_date": trade_date, "adj_factor": "1"}
+    )
+    data[("suspend_d", trade_date)].append(
+        {
+            "ts_code": "600087.SH",
+            "trade_date": trade_date,
+            "suspend_type": "S",
+            "suspend_timing": None,
+        }
+    )
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="retired-source-filter", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+        details = json.loads(
+            ds.db.execute(
+                "SELECT details_json FROM sync_checkpoints "
+                "WHERE stream = 'daily' AND partition_key = ?",
+                (trade_date,),
+            ).fetchone()[0]
+        )
+
+        assert result["discardedRetiredSourceRows"] == 3
+        assert details["discardedRetiredSourceRows"]["daily"]["count"] == 1
+        assert details["discardedRetiredSourceRows"]["adjustmentFactors"]["count"] == 1
+        assert details["discardedRetiredSourceRows"]["suspensions"]["count"] == 1
+
+
 def test_builder_rejects_post_delisting_daily_bar(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [
@@ -866,6 +941,45 @@ def test_builder_rejects_unclassified_adjustment_factor(tmp_path):
         builder.sync_reference("20160101", "20260915")
         with pytest.raises(MarketDatasetError, match="ADJUSTMENT_HAS_OUT_OF_UNIVERSE_INSTRUMENTS"):
             builder.sync_daily_partition(trade_date)
+
+
+def test_builder_prefers_historical_alias_when_factors_only_differ_by_rounding(tmp_path):
+    data = responses()
+    data[("stock_basic", "L")].append(
+        stock("001872.SZ", "Renamed Port", "主板", "SZSE", "19930505")
+    )
+    trade_date = "20180816"
+    codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [
+        *(bar(code, trade_date) for code in codes),
+        bar("000022.SZ", trade_date),
+        bar("001872.SZ", trade_date),
+    ]
+    data[("adj_factor", trade_date)] = [
+        *(
+            {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+            for code in codes
+        ),
+        {"ts_code": "000022.SZ", "trade_date": trade_date, "adj_factor": "4.189"},
+        {"ts_code": "001872.SZ", "trade_date": trade_date, "adj_factor": "4.1885"},
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="alias-rounding", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+        factor = ds.db.execute(
+            "SELECT source_code, factor FROM adjustment_factors "
+            "WHERE instrument_id = 'SZ.001872' AND trade_date = ?",
+            (trade_date,),
+        ).fetchone()
+
+        assert result["discardedAliasDuplicates"] == 2
+        assert tuple(factor) == ("000022.SZ", "4.189")
 
 
 def test_builder_rejects_conflicting_alias_duplicate(tmp_path):
