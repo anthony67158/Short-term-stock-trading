@@ -6,6 +6,7 @@ import { gunzipSync } from 'node:zlib'
 
 import {
   ACCOUNT_RISK_PROFILES,
+  ACCOUNT_RISK_PROFILE_VERSION,
 } from '../../shared/accountRiskProfiles.js'
 import {
   cancelDecisionOrder,
@@ -204,7 +205,13 @@ function plannedPrices(row) {
   return entry > stop && stop > 0 ? { entry, stop } : null
 }
 
-function sharesForSignal(state, row, prices, profile) {
+function sharesForSignal(
+  state,
+  row,
+  prices,
+  profile,
+  currentOpenRiskCash = 0,
+) {
   const planned = plannedPrices(row)
   if (!planned) return 0
   const equity = equityOf(state, prices)
@@ -215,6 +222,14 @@ function sharesForSignal(state, row, prices, profile) {
     equity * profile.singleTradeRiskPct / 100
       / riskPerShare
       / 100,
+  ) * 100
+  const openRiskCapacity = Math.max(
+    0,
+    equity * profile.maximumOpenRiskPct / 100
+      - currentOpenRiskCash,
+  )
+  const openRiskShares = Math.floor(
+    openRiskCapacity / riskPerShare / 100,
   ) * 100
   const singleShares = Math.floor(
     equity * profile.maximumSinglePositionPct / 100
@@ -242,6 +257,7 @@ function sharesForSignal(state, row, prices, profile) {
     0,
     Math.min(
       riskShares,
+      openRiskShares,
       singleShares,
       positionShares,
       cashShares,
@@ -291,6 +307,7 @@ export function replayReviewAccount({
   const skipped = []
   let maximumSingleTradeRiskPct = 0
   let maximumOpenRiskPct = 0
+  let maximumObservedOpenRiskPct = 0
   const openRisk = new Map()
 
   for (const date of dates) {
@@ -308,7 +325,10 @@ export function replayReviewAccount({
       if (!accepted.has(row.decisionId)) continue
       const code = row.code
       const position = state.positions[code]
-      if (!position) continue
+      if (!position) {
+        if (!hasOpenExposure(state, code)) openRisk.delete(code)
+        continue
+      }
       const quantityShares = position.layers.reduce(
         (sum, layer) => sum + layer.quantityShares,
         0,
@@ -352,6 +372,10 @@ export function replayReviewAccount({
         row,
         prices,
         profile,
+        [...openRisk.values()].reduce(
+          (sum, item) => sum + item.riskCash,
+          0,
+        ),
       )
       if (quantityShares < 100) {
         skipped.push({
@@ -404,6 +428,13 @@ export function replayReviewAccount({
         riskCash:
           (planned.entry - planned.stop) * quantityShares,
       })
+      maximumOpenRiskPct = Math.max(
+        maximumOpenRiskPct,
+        [...openRisk.values()].reduce(
+          (sum, item) => sum + item.riskCash,
+          0,
+        ) / Math.max(1, equityOf(state, prices)) * 100,
+      )
     }
 
     for (const item of entries) {
@@ -425,11 +456,14 @@ export function replayReviewAccount({
         orderId('buy', item.row),
         date,
       )
+      if (!hasOpenExposure(state, item.row.code)) {
+        openRisk.delete(item.row.code)
+      }
     }
 
     const equity = equityOf(state, prices)
-    maximumOpenRiskPct = Math.max(
-      maximumOpenRiskPct,
+    maximumObservedOpenRiskPct = Math.max(
+      maximumObservedOpenRiskPct,
       [...openRisk.values()].reduce(
         (sum, item) => sum + item.riskCash,
         0,
@@ -447,10 +481,12 @@ export function replayReviewAccount({
   }
   return {
     schemaVersion: REVIEW_V3_ACCOUNT_REPLAY_VERSION,
+    riskProfileVersion: ACCOUNT_RISK_PROFILE_VERSION,
     riskProfile,
     riskEvidence: {
       maximumSingleTradeRiskPct,
       maximumOpenRiskPct,
+      maximumObservedOpenRiskPct,
     },
     acceptedCount: accepted.size,
     skipped,
