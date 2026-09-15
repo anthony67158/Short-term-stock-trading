@@ -4,7 +4,7 @@ from fastapi import APIRouter, Header, Query
 
 from platform_app.contracts.base import Contract, Envelope
 from platform_app.modules.identity.routes import CurrentUser
-from platform_app.modules.portfolio import executions, service
+from platform_app.modules.portfolio import executions, reconciliation, service
 from platform_app.modules.portfolio.execution_contracts import (
     ExecutionInput, ExecutionPage, ExecutionView, PositionPage,
 )
@@ -76,3 +76,8 @@ def positions(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ):
     return Envelope(data=executions.positions(user.id, account_id, cursor, limit))
+
+
+@router.get("/{account_id}/reconciliation", response_model=Envelope[reconciliation.ReconciliationView])
+def reconcile(account_id: str, user: CurrentUser):
+    return Envelope(data=reconciliation.reconcile(user.id, account_id))

@@ -127,6 +127,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/reconciliation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Reconcile */
+        get: operations["reconcile_api_v1_accounts__account_id__reconciliation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instruments": {
         parameters: {
             query?: never;
@@ -585,6 +602,17 @@ export interface components {
             /** Evidenceids */
             evidenceIds: string[];
         };
+        /** Discrepancy */
+        Discrepancy: {
+            /** Reference */
+            reference: string;
+            /** Field */
+            field: string;
+            /** Expected */
+            expected: string;
+            /** Actual */
+            actual: string;
+        };
         /** Envelope[AccountBalance] */
         Envelope_AccountBalance_: {
             data: components["schemas"]["AccountBalance"];
@@ -663,6 +691,11 @@ export interface components {
         /** Envelope[QuoteView] */
         Envelope_QuoteView_: {
             data: components["schemas"]["QuoteView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[ReconciliationView] */
+        Envelope_ReconciliationView_: {
+            data: components["schemas"]["ReconciliationView"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[ResearchCapability] */
@@ -1029,6 +1062,32 @@ export interface components {
              * @constant
              */
             executionEligible: false;
+        };
+        /** ReconciliationView */
+        ReconciliationView: {
+            /** Accountversion */
+            accountVersion: number;
+            /** Cashbalance */
+            cashBalance: string;
+            /** Replaycashbalance */
+            replayCashBalance: string;
+            /** Executioncount */
+            executionCount: number;
+            /** Openlotcount */
+            openLotCount: number;
+            /** Discrepancycount */
+            discrepancyCount: number;
+            /** Discrepancies */
+            discrepancies: components["schemas"]["Discrepancy"][];
+            /** Matches */
+            matches: boolean;
+            /**
+             * Scope
+             * @default INTERNAL_LEDGER
+             */
+            scope: string;
+            /** Checkedat */
+            checkedAt?: string;
         };
         /** ResearchCapability */
         ResearchCapability: {
@@ -1439,6 +1498,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_PositionPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_api_v1_accounts__account_id__reconciliation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ReconciliationView_"];
                 };
             };
             /** @description Validation Error */

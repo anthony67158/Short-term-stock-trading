@@ -568,6 +568,48 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/reconciliation": {
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Reconcile",
+        "operationId": "reconcile_api_v1_accounts__account_id__reconciliation_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReconciliationView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/instruments": {
       "get": {
         "tags": [
@@ -1839,6 +1881,35 @@
         ],
         "title": "Claim"
       },
+      "Discrepancy": {
+        "properties": {
+          "reference": {
+            "type": "string",
+            "title": "Reference"
+          },
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "expected": {
+            "type": "string",
+            "title": "Expected"
+          },
+          "actual": {
+            "type": "string",
+            "title": "Actual"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reference",
+          "field",
+          "expected",
+          "actual"
+        ],
+        "title": "Discrepancy"
+      },
       "Envelope_AccountBalance_": {
         "properties": {
           "data": {
@@ -2094,6 +2165,22 @@
           "data"
         ],
         "title": "Envelope[QuoteView]"
+      },
+      "Envelope_ReconciliationView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReconciliationView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReconciliationView]"
       },
       "Envelope_ResearchCapability_": {
         "properties": {
@@ -3058,6 +3145,71 @@
           "freshness"
         ],
         "title": "QuoteView"
+      },
+      "ReconciliationView": {
+        "properties": {
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "cashBalance": {
+            "type": "string",
+            "title": "Cashbalance",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "replayCashBalance": {
+            "type": "string",
+            "title": "Replaycashbalance",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "executionCount": {
+            "type": "integer",
+            "title": "Executioncount"
+          },
+          "openLotCount": {
+            "type": "integer",
+            "title": "Openlotcount"
+          },
+          "discrepancyCount": {
+            "type": "integer",
+            "title": "Discrepancycount"
+          },
+          "discrepancies": {
+            "items": {
+              "$ref": "#/components/schemas/Discrepancy"
+            },
+            "type": "array",
+            "title": "Discrepancies"
+          },
+          "matches": {
+            "type": "boolean",
+            "title": "Matches"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": "INTERNAL_LEDGER"
+          },
+          "checkedAt": {
+            "type": "string",
+            "title": "Checkedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "accountVersion",
+          "cashBalance",
+          "replayCashBalance",
+          "executionCount",
+          "openLotCount",
+          "discrepancyCount",
+          "discrepancies",
+          "matches"
+        ],
+        "title": "ReconciliationView"
       },
       "ResearchCapability": {
         "properties": {

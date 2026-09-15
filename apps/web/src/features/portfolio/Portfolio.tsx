@@ -5,6 +5,7 @@ import type { components } from "../../../../../packages/api-client/schema";
 import { api, errorMessage } from "../../lib/api";
 import { Button, Empty, Input } from "../../components/Controls";
 import { Executions } from "./Executions";
+import { Reconciliation } from "./Reconciliation";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
@@ -138,6 +139,7 @@ function AccountLedger({ accountId }: { accountId: string }) {
           </tr>)}</tbody></table></div>}
       {history.hasNextPage && <Button disabled={history.isFetchingNextPage} onClick={() => history.fetchNextPage()}>加载更早记录</Button>}
     </section>
+    <Reconciliation accountId={account.id} version={account.version} />
   </>;
 }
 

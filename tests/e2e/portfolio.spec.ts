@@ -85,6 +85,9 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await expect(page.getByRole("alert")).toContainText("可卖股数不足");
     await expect(page.locator(".balance-value")).toHaveText("9,424.99");
     await page.getByRole("button", { name: "取消", exact: true }).click();
+    await page.getByRole("button", { name: "核对账本", exact: true }).click();
+    await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
+    await expect(page.getByText("已复算 1 笔成交 · 1 个未平批次 · 现金 9424.99 元")).toBeVisible();
     for (const theme of ["dark", "light"]) {
       if (theme === "light") await page.getByRole("button", { name: "切换深浅主题" }).click();
       for (const width of [390, 768, 1280, 1440]) {
