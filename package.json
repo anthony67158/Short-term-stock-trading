@@ -8,9 +8,11 @@
     "typecheck": "pnpm --filter @platform/web typecheck",
     "contracts": "cd backend && uv run platform-cli export-contracts && cd .. && openapi-typescript contracts/openapi.json -o packages/api-client/schema.d.ts",
     "test:backend": "cd backend && uv run pytest",
+    "test:e2e": "playwright test",
     "lint": "cd backend && uv run ruff check src tests migrations"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "openapi-typescript": "^7.9.1"
   }
 }

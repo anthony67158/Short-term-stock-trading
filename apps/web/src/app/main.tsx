@@ -6,6 +6,7 @@ import { ChartNoAxesCombined, CircleHelp, Compass, FlaskConical, LayoutDashboard
 import { api } from "../lib/api";
 import { Button, Empty } from "../components/Controls";
 import { Login } from "./Login";
+import { Portfolio } from "../features/portfolio/Portfolio";
 import "../styles/global.css";
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 15_000 } } });
@@ -53,12 +54,17 @@ function Workspace() {
         <div className="control-group"><Button className="icon-button" aria-label="切换深浅主题" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>{theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}</Button>
           <Button className="icon-button" aria-label="退出登录" onClick={async () => {
             const result = await api.DELETE("/api/v1/sessions/current");
-            if (result.response.ok) { await cache.cancelQueries(); cache.clear(); cache.setQueryData(["session"], null); }
+            if (result.response.ok) {
+              await cache.cancelQueries();
+              cache.setQueryData(["session"], null);
+              cache.removeQueries({ predicate: (query) => query.queryKey[0] !== "session" });
+            }
           }}><LogOut size={16} /></Button></div>
       </div>
     </aside>
     <main id="main" className="workspace"><Routes>
-      {navigation.map(({ path, label }) => <Route key={path} path={path} element={<>
+      <Route path="/portfolio" element={<Portfolio />} />
+      {navigation.filter(({ path }) => path !== "/portfolio").map(({ path, label }) => <Route key={path} path={path} element={<>
         <header className="workspace-header"><h1>{label}</h1><span className="secondary">研究与账户工作区</span></header>
         <div className="workspace-content"><Empty title="此工作区正在建设"><CircleHelp size={20} />模块接入后将在这里展示真实数据与任务结果。</Empty></div>
       </>} />)}

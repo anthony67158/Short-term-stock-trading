@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Generic, TypeVar
 from uuid import uuid4
 
@@ -13,7 +13,10 @@ from pydantic.alias_generators import to_camel
 def decimal_input(value):
     if not isinstance(value, (str, Decimal)):
         raise ValueError("金额必须使用十进制字符串")
-    result = Decimal(value)
+    try:
+        result = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("金额必须是有效十进制数") from exc
     if not result.is_finite():
         raise ValueError("金额必须是有限数")
     return result

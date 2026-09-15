@@ -41,11 +41,39 @@ input, select, textarea { min-width: 0; width: 100%; color: var(--text); backgro
 .sidebar nav a:hover { background: var(--hover); }
 .sidebar nav a.active { color: var(--text); background: var(--selected); font-weight: 500; }
 .sidebar-bottom { margin-top: auto; padding: 12px; display: flex; flex-direction: column; gap: 16px; }
+.sidebar-bottom > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-bottom .control-group { flex-shrink: 0; }
 .workspace { min-width: 0; }
 .workspace-header { min-height: 64px; padding: 16px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .workspace-header h1 { font-size: 16px; }
 .workspace-header > span { font-size: 12px; }
 .workspace-content { padding: 24px; }
+.account-picker { display: flex; align-items: end; gap: var(--space-3); margin-bottom: var(--space-6); }
+.account-picker .field { width: min(100%, 360px); }
+.account-summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-8); padding: var(--space-4) 0 var(--space-6); border-bottom: 1px solid var(--border); }
+.account-summary > div { display: grid; gap: var(--space-1); }
+.account-summary span { font-size: 12px; }
+.account-summary strong { font-size: 15px; font-weight: 500; }
+.account-summary .balance-value { font-size: 24px; line-height: 32px; }
+.account-summary > button { margin-left: auto; }
+.editor-section { border-bottom: 1px solid var(--border); padding: var(--space-6) 0; margin-bottom: var(--space-6); }
+.editor-section > p { font-size: 13px; margin-top: var(--space-2); }
+.inline-form { display: grid; grid-template-columns: repeat(2, minmax(0, 320px)); gap: var(--space-4); margin-top: var(--space-6); }
+.inline-form .error, .form-actions { grid-column: 1 / -1; }
+.form-actions { display: flex; gap: var(--space-2); }
+.ledger-section { padding-top: var(--space-6); }
+.ledger-section h2 { margin-bottom: var(--space-4); }
+.table-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { font-size: 12px; font-weight: 500; color: var(--secondary); text-align: left; white-space: nowrap; }
+th, td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); height: 40px; }
+td { max-width: 480px; overflow-wrap: anywhere; }
+td:first-child { white-space: nowrap; }
+td:nth-child(2) { white-space: nowrap; }
+td:last-child { min-width: 140px; }
+tbody tr:hover { background: var(--hover); }
+.numeric { text-align: right; white-space: nowrap; }
+.save-notice { padding-top: var(--space-4); color: var(--accent); font-size: 13px; }
 .empty { padding: 64px 24px; text-align: center; color: var(--secondary); }
 .empty h1, .empty h2 { color: var(--text); margin-bottom: 12px; }
 .empty p { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -68,5 +96,9 @@ input, select, textarea { min-width: 0; width: 100%; color: var(--text); backgro
   .workspace-header { padding: 16px; }
   .workspace-header > span { display: none; }
   .workspace-content { padding: 16px; }
+  .inline-form { grid-template-columns: minmax(0, 1fr); }
+  .account-summary { gap: var(--space-6); }
+  .account-summary > button { margin-left: 0; }
+  .table-scroll { font-size: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }

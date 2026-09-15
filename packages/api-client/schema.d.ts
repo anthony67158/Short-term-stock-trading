@@ -39,6 +39,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Accounts */
+        get: operations["list_accounts_api_v1_accounts_get"];
+        put?: never;
+        /** Create Account */
+        post: operations["create_account_api_v1_accounts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/balance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Account Balance */
+        get: operations["account_balance_api_v1_accounts__account_id__balance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/cash-flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Cash History */
+        get: operations["cash_history_api_v1_accounts__account_id__cash_flows_get"];
+        put?: never;
+        /** Cash Flow */
+        post: operations["cash_flow_api_v1_accounts__account_id__cash_flows_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -60,6 +113,141 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountBalance */
+        AccountBalance: {
+            account: components["schemas"]["AccountView"];
+            /** Cashbalance */
+            cashBalance: string;
+        };
+        /** AccountInput */
+        AccountInput: {
+            /** Name */
+            name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "REAL" | "SIMULATED";
+            /**
+             * Currency
+             * @default CNY
+             * @constant
+             */
+            currency: "CNY";
+            /** Maxpositionpercent */
+            maxPositionPercent: number;
+        };
+        /** AccountPage */
+        AccountPage: {
+            /** Accounts */
+            accounts: components["schemas"]["AccountView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** AccountView */
+        AccountView: {
+            /** Name */
+            name: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "REAL" | "SIMULATED";
+            /**
+             * Currency
+             * @default CNY
+             * @constant
+             */
+            currency: "CNY";
+            /** Maxpositionpercent */
+            maxPositionPercent: number;
+            /** Id */
+            id: string;
+            /** Version */
+            version: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** CashEntryView */
+        CashEntryView: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL";
+            /** Amount */
+            amount: string;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /**
+             * Recordedat
+             * Format: date-time
+             */
+            recordedAt: string;
+            /** Source */
+            source: string;
+            /** Accountversion */
+            accountVersion: number;
+        };
+        /** CashFlowInput */
+        CashFlowInput: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "OPENING" | "DEPOSIT" | "WITHDRAWAL";
+            /** Amount */
+            amount: string;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /** Source */
+            source: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** CashPage */
+        CashPage: {
+            /** Entries */
+            entries: components["schemas"]["CashEntryView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** Envelope[AccountBalance] */
+        Envelope_AccountBalance_: {
+            data: components["schemas"]["AccountBalance"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[AccountPage] */
+        Envelope_AccountPage_: {
+            data: components["schemas"]["AccountPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[AccountView] */
+        Envelope_AccountView_: {
+            data: components["schemas"]["AccountView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CashEntryView] */
+        Envelope_CashEntryView_: {
+            data: components["schemas"]["CashEntryView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CashPage] */
+        Envelope_CashPage_: {
+            data: components["schemas"]["CashPage"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[Health] */
         Envelope_Health_: {
             data: components["schemas"]["Health"];
@@ -201,6 +389,175 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_accounts_api_v1_accounts_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_AccountPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_account_api_v1_accounts_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_AccountView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    account_balance_api_v1_accounts__account_id__balance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_AccountBalance_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cash_history_api_v1_accounts__account_id__cash_flows_get: {
+        parameters: {
+            query?: {
+                cursor?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CashPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cash_flow_api_v1_accounts__account_id__cash_flows_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CashFlowInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CashEntryView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
