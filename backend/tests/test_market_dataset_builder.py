@@ -488,6 +488,34 @@ def test_historical_xintai_listing_suspension_explains_missing_daily(tmp_path):
         }
 
 
+def test_historical_pangang_listing_suspension_explains_missing_daily(tmp_path):
+    data = responses()
+    data[("stock_basic", "L")].append(
+        stock("000629.SZ", "Pangang Vanadium", "主板", "SZSE", "19961115")
+    )
+    trade_date = "20170505"
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+        for code in [*traded_codes, "000629.SZ"]
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="pangang-suspension", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+
+        assert result["dailyBars"] == 3
+        assert ds.listing_status_explanations(trade_date) == {
+            "SZ.000629": ["SUSPENDED_LISTING"]
+        }
+
+
 def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [
