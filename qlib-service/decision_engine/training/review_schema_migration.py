@@ -191,8 +191,9 @@ def select_review_schema_migration(
         or tuple(FEATURE_NAMES_V4[:len(FEATURE_NAMES)]) != FEATURE_NAMES
     ):
         blockers.append("迁移目标必须是以V3为前缀的V4复核模型")
-    if challenger_metadata.get("productionEligible") is not True:
-        blockers.append("V4挑战者未通过自身生产门禁")
+    challenger_production_eligible = (
+        challenger_metadata.get("productionEligible") is True
+    )
     universe = (v4.get("summary") or {}).get("universe") or {}
     if (
         universe.get("schema_version") != "cn-main-board.v1"
@@ -228,6 +229,8 @@ def select_review_schema_migration(
         )
         blockers.extend(gate["blockers"])
         improvements = gate["improvements"]
+    if not challenger_production_eligible:
+        blockers.append("V4挑战者未通过自身生产门禁")
 
     action = "PUBLISH" if not blockers else "KEEP_CURRENT"
     decision = {

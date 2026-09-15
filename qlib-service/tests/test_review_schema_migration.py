@@ -178,6 +178,70 @@ class ReviewSchemaMigrationTest(unittest.TestCase):
         self.assertEqual(decision["migration"]["v3Samples"], 500)
         self.assertEqual(decision["migration"]["v4Samples"], 500)
 
+    def test_ineligible_challenger_is_compared_but_cannot_publish(self):
+        v3 = dataset()
+        v3["X_all"] = np.zeros((500, len(FEATURE_NAMES)))
+        v4 = dataset()
+        champion = metadata(
+            FEATURE_SCHEMA_VERSION,
+            FEATURE_NAMES,
+            "review.v3",
+        )
+        challenger = metadata(
+            FEATURE_SCHEMA_VERSION_V4,
+            FEATURE_NAMES_V4,
+            "review.v4",
+            eligible=False,
+        )
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "decision_engine.training.review_schema_migration._load_bundle",
+            side_effect=[(["v3"], champion), (["v4"], challenger)],
+        ), patch(
+            "decision_engine.training.review_schema_migration."
+            "build_migration_datasets",
+            return_value=(v3, v4),
+        ), patch(
+            "decision_engine.training.review_schema_migration."
+            "_confirmation_partitions",
+            return_value=partitions(),
+        ), patch(
+            "decision_engine.training.review_schema_migration."
+            "evaluate_review_release",
+            side_effect=[{"version": "v3"}, {"version": "v4"}],
+        ) as evaluate, patch(
+            "decision_engine.training.review_schema_migration."
+            "review_promotion_gate",
+            return_value={
+                "passed": False,
+                "blockers": ["净R下界未转正"],
+                "improvements": ["机会Top5平均净R至少提升0.01R"],
+            },
+        ):
+            decision = select_review_schema_migration(
+                "dataset.json.gz",
+                "champion",
+                "challenger",
+                decision_output=os.path.join(directory, "decision.json"),
+            )
+
+        self.assertEqual(decision["action"], "KEEP_CURRENT")
+        self.assertEqual(evaluate.call_count, 2)
+        self.assertEqual(
+            decision["evaluation"],
+            {
+                "champion": {"version": "v3"},
+                "challenger": {"version": "v4"},
+            },
+        )
+        self.assertIn(
+            "V4挑战者未通过自身生产门禁",
+            decision["compatibility"]["blockers"],
+        )
+        self.assertEqual(
+            decision["compatibility"]["improvements"],
+            ["机会Top5平均净R至少提升0.01R"],
+        )
+
     def test_non_v3_champion_is_blocked(self):
         v4 = dataset()
         champion = metadata(
