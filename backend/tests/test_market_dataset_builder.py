@@ -320,6 +320,38 @@ def test_daily_sync_repairs_new_official_listing_status_facts(tmp_path):
         )
 
 
+def test_historical_xintai_listing_suspension_explains_missing_daily(tmp_path):
+    data = responses()
+    data[("stock_basic", "D")] = [
+        {
+            **stock("300372.SZ", "Xintai", "创业板", "SZSE", "20140127"),
+            "list_status": "D",
+            "delist_date": "20170828",
+        }
+    ]
+    trade_date = "20160906"
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+        for code in [*traded_codes, "300372.SZ"]
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="xintai-suspension", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+
+        assert result["dailyBars"] == 3
+        assert ds.listing_status_explanations(trade_date) == {
+            "SZ.300372": ["SUSPENDED_LISTING"]
+        }
+
+
 def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [
