@@ -786,6 +786,15 @@ def test_historical_tianxiang_listing_suspension_explains_missing_daily(tmp_path
             "20200529",
             "20210315",
         ),
+        (
+            "000760.SZ",
+            "SZ.000760",
+            "Steyr",
+            "19970627",
+            "20210723",
+            "20200706",
+            "20210610",
+        ),
     ],
 )
 def test_historical_2020_listing_suspensions_explain_missing_daily(
