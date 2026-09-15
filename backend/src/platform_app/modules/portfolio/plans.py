@@ -9,7 +9,7 @@ from platform_app.kernel.trading import money, quantity_rule, trading_date, vali
 from platform_app.modules.market.models import Instrument
 from platform_app.modules.operations.models import Outbox
 from platform_app.modules.portfolio.models import (
-    Execution, ExecutionCorrection, ExecutionPlan, PlanEvent, PositionLot,
+    Account, Execution, ExecutionCorrection, ExecutionPlan, PlanEvent, PositionLot,
 )
 from platform_app.modules.portfolio.plan_contracts import PlanCancel, PlanInput, PlanPage, PlanView
 from platform_app.modules.portfolio.service import PortfolioError, cash_total, fingerprint, owned_account
@@ -149,6 +149,8 @@ def refresh_reservations(db, account, changed_plan_id=None):
             elif plan.status == "COMPLETED":
                 # A correction does not silently recreate a completed broker intention.
                 plan.status = "INVALIDATED"
+            elif plan.expires_at <= now:
+                plan.status = "EXPIRED"
             else:
                 plan.status = "PARTIALLY_RECORDED" if plan.recorded_shares else "CONFIRMED"
         plan.reserved_cash = (
@@ -188,3 +190,26 @@ def list_plans(user_id: str, account_id: str, before: str | None, limit: int):
             account_version=account.version, reserved_cash=reserved,
             spendable_cash=cash_total(db, account_id) - reserved,
         )
+
+
+def expire_due(limit: int = 100) -> int:
+    """Bounded worker batch; account lock serializes expiry with fills and cancellations."""
+    now = utcnow()
+    count = 0
+    with sessions().begin() as db:
+        due = select(ExecutionPlan.id).where(
+            ExecutionPlan.account_id == Account.id, ExecutionPlan.status.in_(ACTIVE),
+            ExecutionPlan.expires_at <= now).exists()
+        accounts = list(db.scalars(select(Account).where(due).order_by(Account.id)
+                                  .limit(limit).with_for_update(skip_locked=True)))
+        for account in accounts:
+            for plan in db.scalars(select(ExecutionPlan).where(
+                ExecutionPlan.account_id == account.id, ExecutionPlan.status.in_(ACTIVE),
+                ExecutionPlan.expires_at <= now).order_by(ExecutionPlan.expires_at, ExecutionPlan.id)):
+                account.version += 1
+                plan.status, plan.reserved_cash, plan.reserved_shares = "EXPIRED", Decimal(0), 0
+                plan.revision += 1
+                emit(db, account, plan, "EXPIRE", f"expire:{plan.id}", "0" * 64,
+                     "已到计划有效期，释放尚未成交的预留")
+                count += 1
+    return count

@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "../../../../../packages/api-client/schema";
 import { Button, Input } from "../../components/Controls";
@@ -64,6 +64,10 @@ export function Plans({ account }: { account: Account }) {
     });
   }
   const summary = history.data?.pages[0];
+  useEffect(() => {
+    if (summary && summary.accountVersion > account.version)
+      void cache.invalidateQueries({ queryKey: ["balance", account.id] });
+  }, [summary?.accountVersion, account.version, account.id, cache]);
   const rows = history.data?.pages.flatMap((page) => page.plans) ?? [];
   return <section className="ledger-section">
     <div className="section-toolbar"><h2>人工计划与预留</h2><Button onClick={() => { create.reset(); setEditing(true); }} disabled={editing}>创建人工计划</Button></div>

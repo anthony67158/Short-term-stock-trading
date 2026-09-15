@@ -32,6 +32,8 @@ uv run uvicorn platform_app.entrypoints.api:app --reload --host 127.0.0.1 --port
 当前目录不能用于历史回测股票池。
 
 研究Worker单独启动：`uv run python -m platform_app.modules.research.worker`。
+账本维护单独启动：`uv run python -m platform_app.modules.portfolio.worker`，
+每秒为到期人工计划释放剩余预留并追加审计；读取时也立即排除到期占用。
 `PLATFORM_AGENT_ENABLED`默认关闭，完成供应商真实鉴权验证后才启用；
 未启用时仍可保存研究材料。调用次数、时间与材料包均有限额，
 当前研判只用于研究，不能生成生产交易动作。

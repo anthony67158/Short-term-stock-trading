@@ -222,7 +222,7 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         for event in plan_events:
             revisions[event.plan_id] += 1
             check(event.id, "planRevision", revisions[event.plan_id], event.revision)
-            if event.kind in ("CREATE", "CANCEL"):
+            if event.kind in ("CREATE", "CANCEL", "EXPIRE"):
                 check(event.id, "uniqueVersion", False, event.account_version in version_owners)
                 version_owners[event.account_version] = event.id
             else:

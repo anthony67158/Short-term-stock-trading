@@ -143,11 +143,31 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await expect(page.locator(".balance-value")).toHaveText("9,424.99");
     await page.reload();
     await expect(page.getByRole("region", { name: "人工计划，可横向滚动" })).toContainText("0 / 100");
+    const planId = await page.getByRole("region", { name: "人工计划，可横向滚动" })
+      .locator("tbody tr").first().locator("td").nth(4).innerText();
+    await page.getByRole("button", { name: "录入成交", exact: true }).click();
+    await page.getByLabel("证券代码（6位）").fill("000001");
+    await page.getByLabel("实际成交股数").fill("37");
+    await page.getByLabel("成交价格（元）").fill("10");
+    await page.getByLabel("成交时间", { exact: true }).fill(localTime());
+    await page.getByLabel("实际佣金（元）").fill("5");
+    await page.getByLabel("实际印花税（元）").fill("0");
+    await page.getByLabel("实际过户费（元）").fill("0");
+    await page.getByLabel("其他实际费用（元）").fill("0");
+    await page.getByLabel("交割编号（账户内唯一）").fill("synthetic-linked-partial");
+    await page.getByLabel("成交凭据说明").fill("合成关联计划部分成交");
+    await page.getByLabel("关联人工计划编号（可选）").fill(planId);
+    await page.getByRole("button", { name: "保存成交事实" }).click();
+    await expect(page.locator(".balance-value")).toHaveText("9,049.99");
+    await expect(page.getByRole("region", { name: "人工计划，可横向滚动" })).toContainText("37 / 100");
+    await expect(page.getByText("计划预留：630.00 元 · 可支配现金：8419.99 元")).toBeVisible();
+    await page.reload();
+    await expect(page.getByRole("region", { name: "人工计划，可横向滚动" })).toContainText("部分成交已记录");
     await page.getByRole("button", { name: "取消计划", exact: true }).click();
     await page.getByLabel("取消计划原因").fill("合成取消预留");
     await page.getByRole("button", { name: "确认取消并释放剩余预留" }).click();
     await expect(page.getByRole("region", { name: "人工计划，可横向滚动" })).toContainText("已取消");
-    await expect(page.getByText("计划预留：0 元 · 可支配现金：9424.99 元")).toBeVisible();
+    await expect(page.getByText("计划预留：0 元 · 可支配现金：9049.99 元")).toBeVisible();
     await page.getByRole("button", { name: "核对账本", exact: true }).click();
     await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     for (const theme of ["dark", "light"]) {
