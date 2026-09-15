@@ -241,7 +241,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                     "decision_engine.training.review_ensemble.load_dataset",
                     return_value=dataset,
                 ))
-                stack.enter_context(patch(
+                fit = stack.enter_context(patch(
                     "decision_engine.training.review_ensemble._fit_member",
                     side_effect=member,
                 ))
@@ -289,11 +289,11 @@ class DecisionReviewTrainingTest(unittest.TestCase):
                     seeds=(42, 7),
                     **train_kwargs,
                 )
-        return metadata, evaluate
+        return metadata, evaluate, fit
 
     def test_training_reserves_selection_and_confirmation_partitions(self):
         dataset = self.dataset()
-        metadata, evaluate = self._run_training(dataset)
+        metadata, evaluate, fit = self._run_training(dataset)
 
         selection = evaluate.call_args_list[0].args[2]
         confirmation = evaluate.call_args_list[2].args[2]
@@ -317,6 +317,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             evaluate.call_args_list[2].args[3][0]["expectedNetR"],
             0.1,
         ))
+        self.assertEqual(fit.call_count, 2)
         audit = metadata["confirmationAudit"]
         self.assertRegex(audit["selectionDataHash"], r"^[0-9a-f]{64}$")
         self.assertRegex(audit["candidateHash"], r"^[0-9a-f]{64}$")
@@ -343,7 +344,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
 
     def test_default_feature_schema_is_v3(self):
         # 生产默认必须仍是 v3：168 维、v3 schema 名，不受 v4 接入影响。
-        metadata, _ = self._run_training(self.dataset())
+        metadata, _, _ = self._run_training(self.dataset())
         self.assertEqual(
             metadata["featureSchemaVersion"],
             FEATURE_SCHEMA_VERSION,
@@ -354,7 +355,10 @@ class DecisionReviewTrainingTest(unittest.TestCase):
     def test_v4_feature_schema_propagates_to_artifact_and_metadata(self):
         # 显式 feature_schema="v4" 时，artifact/metadata 全部写 v4 176 维口径。
         dataset = self.dataset(FEATURE_NAMES_V4, date_count=800)
-        metadata, _ = self._run_training(dataset, feature_schema="v4")
+        metadata, _, _ = self._run_training(
+            dataset,
+            feature_schema="v4",
+        )
         self.assertEqual(
             metadata["featureSchemaVersion"],
             FEATURE_SCHEMA_VERSION_V4,

@@ -975,47 +975,11 @@ def train_review_ensemble(
     )
     selection_metrics.update(fill_selection_metrics)
 
-    # The selection policy is now frozen. Refit the final candidate with the
-    # selection labels included, while preserving the independent calibration
-    # partition and untouched confirmation partition.
-    final_development = np.sort(np.concatenate([
-        development,
-        selection,
-    ]))
-    final_fill_development = np.sort(np.concatenate([
-        fill_development,
-        fill_selection,
-    ]))
-    final_opportunity_development = np.sort(np.concatenate([
-        opportunity_development,
-        opportunity_selection,
-    ]))
-    members = [
-        _fit_member(
-            dataset,
-            final_development,
-            calibration,
-            final_fill_development,
-            fill_calibration,
-            final_opportunity_development,
-            seed,
-            estimators,
-            threads,
-        )
-        for seed in seeds
-    ]
-    final_calibration_predictions = [
-        _member_predictions(
-            member,
-            dataset["X"][calibration],
-        )
-        for member in members
-    ]
-    ensemble_q10_offset = _ensemble_q10_offset(
-        dataset,
-        calibration,
-        final_calibration_predictions,
-    )
+    # Freeze the exact models used to select the policy. Refitting with the
+    # selection labels changes absolute score distributions and invalidates
+    # the already selected thresholds before confirmation.
+    members = selection_members
+    ensemble_q10_offset = selection_q10_offset
     confirmation_predictions = [
         _member_predictions(member, dataset["X"][confirmation])
         for member in members
@@ -1112,7 +1076,7 @@ def train_review_ensemble(
     model_version = (
         f"decision-review.{int(time.time())}.ensemble{len(members)}"
     )
-    actual = dataset["y_net_r"][final_development]
+    actual = dataset["y_net_r"][development]
     expected_shortfall = float(np.mean(
         actual[actual <= np.quantile(actual, 0.1)]
     ))
@@ -1173,7 +1137,7 @@ def train_review_ensemble(
         "calibrationSampleCount": int(len(calibration)),
         "fillCalibrationSampleCount": int(len(fill_calibration)),
         "featureSupport": _feature_support(
-            dataset["X_all"][final_fill_development],
+            dataset["X_all"][fill_development],
             feature_names,
             missing_indices,
         ),
