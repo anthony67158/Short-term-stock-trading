@@ -136,6 +136,30 @@ class OpeningLot(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class CustodyTransfer(Base):
+    __tablename__ = "custody_transfers"
+    __table_args__ = (
+        UniqueConstraint("account_id", "command_key", name="uq_transfer_command"),
+        UniqueConstraint("account_id", "source_key", name="uq_transfer_source"),
+        UniqueConstraint("account_id", "account_version", name="uq_transfer_version"),
+        CheckConstraint("quantity_shares > 0 AND quantity_shares <= 1000000000", name="quantity"),
+        CheckConstraint("cost_basis >= 0", name="basis"),
+    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
+    instrument_id: Mapped[str] = mapped_column(ForeignKey("instruments.id"))
+    quantity_shares: Mapped[int] = mapped_column(Integer)
+    cost_basis: Mapped[Decimal] = mapped_column(Numeric(20, 2))
+    acquired_date: Mapped[date] = mapped_column(Date)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_key: Mapped[str] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(300))
+    command_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    account_version: Mapped[int] = mapped_column(Integer)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class PositionLot(Base):
     __tablename__ = "position_lots"
     __table_args__ = (
@@ -143,12 +167,14 @@ class PositionLot(Base):
         CheckConstraint("remaining_basis >= 0", name="basis"),
         CheckConstraint("remaining_quantity > 0 OR remaining_basis = 0", name="closed_basis"),
         CheckConstraint(
-            "(execution_id IS NOT NULL)::int + (opening_id IS NOT NULL)::int = 1",
+            "(execution_id IS NOT NULL)::int + (opening_id IS NOT NULL)::int "
+            "+ (transfer_id IS NOT NULL)::int = 1",
             name="single_origin"),
     )
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     execution_id: Mapped[str | None] = mapped_column(ForeignKey("executions.id"), unique=True)
     opening_id: Mapped[str | None] = mapped_column(ForeignKey("opening_lots.id"), unique=True)
+    transfer_id: Mapped[str | None] = mapped_column(ForeignKey("custody_transfers.id"), unique=True)
     account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
     instrument_id: Mapped[str] = mapped_column(ForeignKey("instruments.id"), index=True)
     acquired_date: Mapped[date] = mapped_column(Date)

@@ -299,6 +299,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/custody-transfers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Transfer History */
+        get: operations["transfer_history_api_v1_accounts__account_id__custody_transfers_get"];
+        put?: never;
+        /** Record Transfer */
+        post: operations["record_transfer_api_v1_accounts__account_id__custody_transfers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/calendar": {
         parameters: {
             query?: never;
@@ -1033,6 +1051,16 @@ export interface components {
             data: components["schemas"]["ResearchCapability"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[TransferPage] */
+        Envelope_TransferPage_: {
+            data: components["schemas"]["TransferPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[TransferView] */
+        Envelope_TransferView_: {
+            data: components["schemas"]["TransferView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[UserView] */
         Envelope_UserView_: {
             data: components["schemas"]["UserView"];
@@ -1647,6 +1675,11 @@ export interface components {
              * @default 0
              */
             openingLotCount: number;
+            /**
+             * Transfercount
+             * @default 0
+             */
+            transferCount: number;
             /** Openlotcount */
             openLotCount: number;
             /** Discrepancycount */
@@ -1688,6 +1721,79 @@ export interface components {
             question: string;
             /** Evidenceids */
             evidenceIds: string[];
+        };
+        /**
+         * TransferInput
+         * @description Original acquisition/cost facts for an actual incoming custody transfer.
+         */
+        TransferInput: {
+            /** Instrumentid */
+            instrumentId: string;
+            /** Quantityshares */
+            quantityShares: number;
+            /** Costbasis */
+            costBasis: string;
+            /**
+             * Acquireddate
+             * Format: date
+             */
+            acquiredDate: string;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /** Source */
+            source: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** TransferPage */
+        TransferPage: {
+            /** Transfers */
+            transfers: components["schemas"]["TransferView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** TransferView */
+        TransferView: {
+            /** Id */
+            id: string;
+            /** Instrumentid */
+            instrumentId: string;
+            /** Quantityshares */
+            quantityShares: number;
+            /** Costbasis */
+            costBasis: string;
+            /**
+             * Acquireddate
+             * Format: date
+             */
+            acquiredDate: string;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /** Source */
+            source: string;
+            /** Accountversion */
+            accountVersion: number;
+            /**
+             * Recordedat
+             * Format: date-time
+             */
+            recordedAt: string;
+            /**
+             * Direction
+             * @default IN
+             * @constant
+             */
+            direction: "IN";
         };
         /** UniverseView */
         UniverseView: {
@@ -2504,6 +2610,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_OpeningView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transfer_history_api_v1_accounts__account_id__custody_transfers_get: {
+        parameters: {
+            query?: {
+                cursor?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_TransferPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_transfer_api_v1_accounts__account_id__custody_transfers_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransferInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_TransferView_"];
                 };
             };
             /** @description Validation Error */

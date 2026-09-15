@@ -1324,6 +1324,138 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/custody-transfers": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Record Transfer",
+        "operationId": "record_transfer_api_v1_accounts__account_id__custody_transfers_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TransferView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Transfer History",
+        "operationId": "transfer_history_api_v1_accounts__account_id__custody_transfers_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_TransferPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/calendar": {
       "get": {
         "tags": [
@@ -3544,6 +3676,38 @@
         ],
         "title": "Envelope[ResearchCapability]"
       },
+      "Envelope_TransferPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TransferPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[TransferPage]"
+      },
+      "Envelope_TransferView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TransferView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[TransferView]"
+      },
       "Envelope_UserView_": {
         "properties": {
           "data": {
@@ -5141,6 +5305,11 @@
             "title": "Openinglotcount",
             "default": 0
           },
+          "transferCount": {
+            "type": "integer",
+            "title": "Transfercount",
+            "default": 0
+          },
           "openLotCount": {
             "type": "integer",
             "title": "Openlotcount"
@@ -5275,6 +5444,175 @@
           "evidenceIds"
         ],
         "title": "ResearchInput"
+      },
+      "TransferInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "costBasis": {
+            "type": "string",
+            "title": "Costbasis",
+            "decimal_places": 2,
+            "ge": 0,
+            "lt": 1000000000000000000,
+            "max_digits": 20
+          },
+          "acquiredDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Acquireddate"
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectiveat"
+          },
+          "sourceKey": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Sourcekey"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Source"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "quantityShares",
+          "costBasis",
+          "acquiredDate",
+          "effectiveAt",
+          "sourceKey",
+          "source",
+          "expectedVersion"
+        ],
+        "title": "TransferInput",
+        "description": "Original acquisition/cost facts for an actual incoming custody transfer."
+      },
+      "TransferPage": {
+        "properties": {
+          "transfers": {
+            "items": {
+              "$ref": "#/components/schemas/TransferView"
+            },
+            "type": "array",
+            "title": "Transfers"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "transfers",
+          "nextCursor"
+        ],
+        "title": "TransferPage"
+      },
+      "TransferView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "costBasis": {
+            "type": "string",
+            "title": "Costbasis",
+            "decimal_places": 2,
+            "max_digits": 20
+          },
+          "acquiredDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Acquireddate"
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectiveat"
+          },
+          "sourceKey": {
+            "type": "string",
+            "title": "Sourcekey"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recordedat"
+          },
+          "direction": {
+            "type": "string",
+            "const": "IN",
+            "title": "Direction",
+            "default": "IN"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "instrumentId",
+          "quantityShares",
+          "costBasis",
+          "acquiredDate",
+          "effectiveAt",
+          "sourceKey",
+          "source",
+          "accountVersion",
+          "recordedAt"
+        ],
+        "title": "TransferView"
       },
       "UniverseView": {
         "properties": {

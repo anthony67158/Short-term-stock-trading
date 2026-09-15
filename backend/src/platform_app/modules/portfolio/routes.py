@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, Query
 from platform_app.contracts.base import Contract, Envelope
 from platform_app.modules.identity.routes import CurrentUser
 from platform_app.modules.portfolio import (
-    corrections, executions, imports, openings, plans, reconciliation, service,
+    corrections, executions, imports, openings, plans, reconciliation, service, transfers,
 )
 from platform_app.modules.portfolio.correction_contracts import (
     CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
@@ -19,6 +19,7 @@ from platform_app.modules.portfolio.contracts import (
 from platform_app.modules.portfolio.import_contracts import ImportCommit, ImportInput, ImportView
 from platform_app.modules.portfolio.plan_contracts import PlanCancel, PlanInput, PlanPage, PlanView
 from platform_app.modules.portfolio.opening_contracts import OpeningInput, OpeningPage, OpeningView
+from platform_app.modules.portfolio.transfer_contracts import TransferInput, TransferPage, TransferView
 
 router = APIRouter(prefix="/api/v1/accounts", tags=["portfolio"])
 CommandKey = Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=128)]
@@ -164,3 +165,17 @@ def opening_history(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ):
     return Envelope(data=openings.opening_history(user.id, account_id, cursor, limit))
+
+
+@router.post("/{account_id}/custody-transfers", response_model=Envelope[TransferView], status_code=201)
+def record_transfer(account_id: str, body: TransferInput, user: CurrentUser, key: CommandKey):
+    return Envelope(data=transfers.record_transfer(user.id, account_id, body, key))
+
+
+@router.get("/{account_id}/custody-transfers", response_model=Envelope[TransferPage])
+def transfer_history(
+    account_id: str, user: CurrentUser,
+    cursor: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    return Envelope(data=transfers.transfer_history(user.id, account_id, cursor, limit))

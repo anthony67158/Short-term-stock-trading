@@ -7,7 +7,7 @@ from platform_app.kernel.trading import trading_date
 from platform_app.modules.market.models import Instrument
 from platform_app.modules.operations.models import Outbox
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionPlan, OpeningLot, PositionLot,
+    CashEntry, CustodyTransfer, Execution, ExecutionPlan, OpeningLot, PositionLot,
 )
 from platform_app.modules.portfolio.opening_contracts import OpeningInput, OpeningPage, OpeningView
 from platform_app.modules.portfolio.service import PortfolioError, fingerprint, owned_account
@@ -18,7 +18,9 @@ def last_fact_time(db, account_id):
         CashEntry.account_id == account_id, CashEntry.kind != "REVERSAL"))
     opening = db.scalar(select(func.max(OpeningLot.effective_at)).where(
         OpeningLot.account_id == account_id))
-    return max((value for value in (cash, opening) if value is not None), default=None)
+    transfer = db.scalar(select(func.max(CustodyTransfer.effective_at)).where(
+        CustodyTransfer.account_id == account_id))
+    return max((value for value in (cash, opening, transfer) if value is not None), default=None)
 
 
 def record_opening(user_id: str, account_id: str, body: OpeningInput, key: str):
@@ -36,6 +38,8 @@ def record_opening(user_id: str, account_id: str, body: OpeningInput, key: str):
                 OpeningLot.account_id == account_id, OpeningLot.source_key == body.source_key)):
             raise PortfolioError("OPENING_SOURCE_EXISTS", "此期初批次凭据已经录入")
         if (db.scalar(select(Execution.id).where(Execution.account_id == account_id).limit(1))
+                or db.scalar(select(CustodyTransfer.id).where(
+                    CustodyTransfer.account_id == account_id).limit(1))
                 or db.scalar(select(ExecutionPlan.id).where(
                     ExecutionPlan.account_id == account_id).limit(1))):
             raise PortfolioError("OPENING_CLOSED", "已有成交或计划，不能追加期初；请使用迁移核对流程")

@@ -11,7 +11,7 @@ from platform_app.adapters.database import sessions
 from platform_app.contracts.base import Contract, Money, utcnow
 from platform_app.kernel.trading import trading_date
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionCorrection, ExecutionPlan, LotConsumption, OpeningLot,
+    CashEntry, CustodyTransfer, Execution, ExecutionCorrection, ExecutionPlan, LotConsumption, OpeningLot,
     PlanEvent, PositionLot,
 )
 from platform_app.modules.portfolio.plan_contracts import PlanView
@@ -32,6 +32,7 @@ class ReconciliationView(Contract):
     execution_count: int
     correction_count: int = 0
     opening_lot_count: int = 0
+    transfer_count: int = 0
     open_lot_count: int
     discrepancy_count: int
     discrepancies: list[Discrepancy]
@@ -56,6 +57,10 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             OpeningLot.account_id == account_id).order_by(OpeningLot.account_version).limit(50_001)))
         if len(openings) > 50_000:
             raise PortfolioError("REPLAY_LIMIT", "期初批次超过即时核对上限", 422)
+        transfers = list(db.scalars(select(CustodyTransfer).where(
+            CustodyTransfer.account_id == account_id).limit(50_001)))
+        if len(transfers) > 50_000:
+            raise PortfolioError("REPLAY_LIMIT", "转托管记录超过即时核对上限", 422)
         consumptions = list(db.scalars(select(LotConsumption).join(
             Execution, Execution.id == LotConsumption.sell_execution_id,
         ).where(Execution.account_id == account_id)))
@@ -85,10 +90,16 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         def rounded(value):
             return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
+        timeline = sorted([*[row for row in cash_rows if row.kind != "REVERSAL"],
+                           *openings, *transfers], key=lambda row: row.account_version)
+        for previous, current in zip(timeline, timeline[1:]):
+            check(current.id, "factChronology", True, current.effective_at >= previous.effective_at)
+
         expected_lots, expected_links, execution_deltas = {}, {}, {}
         corrected_deltas, corrected_quantities, corrected_fees = {}, {}, {}
         pending_lots = defaultdict(deque)
         opening_ids = {row.id for row in openings}
+        transfer_ids = {row.id for row in transfers}
         for row in openings:
             expected_lots[row.id] = {
                 "instrument": row.instrument_id, "date": row.acquired_date,
@@ -102,7 +113,17 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         last_opening_version = max((row.account_version for row in openings), default=0)
         by_id = {trade.id: trade for trade in executions}
         # This replay deliberately does not call the write-side FIFO allocator.
-        for trade in executions:
+        for trade in sorted([*executions, *transfers], key=lambda row: row.account_version):
+            if isinstance(trade, CustodyTransfer):
+                expected_lots[trade.id] = {
+                    "instrument": trade.instrument_id, "date": trade.acquired_date,
+                    "quantity": trade.quantity_shares, "basis": trade.cost_basis,
+                    "sequence": trade.account_version,
+                }
+                pending_lots[trade.instrument_id].append(trade.id)
+                check(trade.id, "acquisitionBeforeTransfer", True,
+                      trade.acquired_date <= trading_date(trade.effective_at))
+                continue
             check(trade.id, "executionAfterOpening", True,
                   (last_opening_time is None or trade.executed_at >= last_opening_time)
                   and trade.account_version > last_opening_version)
@@ -172,9 +193,11 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
                 check(buy_id, "lotExists", expected is not None, actual is not None)
                 continue
             check(buy_id, "executionLink",
-                  None if buy_id in opening_ids else buy_id, actual.execution_id)
+                  None if buy_id in opening_ids | transfer_ids else buy_id, actual.execution_id)
             check(buy_id, "openingLink",
                   buy_id if buy_id in opening_ids else None, actual.opening_id)
+            check(buy_id, "transferLink",
+                  buy_id if buy_id in transfer_ids else None, actual.transfer_id)
             for field, column in [
                 ("quantity", "remaining_quantity"), ("basis", "remaining_basis"),
                 ("instrument", "instrument_id"), ("date", "acquired_date"), ("sequence", "sequence"),
@@ -237,7 +260,7 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         for missing_id in execution_deltas.keys() - linked:
             check(missing_id, "cashEntryExists", True, False)
         version_owners = {row.account_version: row.id for row in cash_rows}
-        for row in openings:
+        for row in [*openings, *transfers]:
             check(row.id, "uniqueVersion", False, row.account_version in version_owners)
             version_owners[row.account_version] = row.id
         latest_events, revisions = {}, defaultdict(int)
@@ -289,7 +312,7 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         return ReconciliationView(
             account_version=account.version, cash_balance=actual_cash, replay_cash_balance=replay_cash,
             execution_count=len(executions), correction_count=len(corrections),
-            opening_lot_count=len(openings), open_lot_count=sum(
+            opening_lot_count=len(openings), transfer_count=len(transfers), open_lot_count=sum(
                 lot["quantity"] > 0 for lot in expected_lots.values()),
             discrepancy_count=count, discrepancies=issues, matches=count == 0,
         )

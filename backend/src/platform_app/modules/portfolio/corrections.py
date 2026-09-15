@@ -13,7 +13,7 @@ from platform_app.modules.portfolio.correction_contracts import (
 )
 from platform_app.modules.portfolio.effective_executions import apply_replacement, effective_trades
 from platform_app.modules.portfolio.models import (
-    CashEntry, Execution, ExecutionCorrection, LotConsumption, OpeningLot, PositionLot,
+    CashEntry, CustodyTransfer, Execution, ExecutionCorrection, LotConsumption, OpeningLot, PositionLot,
 )
 from platform_app.modules.portfolio.reconciliation import reconcile
 from platform_app.modules.portfolio.service import (
@@ -69,7 +69,22 @@ def prepare(db, account, execution_id, body):
             OpeningLot.account_id == account.id).order_by(OpeningLot.account_version)):
         lots[row.id] = Lot(row.id, row.acquired_date, row.quantity_shares, row.cost_basis)
         instruments[row.id], sequences[row.id] = row.instrument_id, row.account_version
-    for original in trades:
+    transfers = list(db.scalars(select(CustodyTransfer).where(
+        CustodyTransfer.account_id == account.id).limit(50_001)))
+    if len(transfers) > 50_000:
+        raise PortfolioError("REPLAY_LIMIT", "转托管记录超过即时冲正上限", 422)
+    for original in sorted([*trades, *transfers], key=lambda row: row.account_version):
+        if isinstance(original, CustodyTransfer):
+            lots[original.id] = Lot(
+                original.id, original.acquired_date, original.quantity_shares, original.cost_basis)
+            instruments[original.id] = original.instrument_id
+            sequences[original.id] = original.account_version
+            same = [lot for key, lot in lots.items()
+                    if instruments[key] == original.instrument_id]
+            if (sum(lot.quantity for lot in same) > 1_000_000_000
+                    or sum(lot.basis for lot in same) >= LIMIT):
+                raise PortfolioError("POSITION_LIMIT", "冲正后持仓数量或成本超过支持范围", 422)
+            continue
         pnl[original.id] = None
         if original.id not in active:
             continue
@@ -163,11 +178,14 @@ def correct_execution(
         db.execute(delete(PositionLot).where(PositionLot.account_id == account_id))
         opening_ids = set(db.scalars(select(OpeningLot.id).where(
             OpeningLot.account_id == account_id)))
+        transfer_ids = set(db.scalars(select(CustodyTransfer.id).where(
+            CustodyTransfer.account_id == account_id)))
         for lot in lots.values():
             db.add(PositionLot(
                 id=lot.lot_id,
-                execution_id=None if lot.lot_id in opening_ids else lot.lot_id,
+                execution_id=None if lot.lot_id in opening_ids | transfer_ids else lot.lot_id,
                 opening_id=lot.lot_id if lot.lot_id in opening_ids else None,
+                transfer_id=lot.lot_id if lot.lot_id in transfer_ids else None,
                 account_id=account_id,
                 instrument_id=instruments[lot.lot_id], acquired_date=lot.acquired_date,
                 remaining_quantity=lot.quantity, remaining_basis=lot.basis,
