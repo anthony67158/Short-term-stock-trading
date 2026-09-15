@@ -67,8 +67,8 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             return {
                 "selected": 40 if qualified else (5 if sparse else 0),
                 "activeDays": 30 if qualified else (5 if sparse else 0),
-                "netRLowerBound95": -0.01 if qualified else 0.5,
-                "stress10NetRLowerBound95": -0.02 if qualified else 0.4,
+                "netRLowerBound95": 0.1 if qualified else 0.5,
+                "stress10NetRLowerBound95": 0.08 if qualified else 0.4,
                 "meanNetRAt5": 0.01 if qualified else 0.6,
                 "precisionAt5": 0.5,
                 "account": {
@@ -95,7 +95,7 @@ class DecisionReviewTrainingTest(unittest.TestCase):
             -1.0,
         )
 
-    def test_policy_search_maximizes_coverage_when_none_reach_target(self):
+    def test_policy_search_keeps_positive_edge_when_coverage_is_short(self):
         def metrics(_dataset, _holdout, _predictions, policy):
             broad = (
                 policy["rankingMode"] == "VALUE"
@@ -128,9 +128,12 @@ class DecisionReviewTrainingTest(unittest.TestCase):
 
         self.assertEqual(
             selected["metrics"]["account"]["annualizedTrades"],
-            70,
+            20,
         )
-        self.assertEqual(selected["policy"]["rankingMode"], "VALUE")
+        self.assertEqual(
+            selected["policy"]["minimumNetRLowerBound"],
+            0.0,
+        )
 
     def test_account_metrics_use_actual_daily_selection_count(self):
         dates = [f"2025-{index:03d}" for index in range(300)]
