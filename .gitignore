@@ -1,64 +1,24 @@
-node_modules
-dist
-.fc-package
-.vercel
-.DS_Store
-.npmrc
-*.log
 .env
-.env.local
-.env.*.local
+.env.*
 !.env.example
-qlib-service/.env.lab
-
-# 构建/部署产物(体积大,不进仓库;可按需重建)
-*.tar.gz
-*.zip
-pwa-icons/
-qlib-service/fcbuild/
-qlib-service/__pycache__/
-**/__pycache__/
-*.py[cod]
-.s/
-
-# 量化服务部署包的 vendored 依赖(300M,由 build_deploy_pkg 重建);源码/bootstrap/模型仍进仓库
-qlib-service/deploy_pkg/deps/
-# 训练中间产物(大文件,可重跑 build_dataset.py 重生成)
-qlib-service/dataset.npz
-qlib-service/opportunity-outcomes.json
-qlib-service/opportunity-dataset.npz
-qlib-service/opportunity-model/
-# 注:pool_cache.json 现纳入仓库(仅 ~17KB),作为冷启动 CI runner 的股票池兜底——
-# 海外 CI 出口 IP 拉不到新浪时靠它保证当日仍能重训,这是"凌晨任务总失败"的关键修复。
-# qlib-service/pool_cache.json
-# 每日重训运行时历史日志(持续追加,属运行时产物,不进仓库)
-qlib-service/retrain_history.jsonl
-src/components/.nfs*
-.eas-computer-state*.jpg
-dsw_*_tmp.png
-
-# P1(Tushare)训练中间产物/缓存/大文件——可由源码脚本重生成,不进仓库
-qlib-service/dataset_ts_base.npz
-qlib-service/dataset_ts_ext.npz
-qlib-service/sector_dataset.npz
-qlib-service/sector_raw_cache.json.gz
-qlib-service/sector_hard_errors.json
-qlib-service/ortho.npz
-qlib-service/ortho_sub.npz
-qlib-service/ortho_raw_cache.json
-qlib-service/panel_cache/
-qlib-service/sweep.npz
-qlib-service/challengers/
-# 上线前备份快照(本地回滚用,不进仓库)
-qlib-service/*.bak
-
-# Harness运行报告(由npm run harness生成,CI以artifact保存)
-harness-artifacts/
-poc-artifacts/
-
-# 回测历史数据缓存与报告(由 Tushare 拉取，可重生成，绝不入库)
-backtest/cache/
-backtest/reports/
-
-# 明文密钥清单(仅本人自用,绝不入库)
+.npmrc
 CREDENTIALS.md
+.vercel/
+.trae/
+.DS_Store
+node_modules/
+dist/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+*.log
+.runtime/
+artifacts/
+data/
+playwright-report/
+test-results/
+*.pem
+*.key

@@ -1,9 +1,0 @@
-{
-  "featureSchemaVersion": "opportunity-review-feature.v4",
-  "baseFeatureContract": "opportunity-review-features-v2.json",
-  "initialFeatureContract": "opportunity-score-features.json",
-  "initialFeaturePrefix": "initial_",
-  "alphaFeatureContract": "opportunity-alpha158-signal.json",
-  "alphaFeaturePrefix": "alpha_",
-  "description": "V4 = V2 触价/价格/执行特征(32) + initial_ 前缀的初始候选评分特征(136) + alpha_ 前缀的 Alpha158 连续信号(8)。Alpha158 仅作连续特征参与模型学习,不做任何 Top50 硬过滤;alpha 块缺失时按 0 中性填充并置 Missing 掩码。"
-}
