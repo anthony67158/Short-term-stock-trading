@@ -17,7 +17,12 @@ ALLOWED_ENDPOINTS = {
 }
 DAILY_FIELDS = "ts_code,trade_date,open,high,low,close,pre_close,vol,amount"
 MINUTE_FIELDS = "ts_code,trade_time,open,close,high,low,vol,amount"
+STOCK_BASIC_FIELDS = (
+    "ts_code,symbol,name,market,exchange,list_status,list_date,delist_date"
+)
+BSE_MAPPING_FIELDS = "name,o_code,n_code,list_date"
 TS_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$")
+BSE_CODE_CHANGE_DATE = "20251009"
 
 
 class HistoricalMarketError(ValueError):
@@ -75,6 +80,102 @@ def decimal_text(value, *, positive=False, nonnegative=False) -> str:
 
 def scaled_decimal_text(value, multiplier: int) -> str:
     return decimal_text(Decimal(decimal_text(value, nonnegative=True)) * multiplier)
+
+
+def date_text(value, *, optional=False) -> str | None:
+    text = str(value or "")
+    if optional and not text:
+        return None
+    try:
+        datetime.strptime(text, "%Y%m%d")
+    except ValueError as exc:
+        raise HistoricalMarketError("INVALID_TRADE_DATE") from exc
+    return text
+
+
+def available_at_text(value: str) -> str:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError) as exc:
+        raise HistoricalMarketError("INVALID_AVAILABLE_AT") from exc
+    if parsed.tzinfo is None:
+        raise HistoricalMarketError("INVALID_AVAILABLE_AT")
+    return value
+
+
+def normalize_bse_mapping(row: dict, available_at: str) -> dict:
+    old_code, old_exchange, _ = instrument_parts(row.get("o_code"))
+    new_code, new_exchange, board = instrument_parts(row.get("n_code"))
+    if (
+        old_exchange != "BJ"
+        or new_exchange != "BJ"
+        or old_code.startswith("920")
+        or not new_code.startswith("920")
+    ):
+        raise HistoricalMarketError("INVALID_BSE_MAPPING")
+    source = {
+        "name": str(row.get("name") or "").strip(),
+        "o_code": row["o_code"],
+        "n_code": row["n_code"],
+        "list_date": date_text(row.get("list_date")),
+    }
+    if not source["name"]:
+        raise HistoricalMarketError("INVALID_INSTRUMENT_NAME")
+    return {
+        "sourceCode": source["o_code"],
+        "instrumentId": f"BJ.{new_code}",
+        "board": board,
+        "effectiveFrom": source["list_date"],
+        "effectiveTo": "20251008",
+        "reason": "BSE_920_CODE_MIGRATION",
+        "source": "TUSHARE_COMPATIBLE",
+        "availableAt": available_at_text(available_at),
+        "sourceRowSha256": _row_sha256(source),
+    }
+
+
+def normalize_instrument(row: dict, aliases: dict[str, str], available_at: str) -> dict:
+    source_code = str(row.get("ts_code") or "").upper()
+    canonical_code = aliases.get(source_code, source_code)
+    code, exchange, board = instrument_parts(canonical_code)
+    status = str(row.get("list_status") or "")
+    name = str(row.get("name") or "").strip()
+    if status not in {"L", "D", "P"}:
+        raise HistoricalMarketError("INVALID_LIST_STATUS")
+    if not name:
+        raise HistoricalMarketError("INVALID_INSTRUMENT_NAME")
+    source = {
+        "ts_code": source_code,
+        "name": name,
+        "list_status": status,
+        "list_date": date_text(row.get("list_date")),
+        "delist_date": date_text(row.get("delist_date"), optional=True),
+    }
+    if source["delist_date"] and source["delist_date"] < source["list_date"]:
+        raise HistoricalMarketError("INVALID_LISTING_RANGE")
+    return {
+        "instrumentId": f"{exchange}.{code}",
+        "sourceCode": source_code,
+        "exchange": exchange,
+        "board": board,
+        "name": name,
+        "listStatus": status,
+        "listDate": source["list_date"],
+        "delistDate": source["delist_date"],
+        "source": "TUSHARE_COMPATIBLE",
+        "availableAt": available_at_text(available_at),
+        "sourceRowSha256": _row_sha256(source),
+    }
+
+
+def _row_sha256(row: dict) -> str:
+    import hashlib
+    import json
+
+    payload = json.dumps(
+        row, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def normalize_daily(row: dict) -> dict:

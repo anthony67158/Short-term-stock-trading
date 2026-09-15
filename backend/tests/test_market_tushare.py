@@ -9,7 +9,9 @@ from platform_app.adapters.market_tushare import (
     HistoricalMarketError,
     TushareClient,
     instrument_parts,
+    normalize_bse_mapping,
     normalize_daily,
+    normalize_instrument,
     normalize_minute,
     validate_endpoint,
 )
@@ -60,6 +62,36 @@ def test_daily_and_minute_normalize_units_without_binary_float_math():
             "open": "10", "high": "9", "low": "8", "close": "10", "pre_close": "10",
             "vol": "1", "amount": "1",
         }})
+
+
+def test_bse_mapping_preserves_old_code_under_stable_920_identity():
+    available_at = "2026-09-15T16:00:00+08:00"
+    alias = normalize_bse_mapping({
+        "name": "Synthetic BSE",
+        "o_code": "839729.BJ",
+        "n_code": "920729.BJ",
+        "list_date": "20200727",
+    }, available_at)
+    assert alias["sourceCode"] == "839729.BJ"
+    assert alias["instrumentId"] == "BJ.920729"
+    assert alias["effectiveTo"] == "20251008"
+
+    normalized = normalize_instrument({
+        "ts_code": "839729.BJ",
+        "name": "Synthetic BSE",
+        "list_status": "D",
+        "list_date": "20200727",
+        "delist_date": "20260915",
+    }, {"839729.BJ": "920729.BJ"}, available_at)
+    assert normalized["instrumentId"] == "BJ.920729"
+    assert normalized["sourceCode"] == "839729.BJ"
+    assert normalized["board"] == "BEIJING"
+
+    with pytest.raises(HistoricalMarketError, match="INVALID_BSE_MAPPING"):
+        normalize_bse_mapping({
+            "name": "Bad", "o_code": "839729.BJ",
+            "n_code": "300001.SZ", "list_date": "20200727",
+        }, available_at)
 
 
 def test_endpoint_allowlist_and_protocol_response(monkeypatch):

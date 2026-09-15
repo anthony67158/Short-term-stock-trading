@@ -94,6 +94,7 @@ class MarketDataset:
             raise MarketDatasetError("DATASET_ALREADY_SEALED")
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.db_path, autocommit=False)
+        self.sealed = False
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         existing = self.db.execute(
@@ -113,6 +114,10 @@ class MarketDataset:
     def close(self):
         self.db.close()
 
+    def _assert_writable(self):
+        if self.sealed or self.manifest_path.exists():
+            raise MarketDatasetError("DATASET_ALREADY_SEALED")
+
     def __enter__(self):
         return self
 
@@ -120,6 +125,7 @@ class MarketDataset:
         self.close()
 
     def _insert_exact(self, table: str, keys: dict, values: dict) -> bool:
+        self._assert_writable()
         row = {**keys, **values}
         where = " AND ".join(f"{column} = ?" for column in keys)
         current = self.db.execute(
@@ -152,6 +158,29 @@ class MarketDataset:
                         "list_status": row["listStatus"],
                         "list_date": row["listDate"],
                         "delist_date": row.get("delistDate"),
+                        "source": row["source"],
+                        "available_at": row["availableAt"],
+                        "source_row_sha256": row["sourceRowSha256"],
+                    },
+                )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return inserted
+
+    def write_aliases(self, rows: list[dict]) -> int:
+        inserted = 0
+        try:
+            for row in rows:
+                inserted += self._insert_exact(
+                    "instrument_aliases",
+                    {"source_code": row["sourceCode"]},
+                    {
+                        "instrument_id": row["instrumentId"],
+                        "effective_from": row["effectiveFrom"],
+                        "effective_to": row.get("effectiveTo"),
+                        "reason": row["reason"],
                         "source": row["source"],
                         "available_at": row["availableAt"],
                         "source_row_sha256": row["sourceRowSha256"],
@@ -230,6 +259,7 @@ class MarketDataset:
         ).fetchone() is not None
 
     def seal(self) -> dict:
+        self._assert_writable()
         metadata = dict(self.db.execute("SELECT * FROM dataset_metadata").fetchone())
         tables = {}
         for table in ("instruments", "instrument_aliases", "daily_bars", "sync_checkpoints"):
@@ -253,4 +283,5 @@ class MarketDataset:
             json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
         )
         os.replace(temporary, self.manifest_path)
+        self.sealed = True
         return manifest

@@ -47,6 +47,20 @@ def daily(**changes):
     return row
 
 
+def alias():
+    row = {
+        "sourceCode": "839729.BJ",
+        "instrumentId": "BJ.920729",
+        "effectiveFrom": "20200727",
+        "effectiveTo": "20251008",
+        "reason": "BSE_920_CODE_MIGRATION",
+        "source": "TUSHARE_COMPATIBLE",
+        "availableAt": "2026-09-15T16:00:00+08:00",
+    }
+    row["sourceRowSha256"] = canonical_sha256(row)
+    return row
+
+
 def test_dataset_resumes_exact_rows_and_rejects_conflicts_atomically(tmp_path):
     root = tmp_path / "dataset"
     with MarketDataset(root, dataset_id="full-a-share-2016", source="TUSHARE_COMPATIBLE") as ds:
@@ -77,12 +91,19 @@ def test_dataset_resumes_exact_rows_and_rejects_conflicts_atomically(tmp_path):
 def test_sealed_dataset_has_verifiable_database_hash_and_is_immutable(tmp_path):
     root = tmp_path / "dataset"
     with MarketDataset(root, dataset_id="full-a-share-2016", source="TUSHARE_COMPATIBLE") as ds:
-        ds.write_instruments([instrument()])
+        ds.write_instruments([instrument(
+            instrumentId="BJ.920729", sourceCode="839729.BJ", exchange="BJ",
+            board="BEIJING", name="Synthetic BSE", listDate="20200727",
+        )])
+        ds.write_aliases([alias()])
         manifest = ds.seal()
+        with pytest.raises(MarketDatasetError, match="DATASET_ALREADY_SEALED"):
+            ds.write_aliases([alias()])
 
     with (root / "market.sqlite3").open("rb") as stream:
         assert manifest["databaseSha256"] == hashlib.file_digest(stream, "sha256").hexdigest()
     assert manifest["tables"]["instruments"] == 1
+    assert manifest["tables"]["instrument_aliases"] == 1
     assert (root / "manifest.json").is_file()
     with pytest.raises(MarketDatasetError, match="DATASET_ALREADY_SEALED"):
         MarketDataset(root, dataset_id="full-a-share-2016", source="TUSHARE_COMPATIBLE")
