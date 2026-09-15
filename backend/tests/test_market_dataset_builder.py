@@ -716,6 +716,38 @@ def test_2018_shanghai_listing_suspensions_explain_missing_daily(
         }
 
 
+def test_historical_huaze_listing_suspension_explains_missing_daily(tmp_path):
+    data = responses()
+    data[("stock_basic", "D")] = [
+        {
+            **stock("000693.SZ", "Huaze", "主板", "SZSE", "19970226"),
+            "list_status": "D",
+            "delist_date": "20190709",
+        }
+    ]
+    trade_date = "20180713"
+    traded_codes = ["000001.SZ", "300001.SZ", "688001.SH"]
+    data[("daily", trade_date)] = [bar(code, trade_date) for code in traded_codes]
+    data[("adj_factor", trade_date)] = [
+        {"ts_code": code, "trade_date": trade_date, "adj_factor": "1"}
+        for code in [*traded_codes, "000693.SZ"]
+    ]
+    data[("suspend_d", trade_date)] = []
+
+    with MarketDataset(
+        tmp_path / "dataset", dataset_id="huaze-suspension", source="TUSHARE_COMPATIBLE"
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+
+        result = builder.sync_daily_partition(trade_date)
+
+        assert result["dailyBars"] == 3
+        assert ds.listing_status_explanations(trade_date) == {
+            "SZ.000693": ["SUSPENDED_LISTING"]
+        }
+
+
 def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [

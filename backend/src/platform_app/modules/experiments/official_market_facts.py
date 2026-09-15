@@ -202,6 +202,15 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
         ),
     },
     {
+        "instrument_id": "SZ.000693",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20180713",
+        "effective_to": "20190527",
+        "source_urls": (
+            "https://www.szse.cn/disclosure/notice/company/t20190517_567240.html",
+        ),
+    },
+    {
         "instrument_id": "SZ.000939",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20190513",
