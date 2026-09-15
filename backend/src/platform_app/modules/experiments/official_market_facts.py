@@ -213,6 +213,18 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
         ),
     },
     {
+        "instrument_id": "SH.600485",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20200515",
+        "effective_to": "20210601",
+        "source_urls": (
+            "http://www.sse.com.cn/disclosure/announcement/listing/stock/"
+            "c/c_20200508_78045769.shtml",
+            "http://www.sse.com.cn/disclosure/announcement/listing/stock/"
+            "c/c_20210525_81710479.shtml",
+        ),
+    },
+    {
         "instrument_id": "SZ.000670",
         "status": "SUSPENDED_LISTING",
         "effective_from": "20200407",
@@ -284,6 +296,17 @@ OFFICIAL_LISTING_STATUS_PERIODS = (
         "effective_to": "20191016",
         "source_urls": (
             "https://www.szse.cn/disclosure/notice/company/t20191008_571144.html",
+        ),
+    },
+    {
+        "instrument_id": "SZ.002711",
+        "status": "SUSPENDED_LISTING",
+        "effective_from": "20200515",
+        "effective_to": "20210602",
+        "source_urls": (
+            "https://www.szse.cn/disclosure/notice/t20200511_576983.html",
+            "http://disc.static.szse.cn/download/disc/disk02/finalpage/"
+            "2021-05-26/1faac954-ced6-4705-b4a4-9fd708a5b454.PDF",
         ),
     },
     {
