@@ -173,7 +173,7 @@ def test_agent_search_tool_adds_causal_evidence_and_trace(
             "agent_api_key": SecretStr("synthetic-only"),
             "search_enabled": True,
             "search_api_key": SecretStr("synthetic-search"),
-            "agent_search_max_calls": 2,
+            "agent_search_max_calls": 1,
         }
     )
     monkeypatch.setattr(service, "settings", lambda: config)
@@ -252,7 +252,7 @@ def test_agent_search_tool_adds_causal_evidence_and_trace(
                         title="合成公司公告",
                         site_name="交易所",
                         url="https://example.com/official",
-                        text="这是一条早于任务时点的合成公告摘要。",
+                        text="这是一条早于任务时点且用于接口验证的合成公告摘要内容。",
                         published_at=(
                             utcnow() - timedelta(hours=1)
                         ).isoformat(),
@@ -274,6 +274,8 @@ def test_agent_search_tool_adds_causal_evidence_and_trace(
     result = agent.run_agent(job.payload, search_client=search)
 
     assert len(model_calls) == 2
+    assert "tools" in model_calls[0]
+    assert "tools" not in model_calls[1]
     assert len(search.requests) == 1
     assert search.requests[0].time_range.endswith(
         utcnow().date().isoformat()

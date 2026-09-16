@@ -82,7 +82,10 @@ export function EvidenceResearch({ instrumentId }: { instrumentId: string }) {
     refetchInterval: (query) => ["QUEUED", "RUNNING"].includes(query.state.data?.status ?? "") ? 1000 : false,
   });
   useEffect(() => {
-    if (job.data?.status === "SUCCEEDED") void cache.invalidateQueries({ queryKey: ["research", instrumentId] });
+    if (job.data?.status === "SUCCEEDED") {
+      void cache.invalidateQueries({ queryKey: ["research", instrumentId] });
+      void cache.invalidateQueries({ queryKey: ["evidence", instrumentId] });
+    }
   }, [job.data?.status, cache, instrumentId]);
   const start = useMutation({
     mutationFn: async () => {
@@ -104,12 +107,16 @@ export function EvidenceResearch({ instrumentId }: { instrumentId: string }) {
   const items = evidence.data?.pages.flatMap((page) => page.evidence) ?? [];
   const assessments = research.data?.pages.flatMap((page) => page.assessments) ?? [];
   const running = ["QUEUED", "RUNNING"].includes(job.data?.status ?? "");
+  const canStart = capability.data?.available
+    && (selected.length > 0 || capability.data.searchAvailable);
   return <section className="ledger-section">
     <div className="section-toolbar"><h2>投资论点与证据</h2><Button onClick={() => setAdding(true)}>添加研究材料</Button></div>
     {adding && <EvidenceForm instrumentId={instrumentId} done={async () => { setAdding(false); await evidence.refetch(); }} />}
-    <p className="source-note">{capability.data?.reason || (capability.isError ? "无法读取研究服务状态" : "研究产物仅供研究；联合预测尚未上线。")}</p>
+    <p className="source-note">{capability.data?.reason || (capability.isError
+      ? "无法读取研究服务状态"
+      : `${capability.data?.model} · ${capability.data?.timeoutSeconds ?? 0}秒预算 · ${capability.data?.searchAvailable ? `搜索可用，最多${capability.data.searchMaxCalls}次` : "搜索不可用"} · 仅供研究`)}</p>
     {evidence.isError ? <div role="alert"><p>{errorMessage(evidence.error)}</p><Button onClick={() => evidence.refetch()}>重新读取材料</Button></div> : evidence.isPending ? <p role="status">正在读取研究材料…</p> : items.length === 0 ? <p className="secondary">尚无材料。添加有出处的原文，建立可追溯的研究依据。</p> : items.map((item) =>
-      <details className="evidence-item" key={item.id}><summary>{item.title} <span className="secondary">· 用户提供 · 片段已匹配</span></summary>
+      <details className="evidence-item" key={item.id}><summary>{item.title} <span className="secondary">· {item.provenance === "SEARCH_DISCOVERED" ? "搜索发现" : "用户提供"} · {item.validation === "SEARCH_RESULT_UNVERIFIED" ? "来源未核验" : "片段已匹配"}</span></summary>
         <label className="check-field"><input type="checkbox" checked={selected.includes(item.id)} disabled={!selected.includes(item.id) && selected.length >= 16} onChange={(event) => setSelected((ids) => event.target.checked ? [...ids, item.id] : ids.filter((id) => id !== item.id))} />用于本次研究</label>
         <blockquote>{item.quote}</blockquote><p className="source-note"><a href={item.sourceUrl} target="_blank" rel="noreferrer">查看来源</a> · 发布于 {new Date(item.publishedAt).toLocaleString("zh-CN")}</p>
         <pre className="evidence-text">{item.text}</pre>
@@ -117,14 +124,14 @@ export function EvidenceResearch({ instrumentId }: { instrumentId: string }) {
     {evidence.hasNextPage && <Button onClick={() => evidence.fetchNextPage()} disabled={evidence.isFetchingNextPage}>更多材料</Button>}
     <form className="research-question" onSubmit={(event) => { event.preventDefault(); start.mutate(); }}>
       <Input id="research-question" label={`研究问题 · 已选 ${selected.length} 份材料`} value={question} onChange={(event) => setQuestion(event.target.value)} minLength={5} maxLength={1000} required />
-      <Button type="submit" variant="primary" disabled={!capability.data?.available || !selected.length || running || start.isPending}>{start.isPending ? "提交研究…" : "开始证据研究"}</Button>
+      <Button type="submit" variant="primary" disabled={!canStart || running || start.isPending}>{start.isPending ? "提交研究…" : "开始证据研究"}</Button>
     </form>
     {[start.error, cancel.error, job.error].filter(Boolean).map((error, index) => <p key={index} role="alert" className="error">{errorMessage(error)}</p>)}
     {job.data && <div className="task-status" role="status"><span>{job.data.stage}{job.data.message ? `：${job.data.message}` : ""}</span>{running && <Button disabled={cancel.isPending || job.data.cancellationRequested} onClick={() => cancel.mutate()}>{job.data.cancellationRequested ? "已请求停止" : "停止研究"}</Button>}</div>}
     {research.isError && <div role="alert"><p>{errorMessage(research.error)}</p><Button onClick={() => research.refetch()}>重新读取研判</Button></div>}
     {assessments.map((assessment) => <article className="assessment" key={assessment.id}>
       <h3>{thesisLabels[assessment.output.thesisStatus]} · 研究论点</h3><p>{assessment.output.summary}</p>
-      <p className="source-note">引用校验通过 · 不代表推断已证实 · {new Date(assessment.createdAt).toLocaleString("zh-CN")}</p>
+      <p className="source-note">引用校验通过 · {assessment.toolTrace.length ? `自动检索 ${assessment.toolTrace.length} 次 · ` : ""}不代表推断已证实 · {new Date(assessment.createdAt).toLocaleString("zh-CN")}</p>
       {[...assessment.output.claims, ...assessment.output.counterClaims].map((claim, index) => <p key={index}><strong>{claimLabels[claim.kind]}：</strong>{claim.statement} <span className="secondary">引用 {claim.evidenceIds.map((id) => items.find((item) => item.id === id)?.title || "材料详情待加载").join("、")}</span></p>)}
       <p><strong>失效条件：</strong>{assessment.output.invalidation}</p><p><strong>下次验证：</strong>{assessment.output.nextCheck}</p>
       <p><strong>待补证据：</strong>{assessment.output.uncertainties.join("；")}</p>

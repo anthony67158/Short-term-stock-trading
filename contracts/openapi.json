@@ -2595,6 +2595,14 @@
           "output": {
             "$ref": "#/components/schemas/AssessmentOutput"
           },
+          "toolTrace": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Tooltrace"
+          },
           "status": {
             "type": "string",
             "const": "VALIDATED",
@@ -2620,7 +2628,8 @@
           "createdAt",
           "inputHash",
           "evidenceIds",
-          "output"
+          "output",
+          "toolTrace"
         ],
         "title": "AssessmentView"
       },
@@ -3876,12 +3885,18 @@
           },
           "provenance": {
             "type": "string",
-            "const": "USER_SUPPLIED",
+            "enum": [
+              "USER_SUPPLIED",
+              "SEARCH_DISCOVERED"
+            ],
             "title": "Provenance"
           },
           "validation": {
             "type": "string",
-            "const": "QUOTE_MATCHED",
+            "enum": [
+              "QUOTE_MATCHED",
+              "SEARCH_RESULT_UNVERIFIED"
+            ],
             "title": "Validation"
           }
         },
@@ -5402,6 +5417,25 @@
               }
             ],
             "title": "Reason"
+          },
+          "timeoutSeconds": {
+            "type": "integer",
+            "title": "Timeoutseconds"
+          },
+          "searchAvailable": {
+            "type": "boolean",
+            "title": "Searchavailable"
+          },
+          "searchMaxCalls": {
+            "type": "integer",
+            "title": "Searchmaxcalls"
+          },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools"
           }
         },
         "additionalProperties": false,
@@ -5409,7 +5443,11 @@
         "required": [
           "available",
           "model",
-          "reason"
+          "reason",
+          "timeoutSeconds",
+          "searchAvailable",
+          "searchMaxCalls",
+          "tools"
         ],
         "title": "ResearchCapability"
       },
@@ -5432,7 +5470,6 @@
             },
             "type": "array",
             "maxItems": 16,
-            "minItems": 1,
             "title": "Evidenceids"
           }
         },

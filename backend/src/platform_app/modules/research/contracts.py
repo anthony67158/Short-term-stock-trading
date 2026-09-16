@@ -38,7 +38,7 @@ class EvidencePage(Contract):
 class ResearchInput(Contract):
     instrument_id: InstrumentId
     question: str = Field(min_length=5, max_length=1000)
-    evidence_ids: list[str] = Field(min_length=1, max_length=16)
+    evidence_ids: list[str] = Field(max_length=16)
 
 
 class Claim(Contract):

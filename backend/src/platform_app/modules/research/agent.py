@@ -107,6 +107,8 @@ def _search_evidence(response, payload: dict, fetched_at: datetime) -> list[dict
             continue
         evidence_id = new_id()
         text = result.text
+        if len(text) < 20:
+            continue
         source_fingerprint = hashlib.sha256(
             (
                 response.query
@@ -154,14 +156,20 @@ def _search_evidence(response, payload: dict, fetched_at: datetime) -> list[dict
     return accepted
 
 
-async def _model_request(config, messages: list[dict], timeout: float) -> dict:
+async def _model_request(
+    config,
+    messages: list[dict],
+    timeout: float,
+    *,
+    allow_search: bool,
+) -> dict:
     body = {
         "model": config.agent_model,
         "max_tokens": 2500,
         "messages": messages,
         "response_format": {"type": "json_object"},
     }
-    if config.search_enabled and config.agent_search_max_calls:
+    if allow_search:
         body["tools"] = [SEARCH_TOOL]
         body["tool_choice"] = "auto"
     async with httpx.AsyncClient(
@@ -179,6 +187,10 @@ async def _model_request(config, messages: list[dict], timeout: float) -> dict:
                 raise AgentFailure("AGENT_AUTH_FAILED")
             if response.status_code == 429:
                 raise AgentFailure("AGENT_RATE_LIMITED")
+            if response.status_code == 400:
+                raise AgentFailure("AGENT_PROTOCOL_REJECTED")
+            if response.status_code >= 500:
+                raise AgentFailure("AGENT_UPSTREAM_FAILED")
             response.raise_for_status()
             chunks = bytearray()
             async for chunk in response.aiter_bytes():
@@ -224,7 +236,16 @@ async def _run_agent(payload: dict, config, search_client) -> AgentRunResult:
             remaining = (deadline - utcnow()).total_seconds()
             if remaining < 1:
                 raise AgentFailure("DEADLINE_EXCEEDED")
-            message = await _model_request(config, messages, remaining)
+            allow_search = (
+                config.search_enabled
+                and search_calls < config.agent_search_max_calls
+            )
+            message = await _model_request(
+                config,
+                messages,
+                remaining,
+                allow_search=allow_search,
+            )
             tool_calls = message.get("tool_calls") or []
             if not tool_calls:
                 raw = message.get("content")
@@ -288,6 +309,13 @@ async def _run_agent(payload: dict, config, search_client) -> AgentRunResult:
                             "returnedResults": len(response.results),
                             "acceptedEvidenceIds": [
                                 item["id"] for item in new_evidence
+                            ],
+                            "acceptedResults": [
+                                {
+                                    "evidenceId": item["id"],
+                                    **item["search_metadata"],
+                                }
+                                for item in new_evidence
                             ],
                             "completedAt": fetched_at.isoformat(),
                         }

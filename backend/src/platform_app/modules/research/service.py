@@ -105,8 +105,14 @@ def submit_research(owner: str, body: ResearchInput, key: str) -> Job:
             if existing.input_hash != digest:
                 raise ResearchError("IDEMPOTENCY_CONFLICT", "同一请求编号的内容发生变化", 409)
             return existing
-        if not capability().available:
-            raise ResearchError("AGENT_UNAVAILABLE", capability().reason, 503)
+        current_capability = capability()
+        if not current_capability.available:
+            raise ResearchError("AGENT_UNAVAILABLE", current_capability.reason, 503)
+        if not body.evidence_ids and not current_capability.search_available:
+            raise ResearchError(
+                "EVIDENCE_REQUIRED",
+                "没有手工材料且搜索服务不可用，无法开始有依据的研究",
+            )
         count = db.scalar(select(func.count()).select_from(Job).where(
             Job.owner_id == owner, Job.kind == "RESEARCH",
             Job.created_at >= now - timedelta(hours=24),

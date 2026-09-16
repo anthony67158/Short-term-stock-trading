@@ -713,6 +713,10 @@ export interface components {
             /** Evidenceids */
             evidenceIds: string[];
             output: components["schemas"]["AssessmentOutput"];
+            /** Tooltrace */
+            toolTrace: {
+                [key: string]: unknown;
+            }[];
             /**
              * Status
              * @default VALIDATED
@@ -1135,14 +1139,14 @@ export interface components {
             availableAt: string;
             /**
              * Provenance
-             * @constant
+             * @enum {string}
              */
-            provenance: "USER_SUPPLIED";
+            provenance: "USER_SUPPLIED" | "SEARCH_DISCOVERED";
             /**
              * Validation
-             * @constant
+             * @enum {string}
              */
-            validation: "QUOTE_MATCHED";
+            validation: "QUOTE_MATCHED" | "SEARCH_RESULT_UNVERIFIED";
         };
         /** ExecutionInput */
         ExecutionInput: {
@@ -1712,6 +1716,14 @@ export interface components {
             model: string;
             /** Reason */
             reason: string | null;
+            /** Timeoutseconds */
+            timeoutSeconds: number;
+            /** Searchavailable */
+            searchAvailable: boolean;
+            /** Searchmaxcalls */
+            searchMaxCalls: number;
+            /** Tools */
+            tools: string[];
         };
         /** ResearchInput */
         ResearchInput: {
