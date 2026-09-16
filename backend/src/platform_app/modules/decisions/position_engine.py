@@ -144,11 +144,26 @@ def arbitrate_position(request: PositionDecisionRequest) -> PositionDecision:
     if risk.hard_stop_triggered:
         return _risk_override(request)
     if request.release.status != "READY":
-        return _unavailable(
-            request,
-            *request.release.blocker_codes,
-            decision_reason="联合版本尚未通过发布门禁，不能输出生产持仓建议。",
-        )
+        if (
+            request.release.status == "SHADOW"
+            and request.constraints.account_kind == "SIMULATED"
+        ):
+            pass
+        else:
+            reason_codes = (
+                ["SHADOW_RELEASE_SIMULATION_ONLY"]
+                if request.release.status == "SHADOW"
+                else request.release.blocker_codes
+            )
+            return _unavailable(
+                request,
+                *reason_codes,
+                decision_reason=(
+                    "影子联合版本只允许模拟账户运行。"
+                    if request.release.status == "SHADOW"
+                    else "联合版本尚未通过发布门禁，不能输出生产持仓建议。"
+                ),
+            )
     if not request.quant or not request.agent:
         return _unavailable(
             request,

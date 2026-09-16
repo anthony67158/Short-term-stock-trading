@@ -123,6 +123,7 @@ def decision_request(
 ):
     now = now or utcnow()
     blockers = [] if release_status == "READY" else ["JOINT_ABLATION_PENDING"]
+    has_components = release_status in {"READY", "SHADOW"}
     return PositionDecisionRequest(
         decision_id="decision-1",
         context_id="context-1",
@@ -131,13 +132,15 @@ def decision_request(
         release=JointReleaseReference(
             release_id="joint-v1",
             status=release_status,
-            position_model_bundle_id="position-v1" if release_status == "READY" else None,
-            position_model_artifact_sha256="a" * 64 if release_status == "READY" else None,
-            agent_protocol_version="position-assessment.v1" if release_status == "READY" else None,
+            allows_new_risk=release_status == "READY",
+            position_model_bundle_id="position-v1" if has_components else None,
+            position_model_artifact_sha256="a" * 64 if has_components else None,
+            agent_protocol_version="position-assessment.v1" if has_components else None,
             blocker_codes=blockers,
         ),
         constraints=PositionConstraints(
             account_id="account-1",
+            account_kind="SIMULATED",
             account_version=3,
             instrument_id="SZ.000001",
             current_quantity_shares=1000,
@@ -250,6 +253,23 @@ def test_agent_quant_conflict_does_not_expand_risk():
     assert decision.status == "UNAVAILABLE"
     assert decision.action == "NONE"
     assert decision.reason_codes == ["AGENT_QUANT_CONFLICT_REQUIRES_REVIEW"]
+
+
+def test_shadow_release_runs_only_for_simulated_accounts():
+    simulated = arbitrate_position(decision_request(release_status="SHADOW"))
+    assert simulated.status == "READY"
+    assert simulated.action == "ADD"
+    request = decision_request(release_status="SHADOW")
+    request = request.model_copy(
+        update={
+            "constraints": request.constraints.model_copy(
+                update={"account_kind": "REAL"}
+            )
+        }
+    )
+    real = arbitrate_position(request)
+    assert real.status == "UNAVAILABLE"
+    assert real.reason_codes == ["SHADOW_RELEASE_SIMULATION_ONLY"]
 
 
 def test_future_available_agent_signal_fails_closed():

@@ -55,6 +55,7 @@ def main():
             "evaluate-quant-backtest",
             "evaluate-account-backtest",
             "build-joint-candidate",
+            "publish-joint-shadow",
             "build-position-action-dataset",
             "train-position-action-model",
         ],
@@ -75,6 +76,8 @@ def main():
     parser.add_argument("--position-model-root", type=Path)
     parser.add_argument("--model-root", type=Path)
     parser.add_argument("--account-backtest", type=Path)
+    parser.add_argument("--candidate-root", type=Path)
+    parser.add_argument("--registry-root", type=Path)
     parser.add_argument("--dataset-id")
     parser.add_argument("--episode-dataset-id")
     parser.add_argument("--label-dataset-id")
@@ -82,6 +85,7 @@ def main():
     parser.add_argument("--ranking-dataset-id")
     parser.add_argument("--model-bundle-id")
     parser.add_argument("--joint-bundle-id")
+    parser.add_argument("--release-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     parser.add_argument(
@@ -350,6 +354,52 @@ def main():
                     account_backtest_path=account_parent
                     / args.account_backtest.name,
                     agent_model=settings().agent_model,
+                ),
+                ensure_ascii=False,
+            )
+        )
+    elif args.command == "publish-joint-shadow":
+        from platform_app.modules.experiments.joint_bundle import (
+            publish_shadow_release,
+        )
+
+        if not all(
+            (
+                args.candidate_root,
+                args.registry_root,
+                args.release_id,
+                args.ranking_model_root,
+                args.model_root,
+                args.position_model_root,
+                args.account_backtest,
+            )
+        ):
+            parser.error(
+                "candidate-root, registry-root, release-id, ranking-model-root, "
+                "model-root, position-model-root and account-backtest are required"
+            )
+        try:
+            candidate_root = external_dataset_root(args.candidate_root)
+            registry_root = external_dataset_root(args.registry_root)
+            ranking_model_root = external_dataset_root(args.ranking_model_root)
+            quant_model_root = external_dataset_root(args.model_root)
+            position_model_root = external_dataset_root(args.position_model_root)
+            account_parent = external_dataset_root(
+                args.account_backtest.resolve().parent
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                publish_shadow_release(
+                    candidate_root=candidate_root,
+                    registry_root=registry_root,
+                    release_id=args.release_id,
+                    ranking_model_root=ranking_model_root,
+                    quant_model_root=quant_model_root,
+                    position_model_root=position_model_root,
+                    account_backtest_path=account_parent
+                    / args.account_backtest.name,
                 ),
                 ensure_ascii=False,
             )

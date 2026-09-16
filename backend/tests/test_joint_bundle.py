@@ -10,6 +10,7 @@ from platform_app.modules.experiments.joint_bundle import (
     JointBundle,
     JointBundleError,
     encode_agent_assessment,
+    publish_shadow_release,
     write_joint_candidate,
 )
 
@@ -192,3 +193,81 @@ def test_joint_candidate_rejects_mixed_component_lineage(tmp_path, monkeypatch):
             account_backtest_path=account_path,
             agent_model="gpt-5.6-terra",
         )
+
+
+def test_shadow_publish_verifies_components_and_atomically_points_to_release(
+    tmp_path,
+    monkeypatch,
+):
+    class _Bundle:
+        def __init__(self, root, *, require_ready):
+            assert require_ready is False
+            name = root.name
+            values = {
+                "ranking": ("ranking-v1", "a" * 64),
+                "quant": ("quant-v1", "b" * 64),
+                "position": ("position-v1", "c" * 64),
+            }
+            bundle_id, artifact = values[name]
+            self.manifest = {
+                "bundleId": bundle_id,
+                "artifactSha256": artifact,
+            }
+
+    monkeypatch.setattr(joint_bundle, "RankingModelBundle", _Bundle)
+    monkeypatch.setattr(joint_bundle, "QuantModelBundle", _Bundle)
+    monkeypatch.setattr(joint_bundle, "PositionActionBundle", _Bundle)
+    account = tmp_path / "account.json"
+    account.write_text('{"synthetic":true}')
+    account_hash = joint_bundle._file_sha256(account)
+    candidate = tmp_path / "candidate"
+    candidate.mkdir()
+    (candidate / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bundleId": "joint-candidate-v2",
+                "schemaVersion": "joint-bundle.v1",
+                "releaseStatus": "UNAVAILABLE",
+                "releaseBlockers": ["JOINT_ABLATION_PENDING"],
+                "decisionFallback": {
+                    "status": "UNAVAILABLE",
+                    "action": "NONE",
+                    "allowsNewRisk": False,
+                },
+                "components": {
+                    "rankingModelBundleId": "ranking-v1",
+                    "rankingModelArtifactSha256": "a" * 64,
+                    "quantModelBundleId": "quant-v1",
+                    "quantModelArtifactSha256": "b" * 64,
+                    "positionModelBundleId": "position-v1",
+                    "positionModelArtifactSha256": "c" * 64,
+                    "accountBacktestSha256": account_hash,
+                },
+                "agent": {
+                    "model": "gpt-synthetic",
+                    "protocolVersion": "research-assessment.v1",
+                    "featureSchemaVersion": "agent-features.v1",
+                    "featureNames": AGENT_FEATURE_NAMES,
+                    "promptSha256": "d" * 64,
+                    "toolSchemaSha256": "e" * 64,
+                },
+                "missingArtifacts": ["prospective-agent-feature-dataset"],
+            }
+        )
+    )
+    registry = tmp_path / "registry"
+    result = publish_shadow_release(
+        candidate_root=candidate,
+        registry_root=registry,
+        release_id="joint-shadow-v1",
+        ranking_model_root=tmp_path / "ranking",
+        quant_model_root=tmp_path / "quant",
+        position_model_root=tmp_path / "position",
+        account_backtest_path=account,
+    )
+    assert result["release"]["releaseStatus"] == "SHADOW"
+    assert result["release"]["allowsNewRisk"] is False
+    pointer = registry / "active-shadow.json"
+    bundle = JointBundle(pointer, require_ready=False)
+    assert bundle.position_release().status == "SHADOW"
+    assert bundle.position_release().allows_new_risk is False

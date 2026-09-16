@@ -42,7 +42,7 @@ def _fingerprint(body) -> str:
 
 def active_release() -> JointReleaseReference:
     root = settings().joint_bundle_root
-    if root is None:
+    if root is None or not root.expanduser().exists():
         return JointReleaseReference(
             release_id="no-active-joint-release",
             status="UNAVAILABLE",
@@ -138,6 +138,7 @@ def submit_position_evaluation(
             release=release,
             constraints=PositionConstraints(
                 account_id=account_id,
+                account_kind=account.kind,
                 account_version=account.version,
                 instrument_id=body.instrument_id,
                 current_quantity_shares=current,

@@ -197,7 +197,8 @@ class PositionAssessment(Contract):
 
 class JointReleaseReference(Contract):
     release_id: str = Field(min_length=1, max_length=160)
-    status: Literal["READY", "UNAVAILABLE"]
+    status: Literal["READY", "SHADOW", "UNAVAILABLE"]
+    allows_new_risk: bool = False
     position_model_bundle_id: str | None = Field(default=None, min_length=1, max_length=160)
     position_model_artifact_sha256: str | None = Field(
         default=None,
@@ -213,8 +214,16 @@ class JointReleaseReference(Contract):
             or not self.position_model_artifact_sha256
             or not self.agent_protocol_version
             or self.blocker_codes
+            or not self.allows_new_risk
         ):
             raise ValueError("READY联合版本必须绑定完整组件且没有阻断项")
+        if self.status == "SHADOW" and (
+            not self.position_model_bundle_id
+            or not self.position_model_artifact_sha256
+            or not self.agent_protocol_version
+            or self.allows_new_risk
+        ):
+            raise ValueError("SHADOW联合版本必须绑定组件且禁止新增风险")
         if self.status == "UNAVAILABLE" and not self.blocker_codes:
             raise ValueError("UNAVAILABLE联合版本必须说明阻断项")
         return self
@@ -222,6 +231,7 @@ class JointReleaseReference(Contract):
 
 class PositionConstraints(Contract):
     account_id: str = Field(min_length=1, max_length=160)
+    account_kind: Literal["REAL", "SIMULATED"]
     account_version: int = Field(strict=True, ge=1)
     instrument_id: InstrumentId
     current_quantity_shares: Quantity

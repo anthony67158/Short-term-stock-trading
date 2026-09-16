@@ -62,6 +62,26 @@ def _file_sha256(path: Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def _manifest_path(root_or_pointer: Path) -> Path:
+    path = root_or_pointer.expanduser().resolve()
+    if path.is_dir():
+        return path / "manifest.json"
+    try:
+        pointer = json.loads(path.read_text())
+        relative = Path(pointer["manifest"])
+        manifest_path = (path.parent / relative).resolve()
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise JointBundleError("JOINT_RELEASE_POINTER_INVALID") from exc
+    if (
+        relative.is_absolute()
+        or path.parent not in manifest_path.parents
+        or not manifest_path.is_file()
+        or _file_sha256(manifest_path) != pointer.get("manifestSha256")
+    ):
+        raise JointBundleError("JOINT_RELEASE_POINTER_INVALID")
+    return manifest_path
+
+
 def encode_agent_assessment(assessment: AssessmentOutput | dict) -> dict[str, float]:
     output = AssessmentOutput.model_validate(assessment)
     claims = [*output.claims, *output.counter_claims]
@@ -193,7 +213,7 @@ def write_joint_candidate(
 
 class JointBundle:
     def __init__(self, root: Path, *, require_ready: bool = True):
-        manifest_path = root.resolve() / "manifest.json"
+        manifest_path = _manifest_path(root)
         if not manifest_path.is_file():
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_MISSING")
         try:
@@ -210,14 +230,25 @@ class JointBundle:
             != AGENT_FEATURE_NAMES
         ):
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
-        if self.manifest.get("releaseStatus") == "READY" and (
+        status = self.manifest.get("releaseStatus")
+        if status not in {"READY", "SHADOW", "UNAVAILABLE"}:
+            raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
+        if status == "READY" and (
             self.manifest.get("releaseBlockers")
             or self.manifest.get("missingArtifacts")
             or self.manifest.get("agent", {}).get("positionProtocolVersion")
             != POSITION_AGENT_PROTOCOL_VERSION
+            or self.manifest.get("allowsNewRisk") is not True
         ):
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
-        if require_ready and self.manifest.get("releaseStatus") != "READY":
+        if status == "SHADOW" and (
+            self.manifest.get("deploymentMode") != "SHADOW"
+            or self.manifest.get("allowsNewRisk") is not False
+            or self.manifest.get("agent", {}).get("positionProtocolVersion")
+            != POSITION_AGENT_PROTOCOL_VERSION
+        ):
+            raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
+        if require_ready and status != "READY":
             raise JointBundleError("JOINT_BUNDLE_NOT_RELEASED")
 
     def position_release(self) -> JointReleaseReference:
@@ -225,6 +256,7 @@ class JointBundle:
         return JointReleaseReference(
             release_id=self.manifest["bundleId"],
             status=self.manifest["releaseStatus"],
+            allows_new_risk=self.manifest.get("allowsNewRisk", False),
             position_model_bundle_id=components.get("positionModelBundleId"),
             position_model_artifact_sha256=components.get(
                 "positionModelArtifactSha256"
@@ -252,3 +284,73 @@ class JointBundle:
             "reasonCodes": self.manifest["releaseBlockers"],
             "releaseId": self.manifest["bundleId"],
         }
+
+
+def publish_shadow_release(
+    *,
+    candidate_root: Path,
+    registry_root: Path,
+    release_id: str,
+    ranking_model_root: Path,
+    quant_model_root: Path,
+    position_model_root: Path,
+    account_backtest_path: Path,
+) -> dict:
+    candidate_path = candidate_root.expanduser().resolve() / "manifest.json"
+    candidate = JointBundle(candidate_root, require_ready=False).manifest
+    ranking = RankingModelBundle(ranking_model_root, require_ready=False)
+    quant = QuantModelBundle(quant_model_root, require_ready=False)
+    position = PositionActionBundle(position_model_root, require_ready=False)
+    components = candidate["components"]
+    expected = {
+        "rankingModelBundleId": ranking.manifest["bundleId"],
+        "rankingModelArtifactSha256": ranking.manifest["artifactSha256"],
+        "quantModelBundleId": quant.manifest["bundleId"],
+        "quantModelArtifactSha256": quant.manifest["artifactSha256"],
+        "positionModelBundleId": position.manifest["bundleId"],
+        "positionModelArtifactSha256": position.manifest["artifactSha256"],
+        "accountBacktestSha256": _file_sha256(account_backtest_path.resolve()),
+    }
+    if components != expected:
+        raise JointBundleError("JOINT_SHADOW_COMPONENT_MISMATCH")
+    root = registry_root.expanduser().resolve()
+    release_root = root / "releases" / release_id
+    manifest_path = release_root / "manifest.json"
+    pointer_path = root / "active-shadow.json"
+    if manifest_path.exists():
+        raise JointBundleError("JOINT_SHADOW_RELEASE_ALREADY_EXISTS")
+    release = {
+        **candidate,
+        "bundleId": release_id,
+        "sourceCandidateBundleId": candidate["bundleId"],
+        "sourceCandidateManifestSha256": _file_sha256(candidate_path),
+        "releaseStatus": "SHADOW",
+        "deploymentMode": "SHADOW",
+        "allowsNewRisk": False,
+        "activatedAt": datetime.now(UTC).isoformat(),
+        "agent": {
+            **candidate["agent"],
+            "positionProtocolVersion": POSITION_AGENT_PROTOCOL_VERSION,
+        },
+    }
+    release_root.mkdir(parents=True, exist_ok=False)
+    temporary_manifest = manifest_path.with_suffix(".json.tmp")
+    temporary_manifest.write_text(
+        json.dumps(release, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    )
+    os.replace(temporary_manifest, manifest_path)
+    relative = manifest_path.relative_to(root)
+    pointer = {
+        "schemaVersion": "joint-release-pointer.v1",
+        "releaseId": release_id,
+        "manifest": str(relative),
+        "manifestSha256": _file_sha256(manifest_path),
+        "updatedAt": datetime.now(UTC).isoformat(),
+    }
+    root.mkdir(parents=True, exist_ok=True)
+    temporary_pointer = pointer_path.with_suffix(".json.tmp")
+    temporary_pointer.write_text(
+        json.dumps(pointer, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    )
+    os.replace(temporary_pointer, pointer_path)
+    return {"release": release, "pointer": pointer}

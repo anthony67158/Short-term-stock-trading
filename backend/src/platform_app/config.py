@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     market_data_api_key: SecretStr = SecretStr("")
     market_data_timeout_seconds: int = Field(default=40, ge=5, le=90)
     market_data_enabled: bool = False
-    joint_bundle_root: Path | None = None
+    joint_bundle_root: Path | None = Path(
+        "~/.local/share/stock-platform/joint-releases/active-shadow.json"
+    ).expanduser()
     cookie_secure: bool = False
 
     @field_validator("agent_base_url")
