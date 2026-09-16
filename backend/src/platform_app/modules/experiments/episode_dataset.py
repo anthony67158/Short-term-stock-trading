@@ -521,6 +521,11 @@ class EpisodeDataset:
     def seal(self) -> dict:
         if self.manifest_path.exists():
             raise EpisodeDatasetError("EPISODE_DATASET_ALREADY_SEALED")
+        pending_minutes = self.db.execute(
+            "SELECT COUNT(*) FROM minute_requirements WHERE status = 'PENDING'"
+        ).fetchone()[0]
+        if pending_minutes:
+            raise EpisodeDatasetError("EPISODE_MINUTE_REQUIREMENTS_INCOMPLETE")
         metadata = dict(self.db.execute("SELECT * FROM episode_dataset_metadata").fetchone())
         tables = {
             table: self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

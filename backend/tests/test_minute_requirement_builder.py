@@ -215,6 +215,11 @@ def test_builder_creates_five_session_requirements_and_marks_missing_daily(tmp_p
             (dates[4], "PENDING", None),
             (dates[5], "PENDING", None),
         ]
+        with pytest.raises(
+            ValueError,
+            match="EPISODE_MINUTE_REQUIREMENTS_INCOMPLETE",
+        ):
+            dataset.seal()
 
 
 def test_builder_defers_episode_without_complete_horizon(tmp_path):
