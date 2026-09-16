@@ -1,13 +1,18 @@
 """Read-only integrity audit for canonical market-dataset.v3 datasets."""
 
 import hashlib
+import re
 import sqlite3
 from bisect import bisect_left
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from platform_app.modules.experiments.market_dataset import SCHEMA_VERSION, canonical_sha256
+from platform_app.modules.experiments.market_dataset import (
+    DAILY_TURNOVER_SCOPE,
+    SCHEMA_VERSION,
+    canonical_sha256,
+)
 
 EXPECTED_MINUTE_BARS = 48
 MINUTE_VOLUME_TOLERANCE_SHARES = Decimal("100")
@@ -145,6 +150,8 @@ def _audit_instrument(
             _record(violations, "invalidDailyOHLC", identity)
         if values["volume_shares"] < 0 or values["amount_cny"] < 0:
             _record(violations, "negativeDailyVolumeOrAmount", identity)
+        if row["turnover_scope"] != DAILY_TURNOVER_SCOPE:
+            _record(violations, "invalidDailyTurnoverScope", identity)
         if row["trade_date"] < instrument["list_date"] or (
             instrument["delist_date"] is not None and row["trade_date"] >= instrument["delist_date"]
         ):
@@ -294,6 +301,91 @@ def _audit_minutes(db: sqlite3.Connection, violations: dict) -> dict:
     return {"checkpoints": len(checkpoints), "validatedPartitions": checked}
 
 
+def _audit_block_trades(
+    db: sqlite3.Connection,
+    open_dates: list[str],
+    violations: dict,
+) -> dict:
+    checkpoints = db.execute(
+        "SELECT partition_key, row_count FROM sync_checkpoints "
+        "WHERE stream = 'block_trades' ORDER BY partition_key"
+    ).fetchall()
+    checkpoint_dates = {row["partition_key"] for row in checkpoints}
+    for trade_date in sorted(set(open_dates) - checkpoint_dates):
+        _record(violations, "missingBlockTradeCheckpoint", trade_date)
+    for trade_date in sorted(checkpoint_dates - set(open_dates)):
+        _record(violations, "nonOpenBlockTradeCheckpoint", trade_date)
+
+    summaries = db.execute(
+        "SELECT b.*, i.source_code AS canonical_source_code, i.list_date, i.delist_date "
+        "FROM block_trade_summaries b JOIN instruments i USING (instrument_id) "
+        "ORDER BY b.trade_date, b.instrument_id"
+    ).fetchall()
+    for row in summaries:
+        identity = f"{row['instrument_id']}@{row['trade_date']}"
+        low = _decimal(row["low_price"])
+        high = _decimal(row["high_price"])
+        volume = _decimal(row["volume_shares"])
+        amount = _decimal(row["amount_cny"])
+        if (
+            low is None
+            or high is None
+            or volume is None
+            or amount is None
+            or low <= 0
+            or high < low
+            or volume <= 0
+            or amount <= 0
+        ):
+            _record(violations, "invalidBlockTradeSummary", identity)
+        if row["trade_date"] < row["list_date"] or (
+            row["delist_date"] is not None and row["trade_date"] >= row["delist_date"]
+        ):
+            _record(violations, "blockTradeOutsideLifecycle", identity)
+        aliases = db.execute(
+            "SELECT source_code, effective_from, effective_to FROM instrument_aliases "
+            "WHERE instrument_id = ?",
+            (row["instrument_id"],),
+        ).fetchall()
+        if not _source_code_valid(
+            row["source_code"],
+            row["canonical_source_code"],
+            aliases,
+            row["trade_date"],
+        ):
+            _record(violations, "blockTradeSourceCodeMismatch", identity)
+        expected_available = (
+            f"{row['trade_date'][:4]}-{row['trade_date'][4:6]}-"
+            f"{row['trade_date'][6:]}T21:00:00+08:00"
+        )
+        if row["available_at"] != expected_available:
+            _record(violations, "blockTradeAvailabilityMismatch", identity)
+        if not re.fullmatch(r"[0-9a-f]{64}", row["source_rows_sha256"]):
+            _record(violations, "invalidBlockTradeSourceHash", identity)
+        if row["trade_date"] not in checkpoint_dates:
+            _record(violations, "blockTradeSummaryWithoutCheckpoint", identity)
+
+    transactions = 0
+    for checkpoint in checkpoints:
+        summarized = db.execute(
+            "SELECT COALESCE(SUM(transaction_count), 0) FROM block_trade_summaries "
+            "WHERE trade_date = ?",
+            (checkpoint["partition_key"],),
+        ).fetchone()[0]
+        transactions += summarized
+        if summarized != checkpoint["row_count"]:
+            _record(
+                violations,
+                "blockTradeCheckpointCountMismatch",
+                checkpoint["partition_key"],
+            )
+    return {
+        "checkpoints": len(checkpoints),
+        "summaryRows": len(summaries),
+        "transactions": transactions,
+    }
+
+
 def audit_market_dataset(dataset_root: Path, *, observed_at=None) -> dict:
     database = dataset_root.resolve() / "market.sqlite3"
     if not database.is_file():
@@ -359,6 +451,7 @@ def audit_market_dataset(dataset_root: Path, *, observed_at=None) -> dict:
                 "listing_status_periods",
                 "name_changes",
                 "minute_bars",
+                "block_trade_summaries",
                 "sync_checkpoints",
             )
         }
@@ -367,6 +460,7 @@ def audit_market_dataset(dataset_root: Path, *, observed_at=None) -> dict:
         ).fetchone()[0]
         if invalid_names:
             _record(violations, "invalidNameChangeInterval", str(invalid_names))
+        block_trade_summary = _audit_block_trades(db, open_dates, violations)
         minute_summary = _audit_minutes(db, violations)
 
     observed = (observed_at or (lambda: datetime.now(UTC).isoformat()))()
@@ -386,11 +480,13 @@ def audit_market_dataset(dataset_root: Path, *, observed_at=None) -> dict:
             "to": end_date,
             "openDates": len(open_dates),
             "dailyCheckpoints": len(checkpoint_dates),
+            "blockTradeCheckpoints": block_trade_summary["checkpoints"],
         },
         "totals": totals,
         "boards": dict(sorted(boards.items())),
         "tables": structural_counts,
         "minutes": minute_summary,
+        "blockTrades": block_trade_summary,
         "violations": violations,
         "passed": integrity == ["ok"] and not violations,
     }

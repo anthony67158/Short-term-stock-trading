@@ -93,6 +93,7 @@ def build_dataset(tmp_path):
         )
         dataset.checkpoint("reference", "20260915:20260915", [{}])
         dataset.checkpoint("daily", "20260915", [{}])
+        dataset.checkpoint("block_trades", "20260915", [])
     return root
 
 
@@ -104,7 +105,9 @@ def test_canonical_dataset_audit_passes_complete_fixture(tmp_path):
 
     assert report["passed"]
     assert report["range"]["openDates"] == 1
+    assert report["range"]["blockTradeCheckpoints"] == 1
     assert report["totals"]["dailyBars"] == 1
+    assert report["blockTrades"]["transactions"] == 0
     assert report["violations"] == {}
 
 
@@ -126,3 +129,32 @@ def test_canonical_dataset_audit_reports_value_and_coverage_failures(tmp_path):
     assert not report["passed"]
     assert report["violations"]["invalidDailyOHLC"]["count"] == 1
     assert report["violations"]["dailyMissingAdjustmentFactor"]["count"] == 1
+
+
+def test_canonical_dataset_audit_validates_block_trade_checkpoint_counts(tmp_path):
+    root = build_dataset(tmp_path)
+    with MarketDataset(root, dataset_id="audit-fixture", source="TUSHARE_COMPATIBLE") as dataset:
+        dataset.write_facts(
+            "block_trade_summaries",
+            [
+                {
+                    "instrument_id": "SH.600000",
+                    "source_code": "600000.SH",
+                    "trade_date": "20260915",
+                    "transaction_count": 1,
+                    "low_price": "10",
+                    "high_price": "10",
+                    "volume_shares": "10000",
+                    "amount_cny": "100000",
+                    "source": "TUSHARE_COMPATIBLE",
+                    "available_at": "2026-09-15T21:00:00+08:00",
+                    "source_rows_sha256": HASH,
+                }
+            ],
+            key_fields=("instrument_id", "trade_date"),
+        )
+
+    report = audit_market_dataset(root)
+
+    assert not report["passed"]
+    assert report["violations"]["blockTradeCheckpointCountMismatch"]["count"] == 1

@@ -48,7 +48,10 @@ def main():
     parser.add_argument("--dataset-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
-    parser.add_argument("--stage", choices=["reference", "names", "daily", "minute", "seal"])
+    parser.add_argument(
+        "--stage",
+        choices=["reference", "names", "daily", "block-trades", "minute", "seal"],
+    )
     parser.add_argument("--instrument-id", action="append")
     parser.add_argument("--sample", action="append", type=cross_source_sample)
     args = parser.parse_args()
@@ -200,7 +203,7 @@ def main():
                 elif args.stage == "names":
                     result = builder.sync_name_changes(args.start_date, args.end_date)
                     print(json.dumps(result, ensure_ascii=False))
-                elif args.stage == "daily":
+                elif args.stage in {"daily", "block-trades"}:
                     dates = dataset.db.execute(
                         "SELECT cal_date FROM trade_calendar "
                         "WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date",
@@ -209,7 +212,11 @@ def main():
                     for (trade_date,) in dates.fetchall():
                         print(
                             json.dumps(
-                                builder.sync_daily_partition(trade_date),
+                                (
+                                    builder.sync_daily_partition(trade_date)
+                                    if args.stage == "daily"
+                                    else builder.sync_block_trade_partition(trade_date)
+                                ),
                                 ensure_ascii=False,
                             ),
                             flush=True,
