@@ -51,6 +51,7 @@ def main():
             "train-quant-model",
             "train-ranking-model",
             "audit-execution-coverage",
+            "build-selected-backtest-dataset",
         ],
     )
     parser.add_argument("--username")
@@ -459,6 +460,119 @@ def main():
                 print(json.dumps(dataset.seal(), ensure_ascii=False))
             else:
                 for result in dataset.build(max_instruments=args.max_windows):
+                    print(json.dumps(result, ensure_ascii=False), flush=True)
+    elif args.command == "build-selected-backtest-dataset":
+        from platform_app.modules.experiments.episode_dataset import EpisodeDataset
+        from platform_app.modules.experiments.minute_requirement_fetcher import (
+            MinuteRequirementFetcher,
+        )
+        from platform_app.modules.experiments.minute_requirement_builder import (
+            MinuteRequirementBuilder,
+        )
+        from platform_app.modules.experiments.selected_episode_builder import (
+            SelectedEpisodeBuilder,
+            load_selected_backtest_policy,
+        )
+
+        if not all(
+            (
+                args.dataset_root,
+                args.episode_root,
+                args.episode_dataset_id,
+                args.ranking_root,
+                args.model_root,
+                args.stage,
+            )
+        ):
+            parser.error(
+                "dataset-root, episode-root, episode-dataset-id, ranking-root, "
+                "model-root and stage are required"
+            )
+        if args.stage not in {
+            "candidates",
+            "minute-requirements",
+            "fetch-minutes",
+            "exhaust-minutes",
+            "seal",
+        }:
+            parser.error(
+                "selected backtest stage must be candidates, minute-requirements, "
+                "fetch-minutes, exhaust-minutes or seal"
+            )
+        if args.stage != "seal" and (
+            not args.start_date
+            or not args.end_date
+            or not re.fullmatch(r"\d{8}", args.start_date)
+            or not re.fullmatch(r"\d{8}", args.end_date)
+            or args.start_date > args.end_date
+        ):
+            parser.error("non-seal stages require ordered YYYYMMDD date values")
+        if args.stage == "exhaust-minutes" and (
+            not args.reason or not args.resolution_note
+        ):
+            parser.error("exhaust-minutes stage requires reason and resolution-note")
+        if args.stage == "fetch-minutes" and args.max_sessions > 150:
+            parser.error("fetch-minutes requires max-sessions <= 150")
+        try:
+            market_root = external_dataset_root(args.dataset_root)
+            episode_root = external_dataset_root(args.episode_root)
+            ranking_root = external_dataset_root(args.ranking_root)
+            model_root = external_dataset_root(args.model_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        policy = load_selected_backtest_policy(
+            ranking_dataset_root=ranking_root,
+            ranking_model_root=model_root,
+            top_n=args.top_n,
+        )
+        with EpisodeDataset(
+            episode_root,
+            dataset_id=args.episode_dataset_id,
+            market_dataset_root=market_root,
+            policy=policy,
+        ) as dataset:
+            if args.stage == "seal":
+                print(json.dumps(dataset.seal(), ensure_ascii=False))
+            elif args.stage == "exhaust-minutes":
+                print(
+                    json.dumps(
+                        dataset.resolve_exhausted_minutes(
+                            start_date=args.start_date,
+                            end_date=args.end_date,
+                            reasons=args.reason,
+                            note=args.resolution_note,
+                        ),
+                        ensure_ascii=False,
+                    )
+                )
+            elif args.stage == "minute-requirements":
+                with MinuteRequirementBuilder(dataset) as builder:
+                    results = builder.build_range(args.start_date, args.end_date)
+                for result in results:
+                    print(json.dumps(result, ensure_ascii=False), flush=True)
+            elif args.stage == "fetch-minutes":
+                from platform_app.adapters.market_tushare import TushareClient
+
+                with MinuteRequirementFetcher(
+                    TushareClient(),
+                    dataset,
+                    max_sessions=args.max_sessions,
+                ) as fetcher:
+                    for result in fetcher.fetch_pending(
+                        args.start_date,
+                        args.end_date,
+                        reasons=args.reason,
+                        max_windows=args.max_windows,
+                    ):
+                        print(json.dumps(result, ensure_ascii=False), flush=True)
+            else:
+                builder = SelectedEpisodeBuilder(
+                    dataset,
+                    ranking_dataset_root=ranking_root,
+                    ranking_model_root=model_root,
+                    top_n=args.top_n,
+                )
+                for result in builder.build_range(args.start_date, args.end_date):
                     print(json.dumps(result, ensure_ascii=False), flush=True)
     elif args.command == "build-label-dataset":
         from platform_app.modules.experiments.label_dataset import LabelDataset
