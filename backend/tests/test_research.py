@@ -146,7 +146,17 @@ def test_agent_http_contract_and_auth_failure_without_retry(research_owner, monk
         assert body["model"] == "gpt-5.6-terra"
         calls.append(request.url.path)
         return httpx.Response(200, json={
-            "choices": [{"message": {"content": json.dumps(output(job.payload))}}],
+            "choices": [{"message": {
+                "content": None,
+                "tool_calls": [{
+                    "id": "assessment-call-1",
+                    "type": "function",
+                    "function": {
+                        "name": "submit_assessment",
+                        "arguments": json.dumps(output(job.payload)),
+                    },
+                }],
+            }}],
         })
 
     monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **kwargs: original(
@@ -154,6 +164,16 @@ def test_agent_http_contract_and_auth_failure_without_retry(research_owner, monk
     ))
     assert agent.run_agent(job.payload).assessment.thesis_status == "UNCERTAIN"
     assert calls == ["/v1/chat/completions"]
+    monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **kwargs: original(
+        **kwargs, transport=httpx.MockTransport(lambda request: httpx.Response(
+            200,
+            json={"choices": [{"message": {
+                "content": json.dumps(output(job.payload)),
+            }}]},
+        )),
+    ))
+    with pytest.raises(AgentFailure, match="INVALID_AGENT_OUTPUT"):
+        agent.run_agent(job.payload)
     monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **kwargs: original(
         **kwargs, transport=httpx.MockTransport(lambda request: httpx.Response(401)),
     ))
@@ -232,7 +252,25 @@ def test_agent_search_tool_adds_causal_evidence_and_trace(
         }
         return httpx.Response(
             200,
-            json={"choices": [{"message": {"content": json.dumps(final)}}]},
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "assessment-call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "submit_assessment",
+                                        "arguments": json.dumps(final),
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
         )
 
     class SearchClient:
@@ -274,8 +312,13 @@ def test_agent_search_tool_adds_causal_evidence_and_trace(
     result = agent.run_agent(job.payload, search_client=search)
 
     assert len(model_calls) == 2
-    assert "tools" in model_calls[0]
-    assert "tools" not in model_calls[1]
+    assert {tool["function"]["name"] for tool in model_calls[0]["tools"]} == {
+        "doubao_search",
+        "submit_assessment",
+    }
+    assert [
+        tool["function"]["name"] for tool in model_calls[1]["tools"]
+    ] == ["submit_assessment"]
     assert len(search.requests) == 1
     assert search.requests[0].time_range.endswith(
         utcnow().date().isoformat()
