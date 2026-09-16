@@ -10,8 +10,10 @@ from itertools import groupby
 from pathlib import Path
 
 import joblib
+import lightgbm
 import numpy as np
 import sklearn
+from lightgbm import LGBMRanker, early_stopping, log_evaluation
 from scipy.stats import rankdata
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error
@@ -23,6 +25,17 @@ from platform_app.modules.experiments.quant_model_trainer import (
 )
 
 MODEL_SCHEMA_VERSION = "ranking-model-bundle.v1"
+BOARD_PERCENTILE_TARGET = "board-percentile-v1"
+GLOBAL_PERCENTILE_TARGET = "global-percentile-v2"
+RANKING_TARGET_POLICIES = (
+    BOARD_PERCENTILE_TARGET,
+    GLOBAL_PERCENTILE_TARGET,
+)
+HGB_MODEL_FAMILY = "hgb-mse-v1"
+LAMBDARANK_MODEL_FAMILY = "lightgbm-lambdarank-v1"
+MODEL_FAMILIES = (HGB_MODEL_FAMILY, LAMBDARANK_MODEL_FAMILY)
+DEFAULT_RELEVANCE_LEVELS = 5
+LINEAR_LABEL_GAIN_POLICY = "linear-v1"
 RAW_COLUMNS = (
     "adjusted_return_1",
     "adjusted_return_5",
@@ -88,6 +101,7 @@ class RankingTrainingData:
     target_return: np.ndarray
     target_rank: np.ndarray
     sample_weight: np.ndarray
+    target_policy: str = BOARD_PERCENTILE_TARGET
 
 
 def _file_sha256(path: Path) -> str:
@@ -118,7 +132,13 @@ def _percentile_ranks(values: np.ndarray) -> np.ndarray:
     )
 
 
-def _date_features(rows: list[sqlite3.Row]) -> tuple[np.ndarray, np.ndarray]:
+def _date_features(
+    rows: list[sqlite3.Row],
+    *,
+    target_policy: str = BOARD_PERCENTILE_TARGET,
+) -> tuple[np.ndarray, np.ndarray]:
+    if target_policy not in RANKING_TARGET_POLICIES:
+        raise QuantModelError("RANKING_TARGET_POLICY_UNSUPPORTED")
     raw = np.asarray(
         [[float(row[column]) for column in RAW_COLUMNS] for row in rows],
         dtype=np.float32,
@@ -149,7 +169,10 @@ def _date_features(rows: list[sqlite3.Row]) -> tuple[np.ndarray, np.ndarray]:
         mask = boards == board_code
         for output_index, raw_index in enumerate(relative_columns):
             relative[mask, output_index] = _percentile_ranks(raw[mask, raw_index])
-        target_rank[mask] = _percentile_ranks(target_return[mask])
+        if target_policy == BOARD_PERCENTILE_TARGET:
+            target_rank[mask] = _percentile_ranks(target_return[mask])
+    if target_policy == GLOBAL_PERCENTILE_TARGET:
+        target_rank = _percentile_ranks(target_return)
     return (
         np.concatenate(
             [transformed, board_one_hot, market_features, relative],
@@ -161,7 +184,11 @@ def _date_features(rows: list[sqlite3.Row]) -> tuple[np.ndarray, np.ndarray]:
 
 def load_ranking_training_data(
     ranking_dataset_root: Path,
+    *,
+    target_policy: str = BOARD_PERCENTILE_TARGET,
 ) -> tuple[RankingTrainingData, dict]:
+    if target_policy not in RANKING_TARGET_POLICIES:
+        raise QuantModelError("RANKING_TARGET_POLICY_UNSUPPORTED")
     manifest, database_path = _verified_ranking_database(ranking_dataset_root)
     count = int(manifest["samples"])
     x = np.empty((count, len(MODEL_FEATURE_NAMES)), dtype=np.float32)
@@ -182,7 +209,10 @@ def load_ranking_training_data(
     offset = 0
     for decision_date, group in groupby(rows, key=lambda row: row["decision_date"]):
         group_rows = list(group)
-        group_x, group_target_rank = _date_features(group_rows)
+        group_x, group_target_rank = _date_features(
+            group_rows,
+            target_policy=target_policy,
+        )
         end = offset + len(group_rows)
         x[offset:end] = group_x
         dates[offset:end] = int(decision_date)
@@ -208,6 +238,7 @@ def load_ranking_training_data(
             target_return=target_return,
             target_rank=target_rank,
             sample_weight=sample_weight,
+            target_policy=target_policy,
         ),
         manifest,
     )
@@ -255,14 +286,47 @@ def _daily_backtest_metrics(
     }
 
 
+def _group_sizes(dates: np.ndarray) -> np.ndarray:
+    _, counts = np.unique(dates, return_counts=True)
+    return counts.astype(np.int32)
+
+
+def _relevance_labels(
+    target_rank: np.ndarray,
+    *,
+    levels: int = DEFAULT_RELEVANCE_LEVELS,
+) -> np.ndarray:
+    if levels < 2:
+        raise QuantModelError("RANKING_RELEVANCE_LEVELS_INVALID")
+    return np.minimum(
+        (target_rank * levels).astype(np.int32),
+        levels - 1,
+    )
+
+
+def _linear_label_gain(levels: int) -> list[int]:
+    if levels < 2:
+        raise QuantModelError("RANKING_RELEVANCE_LEVELS_INVALID")
+    return list(range(levels))
+
+
 def train_ranking_models(
     data: RankingTrainingData,
     *,
     max_iter: int = 120,
     min_samples_leaf: int = 200,
+    model_family: str = HGB_MODEL_FAMILY,
+    relevance_levels: int = DEFAULT_RELEVANCE_LEVELS,
 ) -> tuple[dict, dict]:
+    if model_family not in MODEL_FAMILIES:
+        raise QuantModelError("RANKING_MODEL_FAMILY_UNSUPPORTED")
+    if (
+        model_family != LAMBDARANK_MODEL_FAMILY
+        and relevance_levels != DEFAULT_RELEVANCE_LEVELS
+    ):
+        raise QuantModelError("RANKING_RELEVANCE_LEVELS_REQUIRE_LAMBDARANK")
     split = temporal_split(data.dates)
-    train, _calibration, confirmation = split.masks(data.dates)
+    train, calibration, confirmation = split.masks(data.dates)
     common = {
         "learning_rate": 0.05,
         "max_iter": max_iter,
@@ -272,14 +336,50 @@ def train_ranking_models(
         "early_stopping": False,
         "random_state": RANDOM_STATE,
     }
-    rank_model = HistGradientBoostingRegressor(
-        loss="squared_error",
-        **common,
-    ).fit(
-        data.x[train],
-        data.target_rank[train],
-        sample_weight=data.sample_weight[train],
-    )
+    if model_family == HGB_MODEL_FAMILY:
+        rank_model = HistGradientBoostingRegressor(
+            loss="squared_error",
+            **common,
+        ).fit(
+            data.x[train],
+            data.target_rank[train],
+            sample_weight=data.sample_weight[train],
+        )
+    else:
+        rank_model = LGBMRanker(
+            objective="lambdarank",
+            learning_rate=0.05,
+            n_estimators=max_iter,
+            num_leaves=31,
+            max_depth=6,
+            min_child_samples=min_samples_leaf,
+            reg_lambda=1.0,
+            max_bin=63,
+            deterministic=True,
+            force_col_wise=True,
+            label_gain=_linear_label_gain(relevance_levels),
+            random_state=RANDOM_STATE,
+            n_jobs=8,
+            verbosity=-1,
+        )
+        mean_group_size = float(np.mean(_group_sizes(data.dates[train])))
+        rank_model.fit(
+            data.x[train],
+            _relevance_labels(
+                data.target_rank[train],
+                levels=relevance_levels,
+            ),
+            sample_weight=data.sample_weight[train] * mean_group_size,
+            group=_group_sizes(data.dates[train]),
+            eval_X=data.x[calibration],
+            eval_y=_relevance_labels(
+                data.target_rank[calibration],
+                levels=relevance_levels,
+            ),
+            eval_group=[_group_sizes(data.dates[calibration])],
+            eval_at=(10, 50),
+            callbacks=[early_stopping(20, verbose=False), log_evaluation(0)],
+        )
     lower, upper = np.quantile(data.target_return[train], [0.005, 0.995])
     clipped_return = np.clip(data.target_return, lower, upper)
     return_model = HistGradientBoostingRegressor(
@@ -293,6 +393,16 @@ def train_ranking_models(
     rank_scores = rank_model.predict(data.x[confirmation])
     return_predictions = return_model.predict(data.x[confirmation])
     metrics = {
+        "modelFamily": model_family,
+        "rankingTargetPolicy": data.target_policy,
+        "relevanceLevels": (
+            relevance_levels if model_family == LAMBDARANK_MODEL_FAMILY else None
+        ),
+        "labelGainPolicy": (
+            LINEAR_LABEL_GAIN_POLICY
+            if model_family == LAMBDARANK_MODEL_FAMILY
+            else None
+        ),
         "split": split.as_dict(),
         "confirmationSamples": int(np.sum(confirmation)),
         "expectedReturnMae": float(
@@ -322,13 +432,20 @@ def write_ranking_bundle(
     data: RankingTrainingData,
     ranking_manifest: dict,
     max_iter: int = 120,
+    model_family: str = HGB_MODEL_FAMILY,
+    relevance_levels: int = DEFAULT_RELEVANCE_LEVELS,
 ) -> dict:
     root = output_root.resolve()
     manifest_path = root / "manifest.json"
     if manifest_path.exists():
         raise QuantModelError("RANKING_MODEL_BUNDLE_ALREADY_EXISTS")
     root.mkdir(parents=True, exist_ok=True)
-    models, metrics = train_ranking_models(data, max_iter=max_iter)
+    models, metrics = train_ranking_models(
+        data,
+        max_iter=max_iter,
+        model_family=model_family,
+        relevance_levels=relevance_levels,
+    )
     artifact_path = root / "models.joblib"
     joblib.dump(
         {
@@ -347,10 +464,15 @@ def write_ranking_bundle(
         "artifactSha256": _file_sha256(artifact_path),
         "rankingDatasetId": ranking_manifest["datasetId"],
         "rankingDatabaseSha256": ranking_manifest["databaseSha256"],
+        "rankingTargetPolicy": data.target_policy,
+        "modelFamily": model_family,
+        "relevanceLevels": metrics["relevanceLevels"],
+        "labelGainPolicy": metrics["labelGainPolicy"],
         "featureNames": MODEL_FEATURE_NAMES,
         "libraryVersions": {
             "numpy": np.__version__,
             "scikitLearn": sklearn.__version__,
+            "lightgbm": lightgbm.__version__,
             "joblib": joblib.__version__,
         },
         "metrics": metrics,

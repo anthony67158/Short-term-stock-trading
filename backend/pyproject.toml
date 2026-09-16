@@ -13,6 +13,7 @@ dependencies = [
   "argon2-cffi>=23.1",
   "numpy>=2.2,<3",
   "scikit-learn>=1.9,<1.10",
+  "lightgbm>=4.6,<5",
   "joblib>=1.5,<2",
   "mcp>=1.26,<2",
 ]
