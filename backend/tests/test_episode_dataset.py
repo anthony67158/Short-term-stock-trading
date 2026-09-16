@@ -205,6 +205,6 @@ def test_unsealed_v1_dataset_migrates_without_rebuilding_candidates(tmp_path):
     ) as migrated:
         assert (
             migrated.db.execute("SELECT schema_version FROM episode_dataset_metadata").fetchone()[0]
-            == "episode-dataset.v2"
+            == "episode-dataset.v3"
         )
         assert migrated.db.execute("SELECT COUNT(*) FROM candidate_episodes").fetchone()[0] == 1

@@ -62,6 +62,7 @@ def main():
             "minute",
             "candidates",
             "minute-requirements",
+            "archive-minutes",
             "seal",
         ],
     )
@@ -271,6 +272,9 @@ def main():
             CandidateEpisodeBuilder,
         )
         from platform_app.modules.experiments.episode_dataset import EpisodeDataset
+        from platform_app.modules.experiments.minute_archive_importer import (
+            MinuteArchiveImporter,
+        )
         from platform_app.modules.experiments.minute_requirement_builder import (
             MinuteRequirementBuilder,
         )
@@ -287,9 +291,17 @@ def main():
             )
         ):
             parser.error("dataset-root, episode-root, episode-dataset-id and stage are required")
-        if args.stage not in {"candidates", "minute-requirements", "seal"}:
-            parser.error("episode dataset stage must be candidates, minute-requirements or seal")
-        if args.stage in {"candidates", "minute-requirements"} and (
+        if args.stage not in {
+            "candidates",
+            "minute-requirements",
+            "archive-minutes",
+            "seal",
+        }:
+            parser.error(
+                "episode dataset stage must be candidates, minute-requirements, "
+                "archive-minutes or seal"
+            )
+        if args.stage in {"candidates", "minute-requirements", "archive-minutes"} and (
             not args.start_date
             or not args.end_date
             or not re.fullmatch(r"\d{8}", args.start_date)
@@ -297,6 +309,8 @@ def main():
             or args.start_date > args.end_date
         ):
             parser.error("candidates stage requires ordered YYYYMMDD date values")
+        if args.stage == "archive-minutes" and not args.archive_root:
+            parser.error("archive-minutes stage requires archive-root")
         try:
             market_root = external_dataset_root(args.dataset_root)
             episode_root = external_dataset_root(args.episode_root)
@@ -310,6 +324,15 @@ def main():
         ) as dataset:
             if args.stage == "seal":
                 print(json.dumps(dataset.seal(), ensure_ascii=False))
+            elif args.stage == "archive-minutes":
+                for archive_root in args.archive_root:
+                    with MinuteArchiveImporter(
+                        dataset,
+                        external_dataset_root(archive_root),
+                    ) as importer:
+                        results = importer.import_range(args.start_date, args.end_date)
+                    for result in results:
+                        print(json.dumps(result, ensure_ascii=False), flush=True)
             elif args.stage == "minute-requirements":
                 with MinuteRequirementBuilder(dataset) as builder:
                     results = builder.build_range(args.start_date, args.end_date)

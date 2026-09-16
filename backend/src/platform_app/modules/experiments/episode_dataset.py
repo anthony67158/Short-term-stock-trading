@@ -13,8 +13,8 @@ class EpisodeDatasetError(ValueError):
     pass
 
 
-SCHEMA_VERSION = "episode-dataset.v2"
-MIGRATABLE_SCHEMA_VERSIONS = {"episode-dataset.v1"}
+SCHEMA_VERSION = "episode-dataset.v3"
+MIGRATABLE_SCHEMA_VERSIONS = {"episode-dataset.v1", "episode-dataset.v2"}
 REQUIRED_POLICY_KEYS = {
     "candidatePolicy",
     "executionPolicy",
@@ -101,6 +101,47 @@ CREATE TABLE IF NOT EXISTS minute_requirement_partitions (
     deferred_episode_count INTEGER NOT NULL CHECK (deferred_episode_count >= 0),
     payload_sha256 TEXT NOT NULL,
     completed_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS episode_minute_bars (
+    instrument_id TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    bar_end_shanghai TEXT NOT NULL,
+    open TEXT NOT NULL,
+    high TEXT NOT NULL,
+    low TEXT NOT NULL,
+    close TEXT NOT NULL,
+    volume_shares TEXT NOT NULL,
+    amount_cny TEXT NOT NULL,
+    source_kind TEXT NOT NULL,
+    source_asset_sha256 TEXT NOT NULL,
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, bar_end_shanghai),
+    FOREIGN KEY (instrument_id, trade_date)
+        REFERENCES minute_requirements(instrument_id, trade_date)
+) STRICT;
+CREATE TABLE IF NOT EXISTS minute_ingestion_attempts (
+    source_kind TEXT NOT NULL,
+    source_asset_sha256 TEXT NOT NULL,
+    instrument_id TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    outcome TEXT NOT NULL CHECK (outcome IN ('ACCEPTED', 'REJECTED')),
+    reason TEXT,
+    details_json TEXT NOT NULL,
+    attempted_at TEXT NOT NULL,
+    PRIMARY KEY (source_kind, source_asset_sha256, instrument_id, trade_date),
+    FOREIGN KEY (instrument_id, trade_date)
+        REFERENCES minute_requirements(instrument_id, trade_date)
+) STRICT;
+CREATE TABLE IF NOT EXISTS minute_archive_files (
+    source_kind TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    source_asset_sha256 TEXT NOT NULL,
+    archive_code_count INTEGER NOT NULL CHECK (archive_code_count >= 0),
+    matched_requirement_count INTEGER NOT NULL CHECK (matched_requirement_count >= 0),
+    accepted_count INTEGER NOT NULL CHECK (accepted_count >= 0),
+    rejected_count INTEGER NOT NULL CHECK (rejected_count >= 0),
+    completed_at TEXT NOT NULL,
+    PRIMARY KEY (source_kind, trade_date)
 ) STRICT;
 """
 
@@ -490,6 +531,9 @@ class EpisodeDataset:
                 "minute_requirements",
                 "episode_minute_requirements",
                 "minute_requirement_partitions",
+                "episode_minute_bars",
+                "minute_ingestion_attempts",
+                "minute_archive_files",
             )
         }
         self.db.commit()

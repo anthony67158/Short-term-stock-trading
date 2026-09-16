@@ -219,3 +219,32 @@ uv run platform-cli build-market-dataset \
 
 全量日线与大宗交易分账自身完整性已通过，但分钟episode和扩展独立来源确认
 仍未完成；在这些门禁完成前不得发布生产模型。
+
+## 候选episode分钟覆盖
+
+- 正式episode库：
+  `/Users/bytedance/.local/share/stock-platform/short-horizon-episodes-v1`，
+  schema `episode-dataset.v3`。196,748个候选生成981,740条五日窗口关联；
+  222,088个唯一证券日待取，另有412个因规范日线缺失标记为不适用。
+- Tushare 5分钟归档覆盖2025-09-02至2026-03-09共121个交易日，文件哈希与
+  `backfill-minutes-report.json`逐一一致；命中10,358个需求，通过10,283个。
+- 隔离StockDB归档覆盖2026-03-10至2026-09-10共127个交易日，以最终
+  `archive-replay-manifest.json`为完整清单；命中11,570个需求，通过11,138个。
+  该归档原导出请求标称1分钟，不能仅凭来源声明使用，实际每个证券日均按48个
+  5分钟端点和规范日线重新验证。
+- 当前共21,421个完成证券日、1,028,208根K线。507个拒绝分别为成交量不一致
+  449、成交额不一致56、开收盘不一致2；没有插值、容差放宽或部分写入。
+- 仍有200,667个证券日待从当前Tushare适配器获取。现有覆盖率不足以训练或执行
+  全量回测，T08/T21继续阻断。
+
+可恢复命令：
+
+```sh
+cd backend
+uv run platform-cli build-episode-dataset \
+  --dataset-root /Users/bytedance/.local/share/stock-platform/a-share-20160101-20260915-v5 \
+  --episode-root /Users/bytedance/.local/share/stock-platform/short-horizon-episodes-v1 \
+  --episode-dataset-id short-horizon-episodes-v1 \
+  --stage archive-minutes --start-date 20160101 --end-date 20260915 \
+  --archive-root /absolute/archive/root
+```
