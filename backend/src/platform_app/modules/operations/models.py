@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, String, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -46,3 +53,37 @@ class Outbox(Base):
     payload: Mapped[dict] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_outbox_id",
+            name="uq_notifications_source_outbox",
+        ),
+        CheckConstraint(
+            "severity IN ('INFO','ACTION','WARNING')",
+            name="severity",
+        ),
+    )
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"),
+        index=True,
+    )
+    source_outbox_id: Mapped[str] = mapped_column(
+        ForeignKey("outbox.id"),
+    )
+    event_type: Mapped[str] = mapped_column(String(60), index=True)
+    aggregate_id: Mapped[str] = mapped_column(String(160))
+    severity: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(120))
+    message: Mapped[str] = mapped_column(String(500))
+    payload: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+        index=True,
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

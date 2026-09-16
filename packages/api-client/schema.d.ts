@@ -641,6 +641,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/monitors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Monitors */
+        get: operations["list_monitors_api_v1_accounts__account_id__monitors_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/decisions/{decision_id}/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set Monitor */
+        put: operations["set_monitor_api_v1_decisions__decision_id__monitor_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Notification List */
+        get: operations["notification_list_api_v1_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Read Notification */
+        post: operations["read_notification_api_v1_notifications__notification_id__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1110,6 +1178,26 @@ export interface components {
             data: components["schemas"]["JointReleaseReference"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[MonitorPage] */
+        Envelope_MonitorPage_: {
+            data: components["schemas"]["MonitorPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[MonitorView] */
+        Envelope_MonitorView_: {
+            data: components["schemas"]["MonitorView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[NotificationPage] */
+        Envelope_NotificationPage_: {
+            data: components["schemas"]["NotificationPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[NotificationView] */
+        Envelope_NotificationView_: {
+            data: components["schemas"]["NotificationView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[OpeningPage] */
         Envelope_OpeningPage_: {
             data: components["schemas"]["OpeningPage"];
@@ -1537,6 +1625,86 @@ export interface components {
             asOf?: string;
             /** Revision */
             revision?: number | null;
+        };
+        /** MonitorPage */
+        MonitorPage: {
+            /** Monitors */
+            monitors: components["schemas"]["MonitorView"][];
+        };
+        /** MonitorUpdate */
+        MonitorUpdate: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /** MonitorView */
+        MonitorView: {
+            /** Id */
+            id: string;
+            /** Accountid */
+            accountId: string;
+            /** Instrumentid */
+            instrumentId: string;
+            /** Decisionid */
+            decisionId: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "PAUSED" | "ACTIVE" | "TRIGGERED" | "FAILED";
+            /**
+             * Nextreviewat
+             * Format: date-time
+             */
+            nextReviewAt: string;
+            /** Lastjobid */
+            lastJobId: string | null;
+            /** Lasttriggeredat */
+            lastTriggeredAt: string | null;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** NotificationPage */
+        NotificationPage: {
+            /** Notifications */
+            notifications: components["schemas"]["NotificationView"][];
+            /** Unreadcount */
+            unreadCount: number;
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** NotificationView */
+        NotificationView: {
+            /** Id */
+            id: string;
+            /** Eventtype */
+            eventType: string;
+            /** Aggregateid */
+            aggregateId: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "INFO" | "ACTION" | "WARNING";
+            /** Title */
+            title: string;
+            /** Message */
+            message: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Readat */
+            readAt: string | null;
         };
         /** OpeningInput */
         OpeningInput: {
@@ -3576,6 +3744,135 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_PlanView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_monitors_api_v1_accounts__account_id__monitors_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_MonitorPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_monitor_api_v1_decisions__decision_id__monitor_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonitorUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_MonitorView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notification_list_api_v1_notifications_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_NotificationPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_notification_api_v1_notifications__notification_id__read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_NotificationView_"];
                 };
             };
             /** @description Validation Error */

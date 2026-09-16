@@ -270,6 +270,12 @@ def _publish(
         valid_until=decision.valid_until,
     )
     db.add_all((context, record))
+    db.flush()
+    from platform_app.modules.decisions.monitoring import (
+        register_decision_monitor,
+    )
+
+    register_decision_monitor(db, job.owner_id, decision)
     if request.release.status == "SHADOW" and request.quant and request.agent:
         db.add(
             ProspectiveSample(

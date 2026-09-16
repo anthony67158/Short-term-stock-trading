@@ -13,9 +13,11 @@ from platform_app.entrypoints.api import app
 from platform_app.modules.decisions import service
 from platform_app.modules.decisions.models import (
     CurrentDecision,
+    DecisionMonitor,
     DecisionContextRecord,
     DecisionRecord,
 )
+from platform_app.modules.decisions import monitoring
 from platform_app.modules.decisions.position_contracts import (
     ActionValueEstimate,
     JointReleaseReference,
@@ -30,6 +32,8 @@ from platform_app.modules.identity.service import create_user
 from platform_app.modules.market.models import Instrument
 from platform_app.modules.learning.models import ProspectiveSample
 from platform_app.modules.operations.models import Job, Outbox
+from platform_app.modules.operations.models import Notification
+from platform_app.modules.operations import notifications
 from platform_app.modules.portfolio import openings
 from platform_app.modules.portfolio.models import (
     Account,
@@ -97,6 +101,11 @@ def decision_scope(monkeypatch):
         db.execute(
             delete(CurrentDecision).where(CurrentDecision.account_id == account.id)
         )
+        db.execute(
+            delete(DecisionMonitor).where(
+                DecisionMonitor.account_id == account.id
+            )
+        )
         plan_ids = select(ExecutionPlan.id).where(
             ExecutionPlan.account_id == account.id
         )
@@ -117,6 +126,9 @@ def decision_scope(monkeypatch):
         db.execute(delete(OpeningLot).where(OpeningLot.account_id == account.id))
         db.execute(delete(Assessment).where(Assessment.owner_id == owner))
         db.execute(delete(Evidence).where(Evidence.owner_id == owner))
+        db.execute(
+            delete(Notification).where(Notification.owner_id == owner)
+        )
         db.execute(delete(Job).where(Job.owner_id == owner))
         db.execute(delete(Outbox).where(Outbox.owner_id == owner))
         db.execute(delete(Account).where(Account.id == account.id))
@@ -206,6 +218,7 @@ def persist_ready_reduce_decision(
             )
         )
         db.flush()
+        monitoring.register_decision_monitor(db, owner, decision)
         db.add(
             CurrentDecision(
                 account_id=account_id,
@@ -329,6 +342,43 @@ def test_current_ready_decision_creates_one_linked_execution_plan(
     assert plan.quantity_shares == 500
     assert plan.limit_price == Decimal("9.80")
     assert plan.reserved_shares == 500
+
+
+def test_server_monitor_triggers_once_and_delivers_deduplicated_inbox(
+    decision_scope,
+):
+    owner, instrument_id, account_id, version = decision_scope
+    decision = persist_ready_reduce_decision(
+        owner,
+        account_id,
+        instrument_id,
+        version,
+    )
+    enabled = monitoring.update_monitor(
+        owner,
+        decision.decision_id,
+        monitoring.MonitorUpdate(enabled=True),
+    )
+    assert enabled.status == "ACTIVE"
+    with sessions().begin() as db:
+        monitor = db.get(DecisionMonitor, enabled.id)
+        monitor.next_review_at = utcnow() - timedelta(seconds=1)
+    assert monitoring.trigger_due() == 1
+    assert monitoring.trigger_due() == 0
+    current = monitoring.monitors(owner, account_id).monitors[0]
+    assert current.status == "TRIGGERED"
+    assert current.last_job_id is not None
+    assert notifications.deliver_outbox() >= 1
+    assert notifications.deliver_outbox() == 0
+    page = notifications.list_notifications(owner, None, 50)
+    triggered = next(
+        item
+        for item in page.notifications
+        if item.event_type == "monitor.triggered"
+    )
+    assert page.unread_count >= 1
+    read = notifications.mark_read(owner, triggered.id)
+    assert read.read_at is not None
 
 
 def test_valid_research_is_normalized_to_audited_position_assessment(

@@ -2475,6 +2475,203 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/monitors": {
+      "get": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "List Monitors",
+        "operationId": "list_monitors_api_v1_accounts__account_id__monitors_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_MonitorPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decisions/{decision_id}/monitor": {
+      "put": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Set Monitor",
+        "operationId": "set_monitor_api_v1_decisions__decision_id__monitor_put",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitorUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_MonitorView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Notification List",
+        "operationId": "notification_list_api_v1_notifications_get",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notifications/{notification_id}/read": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Read Notification",
+        "operationId": "read_notification_api_v1_notifications__notification_id__read_post",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_NotificationView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -3847,6 +4044,70 @@
         ],
         "title": "Envelope[JointReleaseReference]"
       },
+      "Envelope_MonitorPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MonitorPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[MonitorPage]"
+      },
+      "Envelope_MonitorView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/MonitorView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[MonitorView]"
+      },
+      "Envelope_NotificationPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotificationPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[NotificationPage]"
+      },
+      "Envelope_NotificationView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/NotificationView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[NotificationView]"
+      },
       "Envelope_OpeningPage_": {
         "properties": {
           "data": {
@@ -5054,6 +5315,223 @@
         "additionalProperties": false,
         "type": "object",
         "title": "Meta"
+      },
+      "MonitorPage": {
+        "properties": {
+          "monitors": {
+            "items": {
+              "$ref": "#/components/schemas/MonitorView"
+            },
+            "type": "array",
+            "title": "Monitors"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "monitors"
+        ],
+        "title": "MonitorPage"
+      },
+      "MonitorUpdate": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "MonitorUpdate"
+      },
+      "MonitorView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "decisionId": {
+            "type": "string",
+            "title": "Decisionid"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PAUSED",
+              "ACTIVE",
+              "TRIGGERED",
+              "FAILED"
+            ],
+            "title": "Status"
+          },
+          "nextReviewAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Nextreviewat"
+          },
+          "lastJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lastjobid"
+          },
+          "lastTriggeredAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lasttriggeredat"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "accountId",
+          "instrumentId",
+          "decisionId",
+          "enabled",
+          "status",
+          "nextReviewAt",
+          "lastJobId",
+          "lastTriggeredAt",
+          "updatedAt"
+        ],
+        "title": "MonitorView"
+      },
+      "NotificationPage": {
+        "properties": {
+          "notifications": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationView"
+            },
+            "type": "array",
+            "title": "Notifications"
+          },
+          "unreadCount": {
+            "type": "integer",
+            "title": "Unreadcount"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "notifications",
+          "unreadCount",
+          "nextCursor"
+        ],
+        "title": "NotificationPage"
+      },
+      "NotificationView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "eventType": {
+            "type": "string",
+            "title": "Eventtype"
+          },
+          "aggregateId": {
+            "type": "string",
+            "title": "Aggregateid"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "INFO",
+              "ACTION",
+              "WARNING"
+            ],
+            "title": "Severity"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Payload"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "readAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Readat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "eventType",
+          "aggregateId",
+          "severity",
+          "title",
+          "message",
+          "payload",
+          "createdAt",
+          "readAt"
+        ],
+        "title": "NotificationView"
       },
       "OpeningInput": {
         "properties": {

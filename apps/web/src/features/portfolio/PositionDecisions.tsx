@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { Bell, BellOff, RefreshCw } from "lucide-react";
 import type { components } from "../../../../../packages/api-client/schema";
 import { Button, Empty } from "../../components/Controls";
 import { api, errorMessage } from "../../lib/api";
@@ -8,6 +8,7 @@ import { api, errorMessage } from "../../lib/api";
 type Account = components["schemas"]["AccountView"];
 type Position = components["schemas"]["PositionView"];
 type Decision = components["schemas"]["PositionDecision"];
+type Monitor = components["schemas"]["MonitorView"];
 
 const actionLabels = {
   HOLD: "保持",
@@ -59,6 +60,17 @@ export function PositionDecisions({
       });
       if (!result.data) throw new Error(errorMessage(result.error));
       return result.data.data.decisions;
+    },
+  });
+  const monitors = useQuery({
+    queryKey: ["monitors", account.id],
+    queryFn: async ({ signal }) => {
+      const result = await api.GET("/api/v1/accounts/{account_id}/monitors", {
+        params: { path: { account_id: account.id } },
+        signal,
+      });
+      if (!result.data) throw new Error(errorMessage(result.error));
+      return result.data.data.monitors;
     },
   });
   const job = useQuery({
@@ -134,8 +146,30 @@ export function PositionDecisions({
       }
     },
   });
+  const updateMonitor = useMutation({
+    mutationFn: async ({
+      decision,
+      enabled,
+    }: {
+      decision: Decision;
+      enabled: boolean;
+    }) => {
+      const result = await api.PUT("/api/v1/decisions/{decision_id}/monitor", {
+        params: { path: { decision_id: decision.decisionId } },
+        body: { enabled },
+      });
+      if (!result.data) throw new Error(errorMessage(result.error));
+      return result.data.data;
+    },
+    onSuccess: async () => {
+      await cache.invalidateQueries({ queryKey: ["monitors", account.id] });
+    },
+  });
   const byInstrument = new Map(
     (decisions.data ?? []).map((decision) => [decision.instrumentId, decision]),
+  );
+  const monitorByInstrument = new Map(
+    (monitors.data ?? []).map((monitor) => [monitor.instrumentId, monitor] as const),
   );
   const release = capability.data;
   const running = ["QUEUED", "RUNNING"].includes(job.data?.status ?? "");
@@ -159,6 +193,7 @@ export function PositionDecisions({
           <thead><tr><th>股票</th><th>当前动作</th><th>量化 / Agent</th><th>状态说明</th><th>操作</th></tr></thead>
           <tbody>{positions.map((position) => {
             const decision = byInstrument.get(position.instrumentId) as Decision | undefined;
+            const monitor = monitorByInstrument.get(position.instrumentId) as Monitor | undefined;
             const isThisJob = activeJob?.instrumentId === position.instrumentId;
             const blockedReal = account.kind === "REAL" && release?.status === "SHADOW";
             const canPlan = decision?.status === "READY"
@@ -188,7 +223,17 @@ export function PositionDecisions({
                   variant="primary"
                   disabled={planning}
                   onClick={() => createPlan.mutate(decision)}
-                >{planning ? "生成中" : "生成执行计划"}</Button>}</div></td>
+                >{planning ? "生成中" : "生成执行计划"}</Button>}
+                {decision && <Button
+                  className="icon-button"
+                  aria-label={monitor?.enabled ? `暂停监控${position.name}` : `启用监控${position.name}`}
+                  title={monitor?.enabled ? "暂停服务端监控" : "启用服务端监控"}
+                  disabled={blockedReal || updateMonitor.isPending}
+                  onClick={() => updateMonitor.mutate({
+                    decision,
+                    enabled: !monitor?.enabled,
+                  })}
+                >{monitor?.enabled ? <BellOff size={15} /> : <Bell size={15} />}</Button>}</div></td>
             </tr>;
           })}</tbody>
         </table>
@@ -199,5 +244,7 @@ export function PositionDecisions({
       <p className="error" role="alert">{errorMessage(evaluate.error || job.error)}</p>}
     {createPlan.isError &&
       <p className="error" role="alert">{errorMessage(createPlan.error)}</p>}
+    {(monitors.isError || updateMonitor.isError) &&
+      <p className="error" role="alert">{errorMessage(monitors.error || updateMonitor.error)}</p>}
   </section>;
 }

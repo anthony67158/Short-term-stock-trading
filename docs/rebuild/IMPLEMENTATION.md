@@ -641,4 +641,19 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端托管PG、容器部署与
   Alembic升级至`0011_decision_plan_link`且无schema漂移；相关后端21项测试、
   TypeScript检查和生产构建通过。
 
+### 服务端复核监控与应用收件箱（T32/T33 增量）
+
+- 每个已发布持仓决策建立`decision_monitors`记录并绑定当前决策、账户、证券和
+  `reviewAfter`。监控默认暂停，用户从持仓建议显式启用后才由服务端Worker触发，
+  避免默认消耗Agent预算；关闭浏览器不影响运行。
+- 到期监控以决策和复核时点生成确定性`triggerKey`，状态先进入`TRIGGERED`，
+  Worker重启时复用同一键，避免重复episode；评估失败进入`FAILED`，新决策发布
+  后在保留用户启停偏好的同时更新下一复核时点。
+- Outbox由Worker投递到独立`notifications`事实表，`source_outbox_id`唯一约束
+  保证重放不重复。新增收件箱页面、未读计数和标记已读；联合决策、监控触发/
+  失败、研究更新和计划变更共享同一通知来源。
+- Alembic升级至`0012_monitoring_notifications`且无schema漂移；相关后端15项
+  测试、Ruff、TypeScript检查和生产构建通过。当前未配置外部系统推送渠道，
+  收件箱是已验收通道。
+
 每个切片记录实际修改、验证命令、结果、限制和提交，不记录密钥、完整私人账户或无关日志。只有实际通过的任务才更新完成状态。

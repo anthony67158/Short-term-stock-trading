@@ -4,6 +4,12 @@ from fastapi import APIRouter, Header, Query
 
 from platform_app.contracts.base import Envelope
 from platform_app.modules.decisions import service
+from platform_app.modules.decisions import monitoring
+from platform_app.modules.decisions.monitor_contracts import (
+    MonitorPage,
+    MonitorUpdate,
+    MonitorView,
+)
 from platform_app.modules.decisions.position_contracts import (
     JointReleaseReference,
     PositionDecision,
@@ -91,4 +97,26 @@ def create_decision_plan(
             body,
             key,
         )
+    )
+
+
+@router.get(
+    "/accounts/{account_id}/monitors",
+    response_model=Envelope[MonitorPage],
+)
+def list_monitors(account_id: str, user: CurrentUser):
+    return Envelope(data=monitoring.monitors(user.id, account_id))
+
+
+@router.put(
+    "/decisions/{decision_id}/monitor",
+    response_model=Envelope[MonitorView],
+)
+def set_monitor(
+    decision_id: str,
+    body: MonitorUpdate,
+    user: CurrentUser,
+):
+    return Envelope(
+        data=monitoring.update_monitor(user.id, decision_id, body)
     )
