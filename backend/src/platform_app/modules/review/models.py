@@ -13,6 +13,9 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from platform_app.adapters.database import Base
 from platform_app.contracts.base import new_id, utcnow
+from platform_app.modules.experiments.models import (  # noqa: F401
+    StrategyVersion,
+)
 
 
 class ReviewReport(Base):

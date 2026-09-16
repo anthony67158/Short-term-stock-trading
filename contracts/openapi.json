@@ -3291,6 +3291,126 @@
         }
       }
     },
+    "/api/v1/review-capability": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Review Capability",
+        "operationId": "review_capability_api_v1_review_capability_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReviewCapability_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/review-runs": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Run Review",
+        "operationId": "run_review_api_v1_review_runs_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRunInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JobView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reviews": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "List Reviews",
+        "operationId": "list_reviews_api_v1_reviews_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReviewReportPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -5231,6 +5351,38 @@
         ],
         "title": "Envelope[ResearchCapability]"
       },
+      "Envelope_ReviewCapability_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewCapability"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReviewCapability]"
+      },
+      "Envelope_ReviewReportPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReviewReportPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReviewReportPage]"
+      },
       "Envelope_StrategyVersionPage_": {
         "properties": {
           "data": {
@@ -5882,6 +6034,60 @@
         ],
         "title": "ExperimentView"
       },
+      "FailureCluster": {
+        "properties": {
+          "clusterId": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Clusterid"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "STRATEGY",
+              "EXECUTION",
+              "DATA"
+            ],
+            "title": "Category"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "sampleCount": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Samplecount"
+          },
+          "strategyFailureEligible": {
+            "type": "boolean",
+            "title": "Strategyfailureeligible"
+          },
+          "sourceSampleIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Sourcesampleids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "clusterId",
+          "category",
+          "label",
+          "sampleCount",
+          "strategyFailureEligible",
+          "sourceSampleIds"
+        ],
+        "title": "FailureCluster"
+      },
       "FreezeStrategyInput": {
         "properties": {
           "expectedRevision": {
@@ -6078,6 +6284,95 @@
           "committedVersion"
         ],
         "title": "ImportView"
+      },
+      "ImprovementProposalView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "reviewReportId": {
+            "type": "string",
+            "title": "Reviewreportid"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "hypothesis": {
+            "type": "string",
+            "title": "Hypothesis"
+          },
+          "changeType": {
+            "type": "string",
+            "enum": [
+              "DECISION_THRESHOLD",
+              "AGENT_PROTOCOL",
+              "RISK_PARAMETER",
+              "FEATURE_SET",
+              "EXECUTION_POLICY"
+            ],
+            "title": "Changetype"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "INCREASE",
+              "DECREASE",
+              "ADD",
+              "REMOVE",
+              "REVIEW"
+            ],
+            "title": "Direction"
+          },
+          "sourceSampleIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sourcesampleids"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "COMPILED",
+              "REJECTED"
+            ],
+            "title": "Status"
+          },
+          "compiledStrategyVersionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compiledstrategyversionid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "reviewReportId",
+          "title",
+          "hypothesis",
+          "changeType",
+          "direction",
+          "sourceSampleIds",
+          "status",
+          "compiledStrategyVersionId",
+          "createdAt"
+        ],
+        "title": "ImprovementProposalView"
       },
       "InstrumentPage": {
         "properties": {
@@ -8432,6 +8727,368 @@
           "evidenceIds"
         ],
         "title": "ResearchInput"
+      },
+      "ReviewAgentOutput": {
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "conclusions": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewConclusion"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Conclusions"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewProposalOutput"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Proposals"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "summary",
+          "conclusions",
+          "proposals"
+        ],
+        "title": "ReviewAgentOutput"
+      },
+      "ReviewCapability": {
+        "properties": {
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "available",
+          "model",
+          "reason"
+        ],
+        "title": "ReviewCapability"
+      },
+      "ReviewConclusion": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "OBSERVED",
+              "HYPOTHESIS"
+            ],
+            "title": "Kind"
+          },
+          "statement": {
+            "type": "string",
+            "maxLength": 1200,
+            "minLength": 1,
+            "title": "Statement"
+          },
+          "metricRefs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 12,
+            "minItems": 1,
+            "title": "Metricrefs"
+          },
+          "sourceSampleIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "title": "Sourcesampleids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "statement",
+          "metricRefs",
+          "sourceSampleIds"
+        ],
+        "title": "ReviewConclusion"
+      },
+      "ReviewMetric": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Metricid"
+          },
+          "label": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Label"
+          },
+          "value": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Value"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "COUNT",
+              "RETURN",
+              "RATE"
+            ],
+            "title": "Unit"
+          },
+          "sourceSampleIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "title": "Sourcesampleids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "metricId",
+          "label",
+          "value",
+          "unit",
+          "sourceSampleIds"
+        ],
+        "title": "ReviewMetric"
+      },
+      "ReviewMetricSnapshot": {
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "review-metric-snapshot.v1",
+            "title": "Schemaversion",
+            "default": "review-metric-snapshot.v1"
+          },
+          "reviewDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Reviewdate"
+          },
+          "maturedSamples": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Maturedsamples"
+          },
+          "excludedSamples": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Excludedsamples"
+          },
+          "sourceDatasetIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sourcedatasetids"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewMetric"
+            },
+            "type": "array",
+            "title": "Metrics"
+          },
+          "failureClusters": {
+            "items": {
+              "$ref": "#/components/schemas/FailureCluster"
+            },
+            "type": "array",
+            "title": "Failureclusters"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reviewDate",
+          "maturedSamples",
+          "excludedSamples",
+          "sourceDatasetIds",
+          "metrics",
+          "failureClusters"
+        ],
+        "title": "ReviewMetricSnapshot"
+      },
+      "ReviewProposalOutput": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "hypothesis": {
+            "type": "string",
+            "maxLength": 1200,
+            "minLength": 1,
+            "title": "Hypothesis"
+          },
+          "changeType": {
+            "type": "string",
+            "enum": [
+              "DECISION_THRESHOLD",
+              "AGENT_PROTOCOL",
+              "RISK_PARAMETER",
+              "FEATURE_SET",
+              "EXECUTION_POLICY"
+            ],
+            "title": "Changetype"
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "INCREASE",
+              "DECREASE",
+              "ADD",
+              "REMOVE",
+              "REVIEW"
+            ],
+            "title": "Direction"
+          },
+          "sourceSampleIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Sourcesampleids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "title",
+          "hypothesis",
+          "changeType",
+          "direction",
+          "sourceSampleIds"
+        ],
+        "title": "ReviewProposalOutput"
+      },
+      "ReviewReportPage": {
+        "properties": {
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewReportView"
+            },
+            "type": "array",
+            "title": "Reports"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reports"
+        ],
+        "title": "ReviewReportPage"
+      },
+      "ReviewReportView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "reviewDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Reviewdate"
+          },
+          "protocolVersion": {
+            "type": "string",
+            "title": "Protocolversion"
+          },
+          "modelId": {
+            "type": "string",
+            "title": "Modelid"
+          },
+          "metricSnapshot": {
+            "$ref": "#/components/schemas/ReviewMetricSnapshot"
+          },
+          "output": {
+            "$ref": "#/components/schemas/ReviewAgentOutput"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/ImprovementProposalView"
+            },
+            "type": "array",
+            "title": "Proposals"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "jobId",
+          "reviewDate",
+          "protocolVersion",
+          "modelId",
+          "metricSnapshot",
+          "output",
+          "proposals",
+          "createdAt"
+        ],
+        "title": "ReviewReportView"
+      },
+      "ReviewRunInput": {
+        "properties": {
+          "reviewDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Reviewdate"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reviewDate"
+        ],
+        "title": "ReviewRunInput"
       },
       "SplitContract": {
         "properties": {

@@ -882,6 +882,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/review-capability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review Capability */
+        get: operations["review_capability_api_v1_review_capability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/review-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run Review */
+        post: operations["run_review_api_v1_review_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Reviews */
+        get: operations["list_reviews_api_v1_reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1543,6 +1594,16 @@ export interface components {
             data: components["schemas"]["ResearchCapability"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[ReviewCapability] */
+        Envelope_ReviewCapability_: {
+            data: components["schemas"]["ReviewCapability"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[ReviewReportPage] */
+        Envelope_ReviewReportPage_: {
+            data: components["schemas"]["ReviewReportPage"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[StrategyVersionPage] */
         Envelope_StrategyVersionPage_: {
             data: components["schemas"]["StrategyVersionPage"];
@@ -1783,6 +1844,24 @@ export interface components {
              */
             finishedAt: string;
         };
+        /** FailureCluster */
+        FailureCluster: {
+            /** Clusterid */
+            clusterId: string;
+            /**
+             * Category
+             * @enum {string}
+             */
+            category: "STRATEGY" | "EXECUTION" | "DATA";
+            /** Label */
+            label: string;
+            /** Samplecount */
+            sampleCount: number;
+            /** Strategyfailureeligible */
+            strategyFailureEligible: boolean;
+            /** Sourcesampleids */
+            sourceSampleIds: string[];
+        };
         /** FreezeStrategyInput */
         FreezeStrategyInput: {
             /** Expectedrevision */
@@ -1855,6 +1934,41 @@ export interface components {
             committedAt: string | null;
             /** Committedversion */
             committedVersion: number | null;
+        };
+        /** ImprovementProposalView */
+        ImprovementProposalView: {
+            /** Id */
+            id: string;
+            /** Reviewreportid */
+            reviewReportId: string;
+            /** Title */
+            title: string;
+            /** Hypothesis */
+            hypothesis: string;
+            /**
+             * Changetype
+             * @enum {string}
+             */
+            changeType: "DECISION_THRESHOLD" | "AGENT_PROTOCOL" | "RISK_PARAMETER" | "FEATURE_SET" | "EXECUTION_POLICY";
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "INCREASE" | "DECREASE" | "ADD" | "REMOVE" | "REVIEW";
+            /** Sourcesampleids */
+            sourceSampleIds: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "DRAFT" | "COMPILED" | "REJECTED";
+            /** Compiledstrategyversionid */
+            compiledStrategyVersionId: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
         };
         /** InstrumentPage */
         InstrumentPage: {
@@ -2637,6 +2751,135 @@ export interface components {
             question: string;
             /** Evidenceids */
             evidenceIds: string[];
+        };
+        /** ReviewAgentOutput */
+        ReviewAgentOutput: {
+            /** Summary */
+            summary: string;
+            /** Conclusions */
+            conclusions: components["schemas"]["ReviewConclusion"][];
+            /** Proposals */
+            proposals: components["schemas"]["ReviewProposalOutput"][];
+        };
+        /** ReviewCapability */
+        ReviewCapability: {
+            /** Available */
+            available: boolean;
+            /** Model */
+            model: string;
+            /** Reason */
+            reason: string | null;
+        };
+        /** ReviewConclusion */
+        ReviewConclusion: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "OBSERVED" | "HYPOTHESIS";
+            /** Statement */
+            statement: string;
+            /** Metricrefs */
+            metricRefs: string[];
+            /** Sourcesampleids */
+            sourceSampleIds: string[];
+        };
+        /** ReviewMetric */
+        ReviewMetric: {
+            /** Metricid */
+            metricId: string;
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "COUNT" | "RETURN" | "RATE";
+            /** Sourcesampleids */
+            sourceSampleIds: string[];
+        };
+        /** ReviewMetricSnapshot */
+        ReviewMetricSnapshot: {
+            /**
+             * Schemaversion
+             * @default review-metric-snapshot.v1
+             * @constant
+             */
+            schemaVersion: "review-metric-snapshot.v1";
+            /**
+             * Reviewdate
+             * Format: date
+             */
+            reviewDate: string;
+            /** Maturedsamples */
+            maturedSamples: number;
+            /** Excludedsamples */
+            excludedSamples: number;
+            /** Sourcedatasetids */
+            sourceDatasetIds: string[];
+            /** Metrics */
+            metrics: components["schemas"]["ReviewMetric"][];
+            /** Failureclusters */
+            failureClusters: components["schemas"]["FailureCluster"][];
+        };
+        /** ReviewProposalOutput */
+        ReviewProposalOutput: {
+            /** Title */
+            title: string;
+            /** Hypothesis */
+            hypothesis: string;
+            /**
+             * Changetype
+             * @enum {string}
+             */
+            changeType: "DECISION_THRESHOLD" | "AGENT_PROTOCOL" | "RISK_PARAMETER" | "FEATURE_SET" | "EXECUTION_POLICY";
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "INCREASE" | "DECREASE" | "ADD" | "REMOVE" | "REVIEW";
+            /** Sourcesampleids */
+            sourceSampleIds: string[];
+        };
+        /** ReviewReportPage */
+        ReviewReportPage: {
+            /** Reports */
+            reports: components["schemas"]["ReviewReportView"][];
+        };
+        /** ReviewReportView */
+        ReviewReportView: {
+            /** Id */
+            id: string;
+            /** Jobid */
+            jobId: string;
+            /**
+             * Reviewdate
+             * Format: date
+             */
+            reviewDate: string;
+            /** Protocolversion */
+            protocolVersion: string;
+            /** Modelid */
+            modelId: string;
+            metricSnapshot: components["schemas"]["ReviewMetricSnapshot"];
+            output: components["schemas"]["ReviewAgentOutput"];
+            /** Proposals */
+            proposals: components["schemas"]["ImprovementProposalView"][];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** ReviewRunInput */
+        ReviewRunInput: {
+            /**
+             * Reviewdate
+             * Format: date
+             */
+            reviewDate: string;
         };
         /** SplitContract */
         SplitContract: {
@@ -4886,6 +5129,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ReleaseView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    review_capability_api_v1_review_capability_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ReviewCapability_"];
+                };
+            };
+        };
+    };
+    run_review_api_v1_review_runs_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewRunInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_JobView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_reviews_api_v1_reviews_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ReviewReportPage_"];
                 };
             };
             /** @description Validation Error */
