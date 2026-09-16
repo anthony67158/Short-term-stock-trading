@@ -34,6 +34,14 @@ def test_session_origin_logout_and_expiration(identity):
         client.headers["Origin"] = "http://localhost:5173"
         response = client.post("/api/v1/sessions", json=payload)
         assert response.status_code == 200
+        assert response.headers["x-frame-options"] == "DENY"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert "frame-ancestors 'none'" in response.headers[
+            "content-security-policy"
+        ]
+        assert response.headers["permissions-policy"] == (
+            "camera=(), microphone=(), geolocation=()"
+        )
         assert "HttpOnly" in response.headers["set-cookie"]
         assert "SameSite=strict" in response.headers["set-cookie"]
         assert response.json()["data"]["id"] == user_id

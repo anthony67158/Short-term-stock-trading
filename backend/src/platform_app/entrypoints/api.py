@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -47,9 +48,20 @@ app.include_router(review_router)
 @app.middleware("http")
 async def request_boundary(request: Request, call_next):
     request.state.request_id = new_id()
+    config = settings()
     if request.method not in ("GET", "HEAD", "OPTIONS"):
-        if request.headers.get("origin") != settings().origin:
+        if request.headers.get("origin") != config.origin:
             return error_response("ORIGIN_REJECTED", "请求来源不受信任", 403)
+        if (
+            not config.write_enabled
+            and request.url.path
+            not in {"/api/v1/sessions", "/api/v1/sessions/current"}
+        ):
+            return error_response(
+                "WRITE_AUTHORITY_DISABLED",
+                "当前处于维护只读窗口，业务写入已停止",
+                503,
+            )
     try:
         response = await call_next(request)
     except SQLAlchemyError:
@@ -58,6 +70,23 @@ async def request_boundary(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=()"
+    )
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'"
+    )
+    if config.environment == "production":
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
     response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -97,10 +126,72 @@ async def invalid_request(_request, _exc):
 class Health(Contract):
     status: str
     database: str
+    revision: str
+    write_enabled: bool
+    active_release_id: str | None
+    active_release_status: str | None
 
 
 @app.get("/api/v1/health", response_model=Envelope[Health])
 def health():
     with engine().connect() as connection:
         connection.execute(text("SELECT 1"))
-    return Envelope(data=Health(status="ok", database="connected"))
+    config = settings()
+    release_id = None
+    release_status = None
+    if config.joint_bundle_root and config.joint_bundle_root.exists():
+        try:
+            from platform_app.modules.experiments.joint_bundle import (
+                JointBundle,
+            )
+
+            release = JointBundle(
+                config.joint_bundle_root,
+                require_ready=False,
+            ).manifest
+            release_id = release["bundleId"]
+            release_status = release["releaseStatus"]
+        except (OSError, TypeError, ValueError):
+            release_status = "INVALID"
+    return Envelope(
+        data=Health(
+            status="ok",
+            database="connected",
+            revision=config.deployment_revision,
+            write_enabled=config.write_enabled,
+            active_release_id=release_id,
+            active_release_status=release_status,
+        )
+    )
+
+
+def _mount_web() -> None:
+    configured = settings().web_dist_root
+    if configured is None:
+        return
+    root = configured.expanduser().resolve()
+    index = root / "index.html"
+    assets = root / "assets"
+    if not index.is_file() or not assets.is_dir():
+        raise RuntimeError("Configured Web distribution is incomplete")
+    app.mount(
+        "/assets",
+        StaticFiles(directory=assets),
+        name="web-assets",
+    )
+
+    @app.get("/", include_in_schema=False)
+    def web_index():
+        return FileResponse(index)
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def web_route(full_path: str):
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        candidate = (root / full_path).resolve()
+        if root in candidate.parents and candidate.is_file():
+            return FileResponse(candidate)
+        return FileResponse(index)
+
+
+_mount_web()

@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     joint_candidate_registry_root: Path = Path(
         "~/.local/share/stock-platform/joint-candidates"
     ).expanduser()
+    web_dist_root: Path | None = None
+    deployment_revision: str = Field(
+        default="development",
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9._-]+$",
+    )
+    write_enabled: bool = True
     cookie_secure: bool = False
 
     @field_validator("agent_base_url")
