@@ -6920,13 +6920,47 @@
           "database": {
             "type": "string",
             "title": "Database"
+          },
+          "revision": {
+            "type": "string",
+            "title": "Revision"
+          },
+          "writeEnabled": {
+            "type": "boolean",
+            "title": "Writeenabled"
+          },
+          "activeReleaseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activereleaseid"
+          },
+          "activeReleaseStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activereleasestatus"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "status",
-          "database"
+          "database",
+          "revision",
+          "writeEnabled",
+          "activeReleaseId",
+          "activeReleaseStatus"
         ],
         "title": "Health"
       },

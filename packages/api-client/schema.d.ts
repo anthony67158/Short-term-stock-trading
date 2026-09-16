@@ -2117,6 +2117,14 @@ export interface components {
             status: string;
             /** Database */
             database: string;
+            /** Revision */
+            revision: string;
+            /** Writeenabled */
+            writeEnabled: boolean;
+            /** Activereleaseid */
+            activeReleaseId: string | null;
+            /** Activereleasestatus */
+            activeReleaseStatus: string | null;
         };
         /** ImportCommit */
         ImportCommit: {

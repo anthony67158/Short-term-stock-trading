@@ -7,6 +7,8 @@ from sqlalchemy import delete, update
 
 from platform_app.adapters.database import sessions
 from platform_app.contracts.base import new_id, utcnow
+from platform_app.config import settings
+from platform_app.entrypoints import api as api_module
 from platform_app.entrypoints.api import app
 from platform_app.modules.identity.models import LoginAttempt, LoginSession, User
 from platform_app.modules.identity.service import create_user, token_hash
@@ -70,3 +72,23 @@ def test_login_throttles_and_does_not_echo_credentials(identity):
         assert client.post("/api/v1/sessions", json={
             "username": name, "password": password,
         }).status_code == 429
+
+
+def test_maintenance_mode_blocks_business_writes(identity, monkeypatch):
+    name, password, _ = identity
+    config = settings().model_copy(update={"write_enabled": False})
+    monkeypatch.setattr(api_module, "settings", lambda: config)
+    with TestClient(app) as client:
+        client.headers["Origin"] = "http://localhost:5173"
+        assert client.post(
+            "/api/v1/sessions",
+            json={"username": name, "password": password},
+        ).status_code == 200
+        response = client.post(
+            "/api/v1/watchlists",
+            json={"instrumentId": "SZ.000001"},
+        )
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == (
+            "WRITE_AUTHORITY_DISABLED"
+        )
