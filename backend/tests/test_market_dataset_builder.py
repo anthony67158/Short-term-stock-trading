@@ -1133,7 +1133,7 @@ def test_builder_audits_rows_for_officially_retired_source_codes(tmp_path):
 
 def test_builder_discards_delisted_source_suspensions_after_official_removal(tmp_path):
     data = responses()
-    trade_date = "20260327"
+    trade_date = "20260331"
     data[("stock_basic", "D")] = [
         {
             **stock("300379.SZ", "Dongtong Delisted", "创业板", "SZSE", "20140128"),
@@ -1142,6 +1142,11 @@ def test_builder_discards_delisted_source_suspensions_after_official_removal(tmp
         },
         {
             **stock("002231.SZ", "Allwin Delisted", "主板", "SZSE", "20080512"),
+            "list_status": "D",
+            "delist_date": "20260327",
+        },
+        {
+            **stock("603056.SH", "Deppon Delisted", "主板", "SSE", "20180116"),
             "list_status": "D",
             "delist_date": trade_date,
         },
@@ -1164,6 +1169,12 @@ def test_builder_discards_delisted_source_suspensions_after_official_removal(tmp
             "suspend_type": "S",
             "suspend_timing": None,
         },
+        {
+            "ts_code": "603056.SH",
+            "trade_date": trade_date,
+            "suspend_type": "S",
+            "suspend_timing": None,
+        },
     ]
 
     with MarketDataset(
@@ -1174,11 +1185,11 @@ def test_builder_discards_delisted_source_suspensions_after_official_removal(tmp
 
         result = builder.sync_daily_partition(trade_date)
 
-        assert result["discardedRetiredSourceRows"] == 2
+        assert result["discardedRetiredSourceRows"] == 3
         assert (
             ds.db.execute(
                 "SELECT COUNT(*) FROM suspensions "
-                "WHERE instrument_id IN ('SZ.300379', 'SZ.002231')"
+                "WHERE instrument_id IN ('SZ.300379', 'SZ.002231', 'SH.603056')"
             ).fetchone()[0]
             == 0
         )

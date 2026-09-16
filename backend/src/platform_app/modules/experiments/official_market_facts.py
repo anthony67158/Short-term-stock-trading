@@ -41,6 +41,15 @@ OFFICIAL_CODE_MIGRATIONS = (
 
 OFFICIAL_RETIRED_SOURCE_CODES = (
     {
+        "source_code": "603056.SH",
+        "retired_from": "20260331",
+        "reason": "DELISTED",
+        "source_urls": (
+            "https://www.sse.com.cn/assortment/stock/list/info/announcement/"
+            "index.shtml?productId=603056",
+        ),
+    },
+    {
         "source_code": "002231.SZ",
         "retired_from": "20260327",
         "reason": "DELISTED",
