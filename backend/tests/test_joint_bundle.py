@@ -67,6 +67,7 @@ def test_joint_candidate_is_fail_closed_and_binds_component_hashes(
         manifest = {
             "bundleId": "ranking-v1",
             "artifactSha256": "a" * 64,
+            "rankingDatabaseSha256": "d" * 64,
         }
 
         def __init__(self, _root, *, require_ready):
@@ -81,8 +82,20 @@ def test_joint_candidate_is_fail_closed_and_binds_component_hashes(
         def __init__(self, _root, *, require_ready):
             assert require_ready is False
 
+    class _Position:
+        manifest = {
+            "bundleId": "position-v1",
+            "artifactSha256": "p" * 64,
+            "rankingDatabaseSha256": "d" * 64,
+            "releaseBlockers": ["POSITION_VALUE_MODEL_NO_POSITIVE_LIFT"],
+        }
+
+        def __init__(self, _root, *, require_ready):
+            assert require_ready is False
+
     monkeypatch.setattr(joint_bundle, "RankingModelBundle", _Ranking)
     monkeypatch.setattr(joint_bundle, "QuantModelBundle", _Quant)
+    monkeypatch.setattr(joint_bundle, "PositionActionBundle", _Position)
     account_path = tmp_path / "account.json"
     account_path.write_text(
         json.dumps(
@@ -103,6 +116,7 @@ def test_joint_candidate_is_fail_closed_and_binds_component_hashes(
         bundle_id="joint-v1",
         ranking_model_root=tmp_path / "ranking",
         quant_model_root=tmp_path / "quant",
+        position_model_root=tmp_path / "position",
         account_backtest_path=account_path,
         agent_model="gpt-5.6-terra",
     )
@@ -112,7 +126,7 @@ def test_joint_candidate_is_fail_closed_and_binds_component_hashes(
         "PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT"
         in manifest["releaseBlockers"]
     )
-    assert "POSITION_ACTION_MODEL_MISSING" in manifest["releaseBlockers"]
+    assert "POSITION_VALUE_MODEL_NO_POSITIVE_LIFT" in manifest["releaseBlockers"]
     with pytest.raises(JointBundleError, match="JOINT_BUNDLE_NOT_RELEASED"):
         JointBundle(root)
     unavailable = JointBundle(root, require_ready=False).unavailable_decision()
@@ -122,7 +136,11 @@ def test_joint_candidate_is_fail_closed_and_binds_component_hashes(
 
 def test_joint_candidate_rejects_mixed_component_lineage(tmp_path, monkeypatch):
     class _Ranking:
-        manifest = {"bundleId": "ranking-v1", "artifactSha256": "a" * 64}
+        manifest = {
+            "bundleId": "ranking-v1",
+            "artifactSha256": "a" * 64,
+            "rankingDatabaseSha256": "d" * 64,
+        }
 
         def __init__(self, _root, *, require_ready):
             pass
@@ -133,8 +151,20 @@ def test_joint_candidate_rejects_mixed_component_lineage(tmp_path, monkeypatch):
         def __init__(self, _root, *, require_ready):
             pass
 
+    class _Position:
+        manifest = {
+            "bundleId": "position-v1",
+            "artifactSha256": "p" * 64,
+            "rankingDatabaseSha256": "d" * 64,
+            "releaseBlockers": [],
+        }
+
+        def __init__(self, _root, *, require_ready):
+            pass
+
     monkeypatch.setattr(joint_bundle, "RankingModelBundle", _Ranking)
     monkeypatch.setattr(joint_bundle, "QuantModelBundle", _Quant)
+    monkeypatch.setattr(joint_bundle, "PositionActionBundle", _Position)
     account_path = tmp_path / "account.json"
     account_path.write_text(
         json.dumps(
@@ -158,6 +188,7 @@ def test_joint_candidate_rejects_mixed_component_lineage(tmp_path, monkeypatch):
             bundle_id="joint-v1",
             ranking_model_root=tmp_path / "ranking",
             quant_model_root=tmp_path / "quant",
+            position_model_root=tmp_path / "position",
             account_backtest_path=account_path,
             agent_model="gpt-5.6-terra",
         )

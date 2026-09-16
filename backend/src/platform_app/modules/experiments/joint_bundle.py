@@ -10,6 +10,9 @@ from pathlib import Path
 from platform_app.modules.experiments.account_backtest import (
     ACCOUNT_BACKTEST_SCHEMA_VERSION,
 )
+from platform_app.modules.experiments.position_action_model import (
+    PositionActionBundle,
+)
 from platform_app.modules.experiments.quant_model_bundle import QuantModelBundle
 from platform_app.modules.experiments.ranking_model_bundle import RankingModelBundle
 from platform_app.modules.research.agent import ASSESSMENT_TOOL, SEARCH_TOOL, SYSTEM
@@ -96,6 +99,7 @@ def write_joint_candidate(
     bundle_id: str,
     ranking_model_root: Path,
     quant_model_root: Path,
+    position_model_root: Path,
     account_backtest_path: Path,
     agent_model: str,
 ) -> dict:
@@ -105,6 +109,7 @@ def write_joint_candidate(
         raise JointBundleError("JOINT_BUNDLE_ALREADY_EXISTS")
     ranking = RankingModelBundle(ranking_model_root, require_ready=False)
     quant = QuantModelBundle(quant_model_root, require_ready=False)
+    position = PositionActionBundle(position_model_root, require_ready=False)
     account_backtest_path = account_backtest_path.resolve()
     try:
         account_report = json.loads(account_backtest_path.read_text())
@@ -116,6 +121,8 @@ def write_joint_candidate(
         != ranking.manifest["artifactSha256"]
         or account_report["lineage"]["quantModelArtifactSha256"]
         != quant.manifest["artifactSha256"]
+        or position.manifest.get("rankingDatabaseSha256")
+        != ranking.manifest.get("rankingDatabaseSha256")
     ):
         raise JointBundleError("JOINT_COMPONENT_LINEAGE_MISMATCH")
     tool_schema = json.dumps(
@@ -128,9 +135,9 @@ def write_joint_candidate(
         dict.fromkeys(
             [
                 *account_report["releaseBlockers"],
+                *position.manifest["releaseBlockers"],
                 "PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT",
                 "AGENT_QUALITY_EVALUATION_PENDING",
-                "POSITION_ACTION_MODEL_MISSING",
             ]
         )
     )
@@ -150,6 +157,8 @@ def write_joint_candidate(
             "rankingModelArtifactSha256": ranking.manifest["artifactSha256"],
             "quantModelBundleId": quant.manifest["bundleId"],
             "quantModelArtifactSha256": quant.manifest["artifactSha256"],
+            "positionModelBundleId": position.manifest["bundleId"],
+            "positionModelArtifactSha256": position.manifest["artifactSha256"],
             "accountBacktestSha256": _file_sha256(account_backtest_path),
         },
         "agent": {
@@ -163,7 +172,6 @@ def write_joint_candidate(
         "missingArtifacts": [
             "prospective-agent-feature-dataset",
             "trained-joint-model",
-            "position-action-model",
         ],
     }
     root.mkdir(parents=True, exist_ok=True)

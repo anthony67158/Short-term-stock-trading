@@ -56,6 +56,7 @@ def main():
             "evaluate-account-backtest",
             "build-joint-candidate",
             "build-position-action-dataset",
+            "train-position-action-model",
         ],
     )
     parser.add_argument("--username")
@@ -71,6 +72,7 @@ def main():
     parser.add_argument("--position-root", type=Path)
     parser.add_argument("--ranking-root", type=Path)
     parser.add_argument("--ranking-model-root", type=Path)
+    parser.add_argument("--position-model-root", type=Path)
     parser.add_argument("--model-root", type=Path)
     parser.add_argument("--account-backtest", type=Path)
     parser.add_argument("--dataset-id")
@@ -319,17 +321,19 @@ def main():
                 args.joint_bundle_id,
                 args.ranking_model_root,
                 args.model_root,
+                args.position_model_root,
                 args.account_backtest,
             )
         ):
             parser.error(
-                "output, joint-bundle-id, ranking-model-root, model-root and "
-                "account-backtest are required"
+                "output, joint-bundle-id, ranking-model-root, model-root, "
+                "position-model-root and account-backtest are required"
             )
         try:
             output_root = external_dataset_root(args.output)
             ranking_model_root = external_dataset_root(args.ranking_model_root)
             quant_model_root = external_dataset_root(args.model_root)
+            position_model_root = external_dataset_root(args.position_model_root)
             account_parent = external_dataset_root(
                 args.account_backtest.resolve().parent
             )
@@ -342,6 +346,7 @@ def main():
                     bundle_id=args.joint_bundle_id,
                     ranking_model_root=ranking_model_root,
                     quant_model_root=quant_model_root,
+                    position_model_root=position_model_root,
                     account_backtest_path=account_parent
                     / args.account_backtest.name,
                     agent_model=settings().agent_model,
@@ -464,6 +469,46 @@ def main():
                     "rankingOnlyCovered": report["rankingOnlyCovered"],
                     "modelActionable": report["modelActionable"],
                 },
+                ensure_ascii=False,
+            )
+        )
+    elif args.command == "train-position-action-model":
+        from platform_app.modules.experiments.position_action_model import (
+            load_position_action_training_data,
+            write_position_action_bundle,
+        )
+
+        if not all(
+            (
+                args.position_root,
+                args.ranking_root,
+                args.model_root,
+                args.model_bundle_id,
+            )
+        ):
+            parser.error(
+                "position-root, ranking-root, model-root and model-bundle-id "
+                "are required"
+            )
+        try:
+            position_root = external_dataset_root(args.position_root)
+            ranking_root = external_dataset_root(args.ranking_root)
+            model_root = external_dataset_root(args.model_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        data, lineage = load_position_action_training_data(
+            position_dataset_root=position_root,
+            ranking_dataset_root=ranking_root,
+        )
+        print(
+            json.dumps(
+                write_position_action_bundle(
+                    output_root=model_root,
+                    bundle_id=args.model_bundle_id,
+                    data=data,
+                    lineage=lineage,
+                    max_iter=args.max_iterations,
+                ),
                 ensure_ascii=False,
             )
         )
