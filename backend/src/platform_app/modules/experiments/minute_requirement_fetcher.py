@@ -164,6 +164,23 @@ class MinuteRequirementFetcher:
         attempted_at = datetime.now(UTC).isoformat()
         try:
             raw_rows = self.client.rows("stk_mins", params, MINUTE_FIELDS)
+            # Some providers index ALL historical BSE bars by the current 920 code.
+            # Only retry an explicitly mapped alias, never guess a different security.
+            canonical = self.market.execute(
+                "SELECT i.source_code FROM instruments i "
+                "JOIN instrument_aliases a ON a.instrument_id=i.instrument_id "
+                "WHERE i.instrument_id=? AND a.source_code=?",
+                (instrument_id, source_code),
+            ).fetchone()
+            if not raw_rows and canonical and canonical["source_code"] != source_code:
+                original_code = source_code
+                source_code = canonical["source_code"]
+                params = {**params, "ts_code": source_code}
+                request_hash = canonical_sha256({
+                    "apiName": "stk_mins", "fields": MINUTE_FIELDS, "params": params,
+                    "emptyHistoricalAlias": original_code,
+                })
+                raw_rows = self.client.rows("stk_mins", params, MINUTE_FIELDS)
             if len(raw_rows) >= UPSTREAM_ROW_LIMIT:
                 raise HistoricalMarketError("MINUTE_MAY_BE_TRUNCATED")
             if any(str(row.get("ts_code") or "").upper() != source_code for row in raw_rows):
@@ -242,6 +259,7 @@ class MinuteRequirementFetcher:
                 reasons[result["reason"]] += 1
         return {
             **window,
+            "responseSourceCode": source_code,
             "status": "COMPLETED",
             "sourceRows": len(raw_rows),
             "responseSha256": response_hash,
