@@ -19,6 +19,10 @@ LABEL_SIMULATION_POLICY = {
 }
 
 
+class LabelUnavailable(ValueError):
+    pass
+
+
 def _decimal(value) -> Decimal:
     result = Decimal(str(value))
     if not result.is_finite():
@@ -78,7 +82,7 @@ def simulate_buy_limit_episode(
         (target_notional / limit / lot).to_integral_value(rounding=ROUND_FLOOR)
     ) * lot
     if target_shares <= 0:
-        raise ValueError("LABEL_TARGET_BELOW_ONE_LOT")
+        raise LabelUnavailable("TARGET_BELOW_ONE_LOT")
     participation = _decimal(execution_policy["maximumBarParticipationRate"])
     stop_price = limit * (Decimal("1") + _decimal(label_policy["stopLossReturn"]))
     take_price = limit * (Decimal("1") + _decimal(label_policy["takeProfitReturn"]))

@@ -13,6 +13,7 @@ from platform_app.modules.experiments.cash_equity_fees import CASH_EQUITY_FEE_PO
 from platform_app.modules.experiments.episode_dataset import canonical_json, canonical_sha256
 from platform_app.modules.experiments.short_horizon_labeler import (
     LABEL_SIMULATION_POLICY,
+    LabelUnavailable,
     simulate_buy_limit_episode,
 )
 
@@ -57,6 +58,12 @@ CREATE TABLE IF NOT EXISTS episode_labels (
     buy_fees_cny TEXT,
     sell_fees_cny TEXT,
     source_row_sha256 TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS label_partition_rejections (
+    decision_date TEXT NOT NULL REFERENCES label_partitions(decision_date),
+    reason TEXT NOT NULL,
+    episode_count INTEGER NOT NULL CHECK (episode_count > 0),
+    PRIMARY KEY (decision_date, reason)
 ) STRICT;
 """
 
@@ -241,7 +248,10 @@ class LabelDataset:
             (decision_date,),
         )
         labels = []
+        path_eligible_count = 0
+        rejection_counts: dict[str, int] = {}
         for episode_id, group in groupby(rows, key=lambda row: row["episode_id"]):
+            path_eligible_count += 1
             episode_rows = [dict(row) for row in group]
             first = episode_rows[0]
             trade_dates = list(
@@ -259,25 +269,34 @@ class LabelDataset:
                 }
                 for row in episode_rows
             ]
-            label = simulate_buy_limit_episode(
-                instrument_id=first["instrument_id"],
-                board=first["board"],
-                decision_date=decision_date,
-                trade_dates=trade_dates,
-                decision_close=first["decision_close"],
-                bars=bars,
-                terminal_close=first["terminal_close"],
-                execution_policy=self.episode_policy["executionPolicy"],
-                label_policy=self.episode_policy["labelPolicy"],
-            )
+            try:
+                label = simulate_buy_limit_episode(
+                    instrument_id=first["instrument_id"],
+                    board=first["board"],
+                    decision_date=decision_date,
+                    trade_dates=trade_dates,
+                    decision_close=first["decision_close"],
+                    bars=bars,
+                    terminal_close=first["terminal_close"],
+                    execution_policy=self.episode_policy["executionPolicy"],
+                    label_policy=self.episode_policy["labelPolicy"],
+                )
+            except LabelUnavailable as exc:
+                reason = str(exc)
+                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+                continue
             labels.append({"episodeId": episode_id, **label})
 
+        path_unavailable = candidate_count - path_eligible_count
+        if path_unavailable:
+            rejection_counts["MINUTE_PATH_UNAVAILABLE"] = path_unavailable
         unavailable_count = candidate_count - len(labels)
         payload_hash = canonical_sha256(
             {
                 "decisionDate": decision_date,
                 "candidateCount": candidate_count,
                 "unavailableCount": unavailable_count,
+                "rejections": rejection_counts,
                 "labels": labels,
             }
         )
@@ -319,6 +338,11 @@ class LabelDataset:
                         source_hash,
                     ),
                 )
+            for reason, episode_count in sorted(rejection_counts.items()):
+                self.db.execute(
+                    "INSERT INTO label_partition_rejections VALUES (?, ?, ?)",
+                    (decision_date, reason, episode_count),
+                )
             self.db.commit()
         except Exception:
             self.db.rollback()
@@ -329,6 +353,7 @@ class LabelDataset:
             "candidateCount": candidate_count,
             "eligibleCount": len(labels),
             "unavailableCount": unavailable_count,
+            "rejections": rejection_counts,
         }
 
     def seal(self) -> dict:
@@ -355,6 +380,13 @@ class LabelDataset:
                 "SELECT board, COUNT(*) AS count FROM episode_labels GROUP BY board"
             )
         }
+        rejection_counts = {
+            row["reason"]: row["count"]
+            for row in self.db.execute(
+                "SELECT reason, SUM(episode_count) AS count "
+                "FROM label_partition_rejections GROUP BY reason"
+            )
+        }
         self.db.commit()
         self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         database_hash = _file_sha256(self.database_path)
@@ -372,6 +404,7 @@ class LabelDataset:
             "partitions": completed_partitions,
             "labels": totals,
             "labelsByBoard": board_counts,
+            "unavailableByReason": rejection_counts,
         }
         temporary = self.manifest_path.with_suffix(".json.tmp")
         temporary.write_text(

@@ -1,12 +1,15 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from platform_app.modules.experiments.cash_equity_fees import (
     calculate_cash_equity_fees,
     stamp_duty_rate,
     transfer_fee_rate,
 )
 from platform_app.modules.experiments.short_horizon_labeler import (
+    LabelUnavailable,
     simulate_buy_limit_episode,
 )
 from platform_app.modules.experiments.short_horizon_policy import SHORT_HORIZON_POLICY
@@ -123,3 +126,19 @@ def test_same_bar_stop_and_take_uses_stop_first():
     assert result["exitReason"] == "STOP"
     assert result["exitPrice"] == "9.69515"
     assert result["stopHazardLabel"] == 1
+
+
+def test_target_below_one_board_lot_is_explicitly_unavailable():
+    dates = [f"2026010{day}" for day in range(2, 7)]
+    with pytest.raises(LabelUnavailable, match="TARGET_BELOW_ONE_LOT"):
+        simulate_buy_limit_episode(
+            instrument_id="SH.600000",
+            board="MAIN",
+            decision_date="20260101",
+            trade_dates=dates,
+            decision_close="1001",
+            bars=_bars(dates, price="1001"),
+            terminal_close="1001",
+            execution_policy=SHORT_HORIZON_POLICY["executionPolicy"],
+            label_policy=SHORT_HORIZON_POLICY["labelPolicy"],
+        )
