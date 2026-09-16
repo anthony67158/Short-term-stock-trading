@@ -5,6 +5,11 @@ from fastapi import APIRouter, Header, Query
 from platform_app.contracts.base import Envelope
 from platform_app.modules.decisions import service
 from platform_app.modules.decisions import monitoring
+from platform_app.modules.decisions import candidates
+from platform_app.modules.decisions.candidate_contracts import (
+    CandidateScan,
+    CandidateScanInput,
+)
 from platform_app.modules.decisions.monitor_contracts import (
     MonitorPage,
     MonitorUpdate,
@@ -120,3 +125,28 @@ def set_monitor(
     return Envelope(
         data=monitoring.update_monitor(user.id, decision_id, body)
     )
+
+
+@router.post(
+    "/candidate-scans",
+    response_model=Envelope[JobView],
+    status_code=202,
+)
+def create_candidate_scan(
+    body: CandidateScanInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(
+        data=JobView.model_validate(
+            candidates.submit_scan(user.id, body, key)
+        )
+    )
+
+
+@router.get(
+    "/candidate-scans/latest",
+    response_model=Envelope[CandidateScan | None],
+)
+def get_latest_candidate_scan(user: CurrentUser):
+    return Envelope(data=candidates.latest_scan(user.id))

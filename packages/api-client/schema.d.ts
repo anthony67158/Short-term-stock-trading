@@ -675,6 +675,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/candidate-scans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Candidate Scan */
+        post: operations["create_candidate_scan_api_v1_candidate_scans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/candidate-scans/latest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Latest Candidate Scan */
+        get: operations["get_latest_candidate_scan_api_v1_candidate_scans_latest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -917,6 +951,49 @@ export interface components {
              * @constant
              */
             calendarScope: "PUBLISHED_SCHEDULE";
+        };
+        /** CandidateScan */
+        CandidateScan: {
+            /**
+             * Schemaversion
+             * @default joint-candidate-scan.v1
+             * @constant
+             */
+            schemaVersion: "joint-candidate-scan.v1";
+            /** Releaseid */
+            releaseId: string;
+            /**
+             * Releasestatus
+             * @enum {string}
+             */
+            releaseStatus: "READY" | "SHADOW";
+            /**
+             * Asof
+             * Format: date-time
+             */
+            asOf: string;
+            /** Decisiondate */
+            decisionDate: string;
+            /** Marketsnapshotref */
+            marketSnapshotRef: string;
+            /** Eligibleinstruments */
+            eligibleInstruments: number;
+            /** Modelrecallcount */
+            modelRecallCount: number;
+            /** Agenteventrecallcount */
+            agentEventRecallCount: number;
+            /** Candidates */
+            candidates: components["schemas"]["JointCandidate"][];
+            /** Blockercodes */
+            blockerCodes: string[];
+        };
+        /** CandidateScanInput */
+        CandidateScanInput: {
+            /**
+             * Limit
+             * @default 20
+             */
+            limit: number;
         };
         /** CashEntryView */
         CashEntryView: {
@@ -1258,6 +1335,11 @@ export interface components {
             data: components["schemas"]["TransferView"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[Union[CandidateScan, NoneType]] */
+        Envelope_Union_CandidateScan__NoneType__: {
+            data: components["schemas"]["CandidateScan"] | null;
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[UserView] */
         Envelope_UserView_: {
             data: components["schemas"]["UserView"];
@@ -1572,6 +1654,32 @@ export interface components {
             errorCode: string | null;
             /** Message */
             message?: string | null;
+        };
+        /** JointCandidate */
+        JointCandidate: {
+            /** Instrumentid */
+            instrumentId: string;
+            /** Name */
+            name: string | null;
+            /**
+             * Board
+             * @enum {string}
+             */
+            board: "MAIN" | "CHINEXT" | "STAR" | "BEIJING";
+            /** Decisiondate */
+            decisionDate: string;
+            /** Recallsources */
+            recallSources: ("MODEL" | "AGENT_EVENT")[];
+            /** Rankscore */
+            rankScore: number | null;
+            /** Expectedgrossreturn */
+            expectedGrossReturn: number | null;
+            /** Assessmentid */
+            assessmentId: string | null;
+            /** Thesisstatus */
+            thesisStatus: ("SUPPORTED" | "WEAKENED" | "INVALIDATED" | "UNCERTAIN") | null;
+            /** Evidenceids */
+            evidenceIds: string[];
         };
         /** JointReleaseReference */
         JointReleaseReference: {
@@ -3819,6 +3927,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_candidate_scan_api_v1_candidate_scans_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CandidateScanInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_JobView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_latest_candidate_scan_api_v1_candidate_scans_latest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_Union_CandidateScan__NoneType__"];
                 };
             };
         };

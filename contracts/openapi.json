@@ -2569,6 +2569,81 @@
         }
       }
     },
+    "/api/v1/candidate-scans": {
+      "post": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Create Candidate Scan",
+        "operationId": "create_candidate_scan_api_v1_candidate_scans_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CandidateScanInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JobView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/candidate-scans/latest": {
+      "get": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Get Latest Candidate Scan",
+        "operationId": "get_latest_candidate_scan_api_v1_candidate_scans_latest_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_Union_CandidateScan__NoneType__"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications": {
       "get": {
         "tags": [
@@ -3209,6 +3284,97 @@
           "availableAt"
         ],
         "title": "CalendarDay"
+      },
+      "CandidateScan": {
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "joint-candidate-scan.v1",
+            "title": "Schemaversion",
+            "default": "joint-candidate-scan.v1"
+          },
+          "releaseId": {
+            "type": "string",
+            "title": "Releaseid"
+          },
+          "releaseStatus": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "SHADOW"
+            ],
+            "title": "Releasestatus"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Asof"
+          },
+          "decisionDate": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "title": "Decisiondate"
+          },
+          "marketSnapshotRef": {
+            "type": "string",
+            "title": "Marketsnapshotref"
+          },
+          "eligibleInstruments": {
+            "type": "integer",
+            "title": "Eligibleinstruments"
+          },
+          "modelRecallCount": {
+            "type": "integer",
+            "title": "Modelrecallcount"
+          },
+          "agentEventRecallCount": {
+            "type": "integer",
+            "title": "Agenteventrecallcount"
+          },
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/JointCandidate"
+            },
+            "type": "array",
+            "title": "Candidates"
+          },
+          "blockerCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockercodes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "releaseId",
+          "releaseStatus",
+          "asOf",
+          "decisionDate",
+          "marketSnapshotRef",
+          "eligibleInstruments",
+          "modelRecallCount",
+          "agentEventRecallCount",
+          "candidates",
+          "blockerCodes"
+        ],
+        "title": "CandidateScan"
+      },
+      "CandidateScanInput": {
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 20
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CandidateScanInput"
       },
       "CashEntryView": {
         "properties": {
@@ -4300,6 +4466,29 @@
         ],
         "title": "Envelope[TransferView]"
       },
+      "Envelope_Union_CandidateScan__NoneType__": {
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CandidateScan"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[Union[CandidateScan, NoneType]]"
+      },
       "Envelope_UserView_": {
         "properties": {
           "data": {
@@ -5136,6 +5325,124 @@
           "errorCode"
         ],
         "title": "JobView"
+      },
+      "JointCandidate": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "board": {
+            "type": "string",
+            "enum": [
+              "MAIN",
+              "CHINEXT",
+              "STAR",
+              "BEIJING"
+            ],
+            "title": "Board"
+          },
+          "decisionDate": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "title": "Decisiondate"
+          },
+          "recallSources": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "MODEL",
+                "AGENT_EVENT"
+              ]
+            },
+            "type": "array",
+            "title": "Recallsources"
+          },
+          "rankScore": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rankscore"
+          },
+          "expectedGrossReturn": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedgrossreturn"
+          },
+          "assessmentId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assessmentid"
+          },
+          "thesisStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SUPPORTED",
+                  "WEAKENED",
+                  "INVALIDATED",
+                  "UNCERTAIN"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thesisstatus"
+          },
+          "evidenceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidenceids"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "name",
+          "board",
+          "decisionDate",
+          "recallSources",
+          "rankScore",
+          "expectedGrossReturn",
+          "assessmentId",
+          "thesisStatus",
+          "evidenceIds"
+        ],
+        "title": "JointCandidate"
       },
       "JointReleaseReference": {
         "properties": {

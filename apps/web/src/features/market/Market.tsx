@@ -5,6 +5,7 @@ import { ArrowLeft, Star } from "lucide-react";
 import { api, errorMessage } from "../../lib/api";
 import { Button, Empty, Input } from "../../components/Controls";
 import { EvidenceResearch } from "./EvidenceResearch";
+import { CandidateScan } from "./CandidateScan";
 
 const boardNames = { MAIN: "主板", STAR: "科创板", CHINEXT: "创业板", BEIJING: "北交所", UNKNOWN: "待核验" };
 
@@ -35,7 +36,7 @@ export function Market() {
         <Button type="button" aria-pressed={watchOnly} onClick={() => setWatchOnly(!watchOnly)}><Star size={16} />{watchOnly ? "查看全部" : "我的关注"}</Button>
       </form>
       {universe && <p className="source-note">{universe.source} · 当前目录 {universe.count.toLocaleString()} 只 · 采集于 {new Date(universe.acquiredAt).toLocaleString("zh-CN")} · 历史股票池待补齐</p>}
-      <p className="capability-note">联合选股尚未就绪。当前可查阅股票与保存关注，暂不提供可执行排名。</p>
+      <CandidateScan />
       {listing.isPending ? <p role="status">正在读取证券目录…</p> : listing.isError ? <div role="alert"><p>{errorMessage(listing.error)}</p><Button onClick={() => listing.refetch()}>重新读取</Button></div>
         : rows.length === 0 ? <Empty title={watchOnly ? "尚未关注股票" : "暂无匹配的证券"}>{watchOnly ? "打开股票详情后加入关注。" : universe ? "换一个名称或完整代码试试。" : "证券目录尚未完成同步。"}</Empty>
           : <div className="table-scroll" tabIndex={0} role="region" aria-label="股票列表"><table><thead><tr><th>股票</th><th>代码</th><th>交易市场</th><th>板块</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id}>

@@ -20,6 +20,7 @@ from platform_app.modules.research.service import ResearchError
 from platform_app.modules.decisions.routes import router as decision_router
 from platform_app.modules.decisions.service import DecisionError
 from platform_app.modules.decisions.monitoring import MonitorError
+from platform_app.modules.decisions.candidates import CandidateError
 from platform_app.modules.operations.routes import router as operations_router
 from platform_app.modules.operations.notifications import NotificationError
 
@@ -56,6 +57,7 @@ async def request_boundary(request: Request, call_next):
 @app.exception_handler(ResearchError)
 @app.exception_handler(DecisionError)
 @app.exception_handler(MonitorError)
+@app.exception_handler(CandidateError)
 @app.exception_handler(NotificationError)
 async def identity_error(_request, exc):
     return error_response(exc.code, exc.message, exc.status)
