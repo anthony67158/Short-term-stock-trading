@@ -18,10 +18,17 @@ class Settings(BaseSettings):
     agent_base_url: str = "https://linlongs.com"
     agent_model: str = "gpt-5.6-terra"
     agent_api_key: SecretStr = SecretStr("")
-    agent_timeout_seconds: int = Field(default=60, ge=5, le=90)
+    agent_timeout_seconds: int = Field(default=180, ge=30, le=180)
     agent_enabled: bool = False
     agent_daily_call_limit: int = Field(default=20, ge=1, le=100)
     agent_global_daily_call_limit: int = Field(default=100, ge=1, le=1000)
+    agent_search_max_calls: int = Field(default=4, ge=0, le=6)
+    search_enabled: bool = False
+    search_base_url: str = "https://open.feedcoopapi.com/search_api/web_search"
+    search_api_key: SecretStr = SecretStr("")
+    search_api_key_name: str = Field(default="stock", min_length=1, max_length=80)
+    search_timeout_seconds: int = Field(default=20, ge=5, le=30)
+    search_result_limit: int = Field(default=8, ge=1, le=10)
     market_data_base_url: str = "https://ts.gyzcloud.top/api"
     market_data_api_key: SecretStr = SecretStr("")
     market_data_timeout_seconds: int = Field(default=40, ge=5, le=90)
@@ -60,6 +67,13 @@ class Settings(BaseSettings):
             or parsed.fragment
         ):
             raise ValueError("Market data endpoint is not an allowed HTTPS API")
+        return value
+
+    @field_validator("search_base_url")
+    @classmethod
+    def secure_search_origin(cls, value):
+        if value != "https://open.feedcoopapi.com/search_api/web_search":
+            raise ValueError("Search endpoint must be the approved Doubao HTTPS API")
         return value
 
 
