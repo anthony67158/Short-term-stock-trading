@@ -560,4 +560,25 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端托管PG、容器部署与
   `66908290d57a0ded94c4ab350509bf514ac12c93ad78b4089f8bd945c24b456d`；
   当前未完成联合模型训练、Agent质量评测、联合/去Agent/去量化消融，因此不能发布。
 
+### 联合持仓运行时仲裁（T25/T26 增量）
+
+- 新增`position-action-reference.v1`，要求量化侧同时给出四动作相对HOLD的
+  期望增量、Q10/Q50/Q90、止损风险、样本支持、趋势、期限、费用与校准引用；
+  HOLD必须保持当前数量并使用零增量基线。现有只输出均值的持仓模型不满足完整
+  生产合同，不能通过缺省值伪装。
+- 新增`position-assessment.v1`，持仓Agent只提交结构化论点、反证、不确定性及
+  来源信号；主力资金和订单流明确保存供应商、推导口径、发布时间、首次获取时间、
+  可用时间和校验状态，不将供应商推导指标写成已证实的“主力身份”事实。
+- 确定性仲裁器按硬风险、联合发布门禁、模型/Agent组件绑定、DecisionContext、
+  时点隔离、账户数量约束的顺序处理。硬止损不等待模型或Agent，按当前可卖数量
+  输出REDUCE/EXIT；无可卖数量保留风险阻断。普通动作必须来自同一READY联合版本；
+  Agent与量化冲突、任一输入缺失/过期或未来证据均返回`UNAVAILABLE/NONE`，
+  不冒充HOLD。
+- `JointBundle`现绑定持仓Agent协议并校验运行时release引用；READY manifest若仍有
+  blocker、缺失artifact或协议不完整会被拒绝。当前`joint-candidate-v2`仍因前瞻
+  Agent样本、联合训练及消融缺失保持`UNAVAILABLE`。
+- 聚焦与全量验证：`uv run pytest -q`为204 passed；`uv run ruff check src tests`
+  通过。尚未实现Position Agent任务持久化、前瞻样本采集和完整联合模型训练，
+  因此本增量只完成可审计运行时合同与仲裁链路，不代表AC08或M3验收完成。
+
 每个切片记录实际修改、验证命令、结果、限制和提交，不记录密钥、完整私人账户或无关日志。只有实际通过的任务才更新完成状态。
