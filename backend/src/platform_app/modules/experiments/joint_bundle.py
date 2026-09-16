@@ -4,8 +4,12 @@ import hashlib
 import json
 import os
 import re
+import shutil
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+
+import fcntl
 
 from platform_app.modules.experiments.account_backtest import (
     ACCOUNT_BACKTEST_SCHEMA_VERSION,
@@ -22,13 +26,18 @@ from platform_app.modules.decisions.position_contracts import (
 from platform_app.modules.decisions.position_engine import arbitrate_position
 from platform_app.modules.experiments.quant_model_bundle import QuantModelBundle
 from platform_app.modules.experiments.ranking_model_bundle import RankingModelBundle
-from platform_app.modules.research.agent import ASSESSMENT_TOOL, SEARCH_TOOL, SYSTEM
+from platform_app.modules.research.agent import (
+    ASSESSMENT_TOOL,
+    POSITION_SYSTEM,
+    SEARCH_TOOL,
+    SYSTEM,
+)
 from platform_app.modules.research.contracts import (
     ASSESSMENT_PROTOCOL_VERSION,
     AssessmentOutput,
 )
 
-JOINT_SCHEMA_VERSION = "joint-bundle.v1"
+JOINT_SCHEMA_VERSION = "joint-bundle.v2"
 AGENT_FEATURE_SCHEMA_VERSION = "agent-features.v1"
 AGENT_FEATURE_NAMES = (
     "thesisSupported",
@@ -79,7 +88,70 @@ def _manifest_path(root_or_pointer: Path) -> Path:
         or _file_sha256(manifest_path) != pointer.get("manifestSha256")
     ):
         raise JointBundleError("JOINT_RELEASE_POINTER_INVALID")
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (OSError, TypeError, json.JSONDecodeError) as exc:
+        raise JointBundleError("JOINT_RELEASE_POINTER_INVALID") from exc
+    if manifest.get("bundleId") != pointer.get("releaseId"):
+        raise JointBundleError("JOINT_RELEASE_POINTER_INVALID")
     return manifest_path
+
+
+def _atomic_json(path: Path, value: dict) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n")
+    os.replace(temporary, path)
+
+
+@contextmanager
+def _registry_lock(root: Path):
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / ".release.lock").open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _active_pointer(root: Path) -> dict | None:
+    pointer_path = root / "active-shadow.json"
+    if not pointer_path.exists():
+        return None
+    _manifest_path(pointer_path)
+    try:
+        return json.loads(pointer_path.read_text())
+    except (OSError, TypeError, json.JSONDecodeError) as exc:
+        raise JointBundleError("JOINT_RELEASE_POINTER_INVALID") from exc
+
+
+def _read_artifact(path: Path, error_code: str) -> dict:
+    try:
+        value = json.loads(path.expanduser().resolve().read_text())
+    except (OSError, TypeError, json.JSONDecodeError) as exc:
+        raise JointBundleError(error_code) from exc
+    if not isinstance(value, dict):
+        raise JointBundleError(error_code)
+    return value
+
+
+def _verified_component_path(
+    manifest_path: Path,
+    relative_value: object,
+    expected_sha256: object,
+) -> Path:
+    if not isinstance(relative_value, str):
+        raise JointBundleError("JOINT_BUNDLE_COMPONENT_INVALID")
+    relative = Path(relative_value)
+    component_path = (manifest_path.parent / relative).resolve()
+    if (
+        relative.is_absolute()
+        or manifest_path.parent not in component_path.parents
+        or not component_path.is_file()
+        or _file_sha256(component_path) != expected_sha256
+    ):
+        raise JointBundleError("JOINT_BUNDLE_COMPONENT_INVALID")
+    return component_path
 
 
 def encode_agent_assessment(assessment: AssessmentOutput | dict) -> dict[str, float]:
@@ -128,6 +200,8 @@ def write_joint_candidate(
     quant_model_root: Path,
     position_model_root: Path,
     account_backtest_path: Path,
+    strategy_artifact_path: Path,
+    ablation_artifact_path: Path,
     agent_model: str,
 ) -> dict:
     root = output_root.resolve()
@@ -146,12 +220,32 @@ def write_joint_candidate(
         account_report.get("schemaVersion") != ACCOUNT_BACKTEST_SCHEMA_VERSION
         or account_report["lineage"]["rankingModelArtifactSha256"]
         != ranking.manifest["artifactSha256"]
-        or account_report["lineage"]["quantModelArtifactSha256"]
-        != quant.manifest["artifactSha256"]
+        or account_report["lineage"]["quantModelArtifactSha256"] != quant.manifest["artifactSha256"]
         or position.manifest.get("rankingDatabaseSha256")
         != ranking.manifest.get("rankingDatabaseSha256")
     ):
         raise JointBundleError("JOINT_COMPONENT_LINEAGE_MISMATCH")
+    strategy_artifact_path = strategy_artifact_path.expanduser().resolve()
+    ablation_artifact_path = ablation_artifact_path.expanduser().resolve()
+    strategy = _read_artifact(
+        strategy_artifact_path,
+        "JOINT_STRATEGY_ARTIFACT_INVALID",
+    )
+    ablation = _read_artifact(
+        ablation_artifact_path,
+        "JOINT_ABLATION_ARTIFACT_INVALID",
+    )
+    if (
+        strategy.get("schemaVersion") != "strategy-freeze.v1"
+        or strategy.get("status") != "EVALUATED"
+        or not re.fullmatch(r"[0-9a-f]{64}", strategy.get("configHash", ""))
+        or ablation.get("schemaVersion") != "four-way-ablation.v1"
+        or ablation.get("strategyVersionId") != strategy.get("strategyVersionId")
+        or ablation.get("configHash") != strategy.get("configHash")
+        or ablation.get("evaluationStatus") not in {"VALID", "INSUFFICIENT"}
+        or not isinstance(ablation.get("experimentId"), str)
+    ):
+        raise JointBundleError("JOINT_EXPERIMENT_LINEAGE_MISMATCH")
     tool_schema = json.dumps(
         [SEARCH_TOOL, ASSESSMENT_TOOL],
         ensure_ascii=False,
@@ -163,11 +257,28 @@ def write_joint_candidate(
             [
                 *account_report["releaseBlockers"],
                 *position.manifest["releaseBlockers"],
-                "PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT",
                 "AGENT_QUALITY_EVALUATION_PENDING",
+                *(
+                    [
+                        "PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT",
+                        "JOINT_ABLATION_INSUFFICIENT",
+                    ]
+                    if ablation["evaluationStatus"] == "INSUFFICIENT"
+                    else []
+                ),
             ]
         )
     )
+    root.mkdir(parents=True, exist_ok=True)
+    strategy_target = root / "strategy.json"
+    ablation_target = root / "ablation.json"
+    for source, target in (
+        (strategy_artifact_path, strategy_target),
+        (ablation_artifact_path, ablation_target),
+    ):
+        temporary = target.with_suffix(target.suffix + ".tmp")
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, target)
     manifest = {
         "bundleId": bundle_id,
         "schemaVersion": JOINT_SCHEMA_VERSION,
@@ -187,6 +298,13 @@ def write_joint_candidate(
             "positionModelBundleId": position.manifest["bundleId"],
             "positionModelArtifactSha256": position.manifest["artifactSha256"],
             "accountBacktestSha256": _file_sha256(account_backtest_path),
+            "strategyVersionId": strategy["strategyVersionId"],
+            "strategyConfigHash": strategy["configHash"],
+            "strategyArtifact": strategy_target.name,
+            "strategyArtifactSha256": _file_sha256(strategy_target),
+            "ablationExperimentId": ablation["experimentId"],
+            "ablationArtifact": ablation_target.name,
+            "ablationArtifactSha256": _file_sha256(ablation_target),
         },
         "agent": {
             "model": agent_model,
@@ -195,19 +313,14 @@ def write_joint_candidate(
             "featureSchemaVersion": AGENT_FEATURE_SCHEMA_VERSION,
             "featureNames": AGENT_FEATURE_NAMES,
             "promptSha256": _sha256_bytes(SYSTEM.encode()),
+            "positionPromptSha256": _sha256_bytes(POSITION_SYSTEM.encode()),
             "toolSchemaSha256": _sha256_bytes(tool_schema),
         },
-        "missingArtifacts": [
-            "prospective-agent-feature-dataset",
-            "trained-joint-model",
-        ],
+        "missingArtifacts": (
+            ["trained-joint-model"] if ablation["evaluationStatus"] == "INSUFFICIENT" else []
+        ),
     }
-    root.mkdir(parents=True, exist_ok=True)
-    temporary = manifest_path.with_suffix(".json.tmp")
-    temporary.write_text(
-        json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    )
-    os.replace(temporary, manifest_path)
+    _atomic_json(manifest_path, manifest)
     return manifest
 
 
@@ -226,10 +339,27 @@ class JointBundle:
                 r"[0-9a-f]{64}",
                 self.manifest.get("agent", {}).get("promptSha256", ""),
             )
-            or tuple(self.manifest.get("agent", {}).get("featureNames", ()))
-            != AGENT_FEATURE_NAMES
+            or not re.fullmatch(
+                r"[0-9a-f]{64}",
+                self.manifest.get("agent", {}).get(
+                    "positionPromptSha256",
+                    "",
+                ),
+            )
+            or tuple(self.manifest.get("agent", {}).get("featureNames", ())) != AGENT_FEATURE_NAMES
         ):
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
+        components = self.manifest.get("components", {})
+        _verified_component_path(
+            manifest_path,
+            components.get("strategyArtifact"),
+            components.get("strategyArtifactSha256"),
+        )
+        _verified_component_path(
+            manifest_path,
+            components.get("ablationArtifact"),
+            components.get("ablationArtifactSha256"),
+        )
         status = self.manifest.get("releaseStatus")
         if status not in {"READY", "SHADOW", "UNAVAILABLE"}:
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
@@ -258,20 +388,12 @@ class JointBundle:
             status=self.manifest["releaseStatus"],
             allows_new_risk=self.manifest.get("allowsNewRisk", False),
             ranking_model_bundle_id=components.get("rankingModelBundleId"),
-            ranking_model_artifact_sha256=components.get(
-                "rankingModelArtifactSha256"
-            ),
+            ranking_model_artifact_sha256=components.get("rankingModelArtifactSha256"),
             quant_model_bundle_id=components.get("quantModelBundleId"),
-            quant_model_artifact_sha256=components.get(
-                "quantModelArtifactSha256"
-            ),
+            quant_model_artifact_sha256=components.get("quantModelArtifactSha256"),
             position_model_bundle_id=components.get("positionModelBundleId"),
-            position_model_artifact_sha256=components.get(
-                "positionModelArtifactSha256"
-            ),
-            agent_protocol_version=self.manifest.get("agent", {}).get(
-                "positionProtocolVersion"
-            ),
+            position_model_artifact_sha256=components.get("positionModelArtifactSha256"),
+            agent_protocol_version=self.manifest.get("agent", {}).get("positionProtocolVersion"),
             blocker_codes=self.manifest.get("releaseBlockers", []),
         )
 
@@ -303,6 +425,7 @@ def publish_shadow_release(
     quant_model_root: Path,
     position_model_root: Path,
     account_backtest_path: Path,
+    expected_active_release_id: str | None = None,
 ) -> dict:
     candidate_path = candidate_root.expanduser().resolve() / "manifest.json"
     candidate = JointBundle(candidate_root, require_ready=False).manifest
@@ -318,15 +441,37 @@ def publish_shadow_release(
         "positionModelBundleId": position.manifest["bundleId"],
         "positionModelArtifactSha256": position.manifest["artifactSha256"],
         "accountBacktestSha256": _file_sha256(account_backtest_path.resolve()),
+        **{
+            key: candidate["components"][key]
+            for key in (
+                "strategyVersionId",
+                "strategyConfigHash",
+                "strategyArtifact",
+                "strategyArtifactSha256",
+                "ablationExperimentId",
+                "ablationArtifact",
+                "ablationArtifactSha256",
+            )
+        },
     }
     if components != expected:
         raise JointBundleError("JOINT_SHADOW_COMPONENT_MISMATCH")
+    artifact_sources = {}
+    for name in ("strategyArtifact", "ablationArtifact"):
+        relative = Path(components[name])
+        source = (candidate_path.parent / relative).resolve()
+        if (
+            relative.is_absolute()
+            or relative.parent != Path(".")
+            or candidate_path.parent not in source.parents
+            or _file_sha256(source) != components[f"{name}Sha256"]
+        ):
+            raise JointBundleError("JOINT_SHADOW_COMPONENT_MISMATCH")
+        artifact_sources[name] = source
     root = registry_root.expanduser().resolve()
     release_root = root / "releases" / release_id
     manifest_path = release_root / "manifest.json"
     pointer_path = root / "active-shadow.json"
-    if manifest_path.exists():
-        raise JointBundleError("JOINT_SHADOW_RELEASE_ALREADY_EXISTS")
     release = {
         **candidate,
         "bundleId": release_id,
@@ -341,24 +486,57 @@ def publish_shadow_release(
             "positionProtocolVersion": POSITION_AGENT_PROTOCOL_VERSION,
         },
     }
-    release_root.mkdir(parents=True, exist_ok=False)
-    temporary_manifest = manifest_path.with_suffix(".json.tmp")
-    temporary_manifest.write_text(
-        json.dumps(release, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    )
-    os.replace(temporary_manifest, manifest_path)
-    relative = manifest_path.relative_to(root)
-    pointer = {
-        "schemaVersion": "joint-release-pointer.v1",
-        "releaseId": release_id,
-        "manifest": str(relative),
-        "manifestSha256": _file_sha256(manifest_path),
-        "updatedAt": datetime.now(UTC).isoformat(),
-    }
-    root.mkdir(parents=True, exist_ok=True)
-    temporary_pointer = pointer_path.with_suffix(".json.tmp")
-    temporary_pointer.write_text(
-        json.dumps(pointer, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
-    )
-    os.replace(temporary_pointer, pointer_path)
+    with _registry_lock(root):
+        active = _active_pointer(root)
+        active_id = active.get("releaseId") if active else None
+        if active_id != expected_active_release_id:
+            raise JointBundleError("JOINT_ACTIVE_RELEASE_CONFLICT")
+        if manifest_path.exists():
+            raise JointBundleError("JOINT_SHADOW_RELEASE_ALREADY_EXISTS")
+        release_root.mkdir(parents=True, exist_ok=False)
+        for name, source in artifact_sources.items():
+            shutil.copyfile(source, release_root / components[name])
+        _atomic_json(manifest_path, release)
+        JointBundle(release_root, require_ready=False)
+        relative = manifest_path.relative_to(root)
+        pointer = {
+            "schemaVersion": "joint-release-pointer.v1",
+            "releaseId": release_id,
+            "manifest": str(relative),
+            "manifestSha256": _file_sha256(manifest_path),
+            "updatedAt": datetime.now(UTC).isoformat(),
+        }
+        _atomic_json(pointer_path, pointer)
     return {"release": release, "pointer": pointer}
+
+
+def activate_existing_shadow_release(
+    *,
+    registry_root: Path,
+    target_release_id: str,
+    expected_active_release_id: str,
+) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{1,160}", target_release_id):
+        raise JointBundleError("JOINT_ROLLBACK_TARGET_INVALID")
+    root = registry_root.expanduser().resolve()
+    manifest_path = root / "releases" / target_release_id / "manifest.json"
+    target = JointBundle(
+        manifest_path.parent,
+        require_ready=False,
+    ).manifest
+    if target.get("releaseStatus") != "SHADOW" or target.get("bundleId") != target_release_id:
+        raise JointBundleError("JOINT_ROLLBACK_TARGET_INVALID")
+    with _registry_lock(root):
+        active = _active_pointer(root)
+        active_id = active.get("releaseId") if active else None
+        if active_id != expected_active_release_id:
+            raise JointBundleError("JOINT_ACTIVE_RELEASE_CONFLICT")
+        pointer = {
+            "schemaVersion": "joint-release-pointer.v1",
+            "releaseId": target_release_id,
+            "manifest": str(manifest_path.relative_to(root)),
+            "manifestSha256": _file_sha256(manifest_path),
+            "updatedAt": datetime.now(UTC).isoformat(),
+        }
+        _atomic_json(root / "active-shadow.json", pointer)
+    return {"release": target, "pointer": pointer}

@@ -29,6 +29,7 @@ from platform_app.modules.operations.routes import router as operations_router
 from platform_app.modules.operations.notifications import NotificationError
 from platform_app.modules.experiments.routes import router as experiment_router
 from platform_app.modules.experiments.service import ExperimentError
+from platform_app.modules.experiments.release_service import ReleaseError
 
 app = FastAPI(title="A股投资平台", version="0.1.0")
 app.include_router(identity_router)
@@ -67,6 +68,7 @@ async def request_boundary(request: Request, call_next):
 @app.exception_handler(CandidateError)
 @app.exception_handler(NotificationError)
 @app.exception_handler(ExperimentError)
+@app.exception_handler(ReleaseError)
 async def identity_error(_request, exc):
     return error_response(exc.code, exc.message, exc.status)
 

@@ -77,6 +77,8 @@ def main():
     parser.add_argument("--position-model-root", type=Path)
     parser.add_argument("--model-root", type=Path)
     parser.add_argument("--account-backtest", type=Path)
+    parser.add_argument("--strategy-artifact", type=Path)
+    parser.add_argument("--ablation-artifact", type=Path)
     parser.add_argument("--candidate-root", type=Path)
     parser.add_argument("--registry-root", type=Path)
     parser.add_argument("--dataset-id")
@@ -87,6 +89,7 @@ def main():
     parser.add_argument("--model-bundle-id")
     parser.add_argument("--joint-bundle-id")
     parser.add_argument("--release-id")
+    parser.add_argument("--expected-active-release-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     parser.add_argument(
@@ -329,20 +332,23 @@ def main():
                 args.model_root,
                 args.position_model_root,
                 args.account_backtest,
+                args.strategy_artifact,
+                args.ablation_artifact,
             )
         ):
             parser.error(
                 "output, joint-bundle-id, ranking-model-root, model-root, "
-                "position-model-root and account-backtest are required"
+                "position-model-root, account-backtest, strategy-artifact "
+                "and ablation-artifact are required"
             )
         try:
             output_root = external_dataset_root(args.output)
             ranking_model_root = external_dataset_root(args.ranking_model_root)
             quant_model_root = external_dataset_root(args.model_root)
             position_model_root = external_dataset_root(args.position_model_root)
-            account_parent = external_dataset_root(
-                args.account_backtest.resolve().parent
-            )
+            account_parent = external_dataset_root(args.account_backtest.resolve().parent)
+            strategy_parent = external_dataset_root(args.strategy_artifact.resolve().parent)
+            ablation_parent = external_dataset_root(args.ablation_artifact.resolve().parent)
         except ValueError as exc:
             parser.error(str(exc))
         print(
@@ -353,8 +359,9 @@ def main():
                     ranking_model_root=ranking_model_root,
                     quant_model_root=quant_model_root,
                     position_model_root=position_model_root,
-                    account_backtest_path=account_parent
-                    / args.account_backtest.name,
+                    account_backtest_path=account_parent / args.account_backtest.name,
+                    strategy_artifact_path=strategy_parent / args.strategy_artifact.name,
+                    ablation_artifact_path=ablation_parent / args.ablation_artifact.name,
                     agent_model=settings().agent_model,
                 ),
                 ensure_ascii=False,
@@ -386,9 +393,7 @@ def main():
             ranking_model_root = external_dataset_root(args.ranking_model_root)
             quant_model_root = external_dataset_root(args.model_root)
             position_model_root = external_dataset_root(args.position_model_root)
-            account_parent = external_dataset_root(
-                args.account_backtest.resolve().parent
-            )
+            account_parent = external_dataset_root(args.account_backtest.resolve().parent)
         except ValueError as exc:
             parser.error(str(exc))
         print(
@@ -400,8 +405,8 @@ def main():
                     ranking_model_root=ranking_model_root,
                     quant_model_root=quant_model_root,
                     position_model_root=position_model_root,
-                    account_backtest_path=account_parent
-                    / args.account_backtest.name,
+                    account_backtest_path=account_parent / args.account_backtest.name,
+                    expected_active_release_id=(args.expected_active_release_id),
                 ),
                 ensure_ascii=False,
             )
@@ -419,28 +424,21 @@ def main():
                 args.output,
             )
         ):
-            parser.error(
-                "registry-root, dataset-root, account-backtest and output "
-                "are required"
-            )
+            parser.error("registry-root, dataset-root, account-backtest and output are required")
         try:
             registry_root = external_dataset_root(args.registry_root)
             dataset_root = external_dataset_root(args.dataset_root)
             output_root = external_dataset_root(args.output)
-            account_parent = external_dataset_root(
-                args.account_backtest.resolve().parent
-            )
+            account_parent = external_dataset_root(args.account_backtest.resolve().parent)
         except ValueError as exc:
             parser.error(str(exc))
         print(
             json.dumps(
                 write_daily_joint_cycle(
                     output_root=output_root,
-                    active_release_pointer=registry_root
-                    / "active-shadow.json",
+                    active_release_pointer=registry_root / "active-shadow.json",
                     market_dataset_root=dataset_root,
-                    account_backtest_path=account_parent
-                    / args.account_backtest.name,
+                    account_backtest_path=account_parent / args.account_backtest.name,
                     minimum_matured_samples=args.minimum_matured_samples,
                 ),
                 ensure_ascii=False,
@@ -472,9 +470,7 @@ def main():
             model_root = external_dataset_root(args.model_root)
             episode_root = external_dataset_root(args.episode_root)
             label_root = external_dataset_root(args.label_root)
-            backtest_parent = external_dataset_root(
-                args.quant_backtest.resolve().parent
-            )
+            backtest_parent = external_dataset_root(args.quant_backtest.resolve().parent)
             output_parent = external_dataset_root(args.output.resolve().parent)
         except ValueError as exc:
             parser.error(str(exc))
@@ -531,16 +527,13 @@ def main():
             )
         ):
             parser.error(
-                "coverage-report, ranking-root, model-root, label-root and output "
-                "are required"
+                "coverage-report, ranking-root, model-root, label-root and output are required"
             )
         try:
             ranking_root = external_dataset_root(args.ranking_root)
             model_root = external_dataset_root(args.model_root)
             label_root = external_dataset_root(args.label_root)
-            coverage_parent = external_dataset_root(
-                args.coverage_report.resolve().parent
-            )
+            coverage_parent = external_dataset_root(args.coverage_report.resolve().parent)
             output_parent = external_dataset_root(args.output.resolve().parent)
         except ValueError as exc:
             parser.error(str(exc))
@@ -578,10 +571,7 @@ def main():
                 args.model_bundle_id,
             )
         ):
-            parser.error(
-                "position-root, ranking-root, model-root and model-bundle-id "
-                "are required"
-            )
+            parser.error("position-root, ranking-root, model-root and model-bundle-id are required")
         try:
             position_root = external_dataset_root(args.position_root)
             ranking_root = external_dataset_root(args.ranking_root)
@@ -619,8 +609,7 @@ def main():
             )
         ):
             parser.error(
-                "ranking-root, model-root, episode-root, label-root and output "
-                "are required"
+                "ranking-root, model-root, episode-root, label-root and output are required"
             )
         try:
             ranking_root = external_dataset_root(args.ranking_root)
@@ -696,9 +685,7 @@ def main():
                 args.model_bundle_id,
             )
         ):
-            parser.error(
-                "episode-root, label-root, model-root and model-bundle-id are required"
-            )
+            parser.error("episode-root, label-root, model-root and model-bundle-id are required")
         try:
             episode_root = external_dataset_root(args.episode_root)
             label_root = external_dataset_root(args.label_root)
@@ -863,9 +850,7 @@ def main():
             or args.start_date > args.end_date
         ):
             parser.error("non-seal stages require ordered YYYYMMDD date values")
-        if args.stage == "exhaust-minutes" and (
-            not args.reason or not args.resolution_note
-        ):
+        if args.stage == "exhaust-minutes" and (not args.reason or not args.resolution_note):
             parser.error("exhaust-minutes stage requires reason and resolution-note")
         if args.stage == "fetch-minutes" and args.max_sessions > 150:
             parser.error("fetch-minutes requires max-sessions <= 150")
@@ -1027,9 +1012,7 @@ def main():
             parser.error("candidates stage requires ordered YYYYMMDD date values")
         if args.stage == "archive-minutes" and not args.archive_root:
             parser.error("archive-minutes stage requires archive-root")
-        if args.stage == "exhaust-minutes" and (
-            not args.reason or not args.resolution_note
-        ):
+        if args.stage == "exhaust-minutes" and (not args.reason or not args.resolution_note):
             parser.error("exhaust-minutes stage requires reason and resolution-note")
         if args.stage == "fetch-minutes" and (
             args.max_sessions > 150

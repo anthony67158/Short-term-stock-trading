@@ -1,4 +1,5 @@
 """Explicit private configuration; old repository .env is never implicitly loaded."""
+
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -11,9 +12,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore", env_prefix="PLATFORM_")
     environment: Literal["local", "test", "production"] = "local"
-    database_url: SecretStr = SecretStr(
-        "postgresql+psycopg://platform@127.0.0.1:55432/platform"
-    )
+    database_url: SecretStr = SecretStr("postgresql+psycopg://platform@127.0.0.1:55432/platform")
     origin: str = "http://localhost:5173"
     agent_base_url: str = "https://linlongs.com"
     agent_model: str = "gpt-5.6-terra"
@@ -45,8 +44,17 @@ class Settings(BaseSettings):
     ranking_model_root: Path = Path(
         "~/.local/share/stock-platform/full-universe-ranking-model-v1"
     ).expanduser()
+    quant_model_root: Path = Path(
+        "~/.local/share/stock-platform/quant-short-horizon-enriched-v2"
+    ).expanduser()
     position_model_root: Path = Path(
         "~/.local/share/stock-platform/position-action-model-v2"
+    ).expanduser()
+    account_backtest_path: Path = Path(
+        "~/.local/share/stock-platform/quant-short-horizon-enriched-v2/account-backtest-v1.json"
+    ).expanduser()
+    joint_candidate_registry_root: Path = Path(
+        "~/.local/share/stock-platform/joint-candidates"
     ).expanduser()
     cookie_secure: bool = False
 
@@ -94,10 +102,12 @@ class Settings(BaseSettings):
 
 @lru_cache
 def settings() -> Settings:
-    path = Path(os.environ.get(
-        "PLATFORM_CONFIG_FILE",
-        "~/.config/stock-platform/platform.env",
-    )).expanduser()
+    path = Path(
+        os.environ.get(
+            "PLATFORM_CONFIG_FILE",
+            "~/.config/stock-platform/platform.env",
+        )
+    ).expanduser()
     result = Settings(_env_file=path)
     if result.environment == "production" and (
         not result.cookie_secure or not result.origin.startswith("https://")

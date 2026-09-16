@@ -3077,6 +3077,220 @@
         }
       }
     },
+    "/api/v1/release-candidates": {
+      "post": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Create Release Candidate",
+        "operationId": "create_release_candidate_api_v1_release_candidates_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseCandidateInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReleaseView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases": {
+      "post": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Activate Release",
+        "operationId": "activate_release_api_v1_releases_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseActivationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReleaseView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "List Releases",
+        "operationId": "list_releases_api_v1_releases_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReleasePage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/releases/{release_id}/rollbacks": {
+      "post": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Rollback Release",
+        "operationId": "rollback_release_api_v1_releases__release_id__rollbacks_post",
+        "parameters": [
+          {
+            "name": "release_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Release Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReleaseRollbackInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ReleaseView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -4968,6 +5182,38 @@
           "data"
         ],
         "title": "Envelope[ReconciliationView]"
+      },
+      "Envelope_ReleasePage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReleasePage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReleasePage]"
+      },
+      "Envelope_ReleaseView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ReleaseView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ReleaseView]"
       },
       "Envelope_ResearchCapability_": {
         "properties": {
@@ -7794,6 +8040,279 @@
           "matches"
         ],
         "title": "ReconciliationView"
+      },
+      "ReleaseActivationInput": {
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Candidateid"
+          },
+          "expectedActiveReleaseId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9._:-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expectedactivereleaseid"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidateId",
+          "reason"
+        ],
+        "title": "ReleaseActivationInput"
+      },
+      "ReleaseCandidateInput": {
+        "properties": {
+          "candidateId": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Candidateid"
+          },
+          "strategyVersionId": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Strategyversionid"
+          },
+          "experimentId": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Experimentid"
+          },
+          "deploymentMode": {
+            "type": "string",
+            "const": "SHADOW",
+            "title": "Deploymentmode",
+            "default": "SHADOW"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "candidateId",
+          "strategyVersionId",
+          "experimentId",
+          "reason"
+        ],
+        "title": "ReleaseCandidateInput"
+      },
+      "ReleasePage": {
+        "properties": {
+          "activeReleaseId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activereleaseid"
+          },
+          "releases": {
+            "items": {
+              "$ref": "#/components/schemas/ReleaseView"
+            },
+            "type": "array",
+            "title": "Releases"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "activeReleaseId",
+          "releases"
+        ],
+        "title": "ReleasePage"
+      },
+      "ReleaseRollbackInput": {
+        "properties": {
+          "expectedActiveReleaseId": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Expectedactivereleaseid"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedActiveReleaseId",
+          "reason"
+        ],
+        "title": "ReleaseRollbackInput"
+      },
+      "ReleaseView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "bundleId": {
+            "type": "string",
+            "title": "Bundleid"
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "CANDIDATE",
+              "ACTIVATE",
+              "ROLLBACK"
+            ],
+            "title": "Operation"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "APPROVED",
+              "REJECTED",
+              "ACTIVE",
+              "RETIRED"
+            ],
+            "title": "Status"
+          },
+          "deploymentMode": {
+            "type": "string",
+            "const": "SHADOW",
+            "title": "Deploymentmode"
+          },
+          "manifestSha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifestsha256"
+          },
+          "sourceCandidateBundleId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourcecandidatebundleid"
+          },
+          "previousBundleId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Previousbundleid"
+          },
+          "rollbackTargetBundleId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rollbacktargetbundleid"
+          },
+          "strategyVersionId": {
+            "type": "string",
+            "title": "Strategyversionid"
+          },
+          "experimentId": {
+            "type": "string",
+            "title": "Experimentid"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "blockerCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockercodes"
+          },
+          "allowsNewRisk": {
+            "type": "boolean",
+            "title": "Allowsnewrisk"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "activatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "bundleId",
+          "operation",
+          "status",
+          "deploymentMode",
+          "manifestSha256",
+          "sourceCandidateBundleId",
+          "previousBundleId",
+          "rollbackTargetBundleId",
+          "strategyVersionId",
+          "experimentId",
+          "reason",
+          "blockerCodes",
+          "allowsNewRisk",
+          "createdAt",
+          "activatedAt"
+        ],
+        "title": "ReleaseView"
       },
       "ReplacementFact": {
         "properties": {

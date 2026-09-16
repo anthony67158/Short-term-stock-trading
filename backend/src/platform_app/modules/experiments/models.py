@@ -1,12 +1,16 @@
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
+    Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -157,4 +161,87 @@ class Experiment(Base):
     finished_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,
+    )
+
+
+class ReleaseRecord(Base):
+    __tablename__ = "release_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "request_key",
+            name="uq_release_record_request",
+        ),
+        CheckConstraint(
+            "operation IN ('CANDIDATE','ACTIVATE','ROLLBACK')",
+            name="operation",
+        ),
+        CheckConstraint(
+            "status IN ('APPROVED','REJECTED','ACTIVE','RETIRED')",
+            name="status",
+        ),
+        CheckConstraint(
+            "deployment_mode = 'SHADOW'",
+            name="deployment_mode",
+        ),
+        CheckConstraint(
+            "allows_new_risk = false",
+            name="shadow_risk",
+        ),
+        CheckConstraint(
+            "(operation = 'CANDIDATE' AND status IN ('APPROVED','REJECTED') "
+            "AND activated_at IS NULL) OR "
+            "(operation IN ('ACTIVATE','ROLLBACK') "
+            "AND status IN ('ACTIVE','RETIRED') AND activated_at IS NOT NULL)",
+            name="lifecycle",
+        ),
+        Index(
+            "uq_release_active_mode",
+            "deployment_mode",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+        default=new_id,
+    )
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"),
+        index=True,
+    )
+    bundle_id: Mapped[str] = mapped_column(String(160), index=True)
+    operation: Mapped[str] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    deployment_mode: Mapped[str] = mapped_column(String(16))
+    manifest_path: Mapped[str] = mapped_column(Text)
+    manifest_sha256: Mapped[str] = mapped_column(String(64))
+    source_candidate_bundle_id: Mapped[str | None] = mapped_column(
+        String(160),
+    )
+    previous_bundle_id: Mapped[str | None] = mapped_column(String(160))
+    rollback_target_bundle_id: Mapped[str | None] = mapped_column(
+        String(160),
+    )
+    strategy_version_id: Mapped[str] = mapped_column(
+        ForeignKey("strategy_versions.id"),
+        index=True,
+    )
+    experiment_id: Mapped[str] = mapped_column(
+        ForeignKey("experiments.id"),
+        index=True,
+    )
+    reason: Mapped[str] = mapped_column(String(500))
+    blocker_codes: Mapped[list] = mapped_column(JSONB)
+    allows_new_risk: Mapped[bool] = mapped_column(Boolean, default=False)
+    request_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
     )

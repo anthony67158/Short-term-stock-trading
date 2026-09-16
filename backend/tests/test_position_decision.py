@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sqlite3
 from datetime import timedelta
@@ -211,8 +212,8 @@ def test_position_assessment_preserves_vendor_methodology_and_causal_time():
     assert assessment.signals[0].validation == "VENDOR_DERIVED"
     assert assessment.signals[0].methodology
     invalid = assessment.model_dump()
-    invalid["signals"][0]["available_at"] = (
-        assessment.signals[0].published_at - timedelta(seconds=1)
+    invalid["signals"][0]["available_at"] = assessment.signals[0].published_at - timedelta(
+        seconds=1
     )
     with pytest.raises(ValidationError, match="证据时间"):
         PositionAssessment.model_validate(invalid)
@@ -244,9 +245,7 @@ def test_hard_stop_preempts_unavailable_joint_bundle_and_uses_sellable_quantity(
 
 
 def test_hard_stop_without_sellable_shares_preserves_unavailable_state():
-    decision = arbitrate_position(
-        decision_request(hard_stop=True, sellable=0)
-    )
+    decision = arbitrate_position(decision_request(hard_stop=True, sellable=0))
     assert decision.status == "UNAVAILABLE"
     assert decision.action == "NONE"
     assert "HARD_STOP_EXECUTION_BLOCKED" in decision.reason_codes
@@ -269,9 +268,7 @@ def test_ready_joint_decision_selects_feasible_quant_value_with_agent_gate():
 
 
 def test_agent_quant_conflict_does_not_expand_risk():
-    decision = arbitrate_position(
-        decision_request(thesis_status="WEAKENED")
-    )
+    decision = arbitrate_position(decision_request(thesis_status="WEAKENED"))
     assert decision.status == "UNAVAILABLE"
     assert decision.action == "NONE"
     assert decision.reason_codes == ["AGENT_QUANT_CONFLICT_REQUIRES_REVIEW"]
@@ -283,11 +280,7 @@ def test_shadow_release_runs_only_for_simulated_accounts():
     assert simulated.action == "ADD"
     request = decision_request(release_status="SHADOW")
     request = request.model_copy(
-        update={
-            "constraints": request.constraints.model_copy(
-                update={"account_kind": "REAL"}
-            )
-        }
+        update={"constraints": request.constraints.model_copy(update={"account_kind": "REAL"})}
     )
     real = arbitrate_position(request)
     assert real.status == "UNAVAILABLE"
@@ -307,19 +300,28 @@ def test_future_available_agent_signal_fails_closed():
 def test_joint_bundle_binds_runtime_position_release(tmp_path):
     root = tmp_path / "joint"
     root.mkdir()
+    strategy = root / "strategy.json"
+    strategy.write_text('{"schemaVersion":"strategy-freeze.v1"}')
+    ablation = root / "ablation.json"
+    ablation.write_text('{"schemaVersion":"four-way-ablation.v1"}')
     (root / "manifest.json").write_text(
         json.dumps(
             {
                 "bundleId": "joint-v1",
-                "schemaVersion": "joint-bundle.v1",
+                "schemaVersion": "joint-bundle.v2",
                 "releaseStatus": "UNAVAILABLE",
                 "releaseBlockers": ["JOINT_ABLATION_PENDING"],
                 "components": {
                     "positionModelBundleId": "position-v1",
                     "positionModelArtifactSha256": "a" * 64,
+                    "strategyArtifact": strategy.name,
+                    "strategyArtifactSha256": hashlib.sha256(strategy.read_bytes()).hexdigest(),
+                    "ablationArtifact": ablation.name,
+                    "ablationArtifactSha256": hashlib.sha256(ablation.read_bytes()).hexdigest(),
                 },
                 "agent": {
                     "promptSha256": "b" * 64,
+                    "positionPromptSha256": "c" * 64,
                     "featureNames": AGENT_FEATURE_NAMES,
                     "positionProtocolVersion": "position-assessment.v1",
                 },
@@ -336,9 +338,7 @@ def test_joint_bundle_binds_runtime_position_release(tmp_path):
         bundle.arbitrate_position(
             request.model_copy(
                 update={
-                    "release": request.release.model_copy(
-                        update={"release_id": "forged-release"}
-                    )
+                    "release": request.release.model_copy(update={"release_id": "forged-release"})
                 }
             )
         )

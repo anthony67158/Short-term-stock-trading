@@ -20,12 +20,8 @@ def fixture_paths(tmp_path):
     market_root.mkdir()
     database = market_root / "market.sqlite3"
     with sqlite3.connect(database) as connection:
-        connection.execute(
-            "CREATE TABLE daily_bars (trade_date TEXT NOT NULL)"
-        )
-        connection.execute(
-            "INSERT INTO daily_bars VALUES ('20260915')"
-        )
+        connection.execute("CREATE TABLE daily_bars (trade_date TEXT NOT NULL)")
+        connection.execute("INSERT INTO daily_bars VALUES ('20260915')")
     market_hash = sha256(database)
     (market_root / "manifest.json").write_text(
         json.dumps(
@@ -60,9 +56,13 @@ def fixture_paths(tmp_path):
     registry = tmp_path / "registry"
     release_root = registry / "releases" / "shadow-v1"
     release_root.mkdir(parents=True)
+    strategy = release_root / "strategy.json"
+    strategy.write_text('{"schemaVersion":"strategy-freeze.v1"}')
+    ablation = release_root / "ablation.json"
+    ablation.write_text('{"schemaVersion":"four-way-ablation.v1"}')
     release = {
         "bundleId": "shadow-v1",
-        "schemaVersion": "joint-bundle.v1",
+        "schemaVersion": "joint-bundle.v2",
         "releaseStatus": "SHADOW",
         "deploymentMode": "SHADOW",
         "allowsNewRisk": False,
@@ -72,9 +72,14 @@ def fixture_paths(tmp_path):
             "positionModelBundleId": "position-v1",
             "positionModelArtifactSha256": "a" * 64,
             "accountBacktestSha256": sha256(account),
+            "strategyArtifact": strategy.name,
+            "strategyArtifactSha256": sha256(strategy),
+            "ablationArtifact": ablation.name,
+            "ablationArtifactSha256": sha256(ablation),
         },
         "agent": {
             "promptSha256": "b" * 64,
+            "positionPromptSha256": "c" * 64,
             "featureNames": AGENT_FEATURE_NAMES,
             "positionProtocolVersion": "position-assessment.v1",
         },
@@ -84,6 +89,7 @@ def fixture_paths(tmp_path):
     registry.joinpath("active-shadow.json").write_text(
         json.dumps(
             {
+                "releaseId": "shadow-v1",
                 "manifest": "releases/shadow-v1/manifest.json",
                 "manifestSha256": sha256(release_path),
             }
@@ -115,8 +121,5 @@ def test_daily_cycle_keeps_shadow_when_data_or_samples_are_incomplete(
     assert report["promotionEligible"] is False
     assert report["prospectiveSamples"]["PENDING"] == 12
     assert "MARKET_DATASET_END_BEFORE_EVALUATION_DATE" in report["releaseBlockers"]
-    assert (
-        "PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT"
-        in report["releaseBlockers"]
-    )
+    assert "PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT" in report["releaseBlockers"]
     assert write_daily_joint_cycle(**arguments) == report

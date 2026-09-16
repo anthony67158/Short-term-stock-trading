@@ -4,11 +4,17 @@ from fastapi import APIRouter, Header, Query
 
 from platform_app.contracts.base import Envelope
 from platform_app.modules.experiments import service
+from platform_app.modules.experiments import release_service
 from platform_app.modules.experiments.contracts import (
     ExperimentInput,
     ExperimentPage,
     ExperimentView,
     FreezeStrategyInput,
+    ReleaseActivationInput,
+    ReleaseCandidateInput,
+    ReleasePage,
+    ReleaseRollbackInput,
+    ReleaseView,
     StrategyVersionInput,
     StrategyVersionPage,
     StrategyVersionView,
@@ -99,3 +105,64 @@ def list_experiments(
 )
 def get_experiment(experiment_id: str, user: CurrentUser):
     return Envelope(data=service.experiment(user.id, experiment_id))
+
+
+@router.post(
+    "/release-candidates",
+    response_model=Envelope[ReleaseView],
+    status_code=201,
+)
+def create_release_candidate(
+    body: ReleaseCandidateInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(
+        data=release_service.register_release_candidate(
+            user.id,
+            body,
+            key,
+        )
+    )
+
+
+@router.post(
+    "/releases",
+    response_model=Envelope[ReleaseView],
+    status_code=201,
+)
+def activate_release(
+    body: ReleaseActivationInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(data=release_service.activate_release(user.id, body, key))
+
+
+@router.get("/releases", response_model=Envelope[ReleasePage])
+def list_releases(
+    user: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+):
+    return Envelope(data=release_service.releases(user.id, limit))
+
+
+@router.post(
+    "/releases/{release_id}/rollbacks",
+    response_model=Envelope[ReleaseView],
+    status_code=201,
+)
+def rollback_release(
+    release_id: str,
+    body: ReleaseRollbackInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(
+        data=release_service.rollback_release(
+            user.id,
+            release_id,
+            body,
+            key,
+        )
+    )

@@ -133,3 +133,46 @@ class ExperimentView(Contract):
 
 class ExperimentPage(Contract):
     experiments: list[ExperimentView]
+
+
+class ReleaseCandidateInput(Contract):
+    candidate_id: Identifier
+    strategy_version_id: str = Field(min_length=1, max_length=32)
+    experiment_id: str = Field(min_length=1, max_length=32)
+    deployment_mode: Literal["SHADOW"] = "SHADOW"
+    reason: str = Field(min_length=1, max_length=500, pattern=r"\S")
+
+
+class ReleaseActivationInput(Contract):
+    candidate_id: Identifier
+    expected_active_release_id: Identifier | None = None
+    reason: str = Field(min_length=1, max_length=500, pattern=r"\S")
+
+
+class ReleaseRollbackInput(Contract):
+    expected_active_release_id: Identifier
+    reason: str = Field(min_length=1, max_length=500, pattern=r"\S")
+
+
+class ReleaseView(Contract):
+    id: str
+    bundle_id: str
+    operation: Literal["CANDIDATE", "ACTIVATE", "ROLLBACK"]
+    status: Literal["APPROVED", "REJECTED", "ACTIVE", "RETIRED"]
+    deployment_mode: Literal["SHADOW"]
+    manifest_sha256: Sha256
+    source_candidate_bundle_id: str | None
+    previous_bundle_id: str | None
+    rollback_target_bundle_id: str | None
+    strategy_version_id: str
+    experiment_id: str
+    reason: str
+    blocker_codes: list[str]
+    allows_new_risk: bool
+    created_at: AwareDatetime
+    activated_at: AwareDatetime | None
+
+
+class ReleasePage(Contract):
+    active_release_id: str | None
+    releases: list[ReleaseView]

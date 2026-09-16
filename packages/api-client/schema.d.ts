@@ -830,6 +830,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/release-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Release Candidate */
+        post: operations["create_release_candidate_api_v1_release_candidates_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/releases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Releases */
+        get: operations["list_releases_api_v1_releases_get"];
+        put?: never;
+        /** Activate Release */
+        post: operations["activate_release_api_v1_releases_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/releases/{release_id}/rollbacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Release */
+        post: operations["rollback_release_api_v1_releases__release_id__rollbacks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1474,6 +1526,16 @@ export interface components {
         /** Envelope[ReconciliationView] */
         Envelope_ReconciliationView_: {
             data: components["schemas"]["ReconciliationView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[ReleasePage] */
+        Envelope_ReleasePage_: {
+            data: components["schemas"]["ReleasePage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[ReleaseView] */
+        Envelope_ReleaseView_: {
+            data: components["schemas"]["ReleaseView"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[ResearchCapability] */
@@ -2452,6 +2514,93 @@ export interface components {
             scope: string;
             /** Checkedat */
             checkedAt?: string;
+        };
+        /** ReleaseActivationInput */
+        ReleaseActivationInput: {
+            /** Candidateid */
+            candidateId: string;
+            /** Expectedactivereleaseid */
+            expectedActiveReleaseId?: string | null;
+            /** Reason */
+            reason: string;
+        };
+        /** ReleaseCandidateInput */
+        ReleaseCandidateInput: {
+            /** Candidateid */
+            candidateId: string;
+            /** Strategyversionid */
+            strategyVersionId: string;
+            /** Experimentid */
+            experimentId: string;
+            /**
+             * Deploymentmode
+             * @default SHADOW
+             * @constant
+             */
+            deploymentMode: "SHADOW";
+            /** Reason */
+            reason: string;
+        };
+        /** ReleasePage */
+        ReleasePage: {
+            /** Activereleaseid */
+            activeReleaseId: string | null;
+            /** Releases */
+            releases: components["schemas"]["ReleaseView"][];
+        };
+        /** ReleaseRollbackInput */
+        ReleaseRollbackInput: {
+            /** Expectedactivereleaseid */
+            expectedActiveReleaseId: string;
+            /** Reason */
+            reason: string;
+        };
+        /** ReleaseView */
+        ReleaseView: {
+            /** Id */
+            id: string;
+            /** Bundleid */
+            bundleId: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "CANDIDATE" | "ACTIVATE" | "ROLLBACK";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "APPROVED" | "REJECTED" | "ACTIVE" | "RETIRED";
+            /**
+             * Deploymentmode
+             * @constant
+             */
+            deploymentMode: "SHADOW";
+            /** Manifestsha256 */
+            manifestSha256: string;
+            /** Sourcecandidatebundleid */
+            sourceCandidateBundleId: string | null;
+            /** Previousbundleid */
+            previousBundleId: string | null;
+            /** Rollbacktargetbundleid */
+            rollbackTargetBundleId: string | null;
+            /** Strategyversionid */
+            strategyVersionId: string;
+            /** Experimentid */
+            experimentId: string;
+            /** Reason */
+            reason: string;
+            /** Blockercodes */
+            blockerCodes: string[];
+            /** Allowsnewrisk */
+            allowsNewRisk: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Activatedat */
+            activatedAt: string | null;
         };
         /** ReplacementFact */
         ReplacementFact: {
@@ -4597,6 +4746,144 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ExperimentView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_release_candidate_api_v1_release_candidates_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseCandidateInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ReleaseView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_releases_api_v1_releases_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ReleasePage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_release_api_v1_releases_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseActivationInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ReleaseView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_release_api_v1_releases__release_id__rollbacks_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                release_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReleaseRollbackInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ReleaseView_"];
                 };
             };
             /** @description Validation Error */
