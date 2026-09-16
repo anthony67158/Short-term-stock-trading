@@ -65,14 +65,19 @@ def setup_cohort(tmp_path, monkeypatch, *, latest="20260916"):
     return experiment, market_path
 
 
-def test_freeze_binds_full_universe_and_future_entry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("policy", ["board-pilot", "candidate-union"])
+def test_freeze_binds_full_universe_and_future_entry(tmp_path, monkeypatch, policy):
     experiment, market = setup_cohort(tmp_path, monkeypatch)
     root = tmp_path / "capture"
-    cohort = forward.freeze(experiment, market.parent, root)
+    cohort = forward.freeze(experiment, market.parent, root, cohort_policy=policy)
     assert cohort["outcomeSessions"] == [
         "20260917", "20260918", "20260921", "20260922", "20260923",
     ]
     assert len(cohort["selected"]) == 4
+    assert cohort["cohortPolicy"] == policy
+    if policy == "candidate-union":
+        assert all("rank5" in s["selectedBy"] and "temporal" in s["selectedBy"]
+                   for s in cohort["selected"])
     assert cohort["quantInputsSha256"] == forward._file_sha256(root / "quant-inputs.npz")
     assert cohort["productionReady"] is False
     with pytest.raises(FileExistsError):
@@ -105,7 +110,7 @@ def test_pair_retains_failures_and_checks_entry_validity(tmp_path, monkeypatch, 
         "selected": [{"instrumentId": "SH.600000", "name": "Synthetic"}],
     }
     (root / "cohort.json").write_text(json.dumps(frozen))
-    monkeypatch.setattr(forward, "freeze", lambda *_: frozen)
+    monkeypatch.setattr(forward, "freeze", lambda *_, **__: frozen)
     monkeypatch.setattr(forward, "encode_agent_assessment", lambda _: {"thesisUncertain": 1})
 
     async def capture(path, *_):

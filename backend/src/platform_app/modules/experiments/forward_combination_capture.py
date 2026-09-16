@@ -24,7 +24,7 @@ from platform_app.modules.experiments.ranking_model_trainer import (
 )
 
 
-def freeze(experiment: Path, market_root: Path, output: Path):
+def freeze(experiment: Path, market_root: Path, output: Path, *, cohort_policy="board-pilot"):
     """No outcomes are loaded. Freshness and training boundaries fail closed."""
     started = utcnow()
     local = started.astimezone(ZoneInfo("Asia/Shanghai"))
@@ -80,15 +80,26 @@ def freeze(experiment: Path, market_root: Path, output: Path):
         np.full(len(rows), int(decision_date)), np.column_stack(predictions),
     )
     scores = combination_scores(normalized, weights)
-    # A small pilot fixes one leader per board before inspecting any Agent response.
+    # Membership is fixed before any Agent response, including eventual failed captures.
+    chosen = {}
+    if cohort_policy == "board-pilot":
+        for board in ("MAIN", "CHINEXT", "STAR", "BEIJING"):
+            indices = [i for i, row in enumerate(rows) if row["board"] == board]
+            index = max(indices, key=lambda i: (float(scores["equal"][i]), rows[i]["instrument_id"]))
+            chosen[index] = ["equal_board_leader"]
+    elif cohort_policy == "candidate-union":
+        for name, values in scores.items():
+            for index in np.argsort(values, kind="stable")[-min(10, len(rows)):]:
+                chosen.setdefault(int(index), []).append(name)
+    else:
+        raise ValueError("FORWARD_COHORT_POLICY_INVALID")
     selected = []
-    for board in ("MAIN", "CHINEXT", "STAR", "BEIJING"):
-        indices = [i for i, row in enumerate(rows) if row["board"] == board]
-        index = max(indices, key=lambda i: (float(scores["equal"][i]), rows[i]["instrument_id"]))
+    for index in sorted(chosen):
         row = rows[index]
         selected.append({
             "instrumentId": row["instrument_id"], "name": names[row["instrument_id"]],
-            "board": board, "snapshotPrice": prices[row["instrument_id"]],
+            "board": row["board"], "snapshotPrice": prices[row["instrument_id"]],
+            "selectedBy": chosen[index],
             "featureAvailableAt": available[row["instrument_id"]].isoformat(),
             "scores": {name: float(values[index]) for name, values in scores.items()},
         })
@@ -105,7 +116,7 @@ def freeze(experiment: Path, market_root: Path, output: Path):
         "split": split, "fusionWeights": dict(zip(CANDIDATES, weights.tolist(), strict=True)),
         "quantInputsSha256": _file_sha256(output / "quant-inputs.npz"),
         "captureSourceSha256": _file_sha256(Path(__file__)),
-        "cohortPolicy": "ONE_EQUAL_WEIGHT_LEADER_PER_BOARD_PILOT",
+        "cohortPolicy": cohort_policy,
         "eligibleUniverse": len(rows), "selected": selected, "outcomeSessions": future,
         "outcomeEntryDeadline": f"{future[0][:4]}-{future[0][4:6]}-{future[0][6:]}T09:30:00+08:00",
         "usage": "RESEARCH_ONLY", "productionReady": False,
@@ -115,8 +126,8 @@ def freeze(experiment: Path, market_root: Path, output: Path):
     return frozen
 
 
-async def run(experiment, market_root, output):
-    frozen = freeze(experiment, market_root, output)
+async def run(experiment, market_root, output, *, cohort_policy="board-pilot"):
+    frozen = freeze(experiment, market_root, output, cohort_policy=cohort_policy)
     samples = []
     for item in frozen["selected"]:
         root = output / item["instrumentId"]
@@ -159,8 +170,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("experiment", "market-root", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
+    parser.add_argument("--cohort-policy", choices=("board-pilot", "candidate-union"),
+                        default="board-pilot")
     args = parser.parse_args()
-    asyncio.run(run(args.experiment, args.market_root, args.output))
+    asyncio.run(run(args.experiment, args.market_root, args.output, cohort_policy=args.cohort_policy))
 
 
 if __name__ == "__main__":
