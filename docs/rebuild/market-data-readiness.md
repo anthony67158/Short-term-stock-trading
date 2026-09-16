@@ -252,3 +252,33 @@ uv run platform-cli build-episode-dataset \
   --stage archive-minutes --start-date 20160101 --end-date 20260915 \
   --archive-root /absolute/archive/root
 ```
+
+当前适配器直接补取命令：
+
+```sh
+cd backend
+PLATFORM_MARKET_DATA_ENABLED=true \
+PLATFORM_MARKET_DATA_API_KEY='由部署环境注入' \
+uv run platform-cli build-episode-dataset \
+  --dataset-root /Users/bytedance/.local/share/stock-platform/a-share-20160101-20260915-v5 \
+  --episode-root /Users/bytedance/.local/share/stock-platform/short-horizon-episodes-v1 \
+  --episode-dataset-id short-horizon-episodes-v1 \
+  --stage fetch-minutes --start-date 20160101 --end-date 20260915 \
+  --max-sessions 120
+```
+
+2026-09-16真实全量运行完成3,218个待补窗口。当前状态：
+
+- `COMPLETED` 208,903个证券日、10,027,344根5分钟K线；
+- `NOT_APPLICABLE` 412个证券日；
+- `PENDING` 13,185个，全部已尝试且有明确质量原因，不存在未请求缺口；
+- 完整五日路径174,891 / 196,748个候选，主板56,073、创业板61,340、
+  科创板39,980、北交所17,498；
+- 拒绝原因：开收盘6,462、成交量3,306、会话缺失1,630、成交额1,340、
+  源OHLC非法431、日内价格越出规范日线16。
+
+单日重试确认`SESSION_INCOMPLETE`样本仍返回0根，不是长窗口截断。沪市主板
+开收盘拒绝中3,825个来自2018-08-20前，符合历史收盘价计算制度与分钟末笔价
+不等价的已知口径；北交所2022～2023集中存在另一组价格、量额与源OHLC问题。
+两类问题必须分别提供可审计处理规则或独立来源，不能统一放宽门限。当前
+episode库`integrity_check=ok`，但因仍有`PENDING`，封存、训练和发布继续阻断。
