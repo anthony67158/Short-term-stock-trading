@@ -10,6 +10,7 @@ from platform_app.adapters.market_tushare import (
     TushareClient,
     instrument_parts,
     normalize_adjustment_factor,
+    normalize_block_trade,
     normalize_bse_mapping,
     normalize_daily,
     normalize_instrument,
@@ -79,6 +80,37 @@ def test_daily_and_minute_normalize_units_without_binary_float_math():
                     "vol": "1",
                     "amount": "1",
                 }
+            }
+        )
+
+
+def test_block_trade_normalizes_ten_thousand_units_and_alias_identity():
+    trade = normalize_block_trade(
+        {
+            "ts_code": "839729.BJ",
+            "trade_date": "20260915",
+            "price": "561.82",
+            "vol": "4",
+            "amount": "2247.28",
+            "buyer": "synthetic buyer",
+            "seller": "synthetic seller",
+        },
+        {"839729.BJ": "920729.BJ"},
+    )
+
+    assert trade["instrumentId"] == "BJ.920729"
+    assert trade["sourceCode"] == "839729.BJ"
+    assert trade["volumeShares"] == "40000"
+    assert trade["amountCny"] == "22472800.00"
+
+    with pytest.raises(HistoricalMarketError, match="INVALID_MARKET_NUMBER"):
+        normalize_block_trade(
+            {
+                "ts_code": "000001.SZ",
+                "trade_date": "20260915",
+                "price": "10",
+                "vol": "0",
+                "amount": "1",
             }
         )
 

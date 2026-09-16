@@ -19,6 +19,7 @@ ALLOWED_ENDPOINTS = {
 }
 DAILY_FIELDS = "ts_code,trade_date,open,high,low,close,pre_close,vol,amount"
 MINUTE_FIELDS = "ts_code,trade_time,open,close,high,low,vol,amount"
+BLOCK_TRADE_FIELDS = "ts_code,trade_date,price,vol,amount,buyer,seller"
 STOCK_BASIC_FIELDS = "ts_code,symbol,name,market,exchange,list_status,list_date,delist_date"
 BSE_MAPPING_FIELDS = "name,o_code,n_code,list_date"
 TS_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$")
@@ -218,6 +219,24 @@ def normalize_daily(row: dict, aliases: dict[str, str] | None = None) -> dict:
         "volumeShares": scaled_decimal_text(row.get("vol"), 100),
         "amountCny": scaled_decimal_text(row.get("amount"), 1000),
         "adjustment": "RAW",
+        "sourceRowSha256": _row_sha256(row),
+    }
+
+
+def normalize_block_trade(row: dict, aliases: dict[str, str] | None = None) -> dict:
+    source_code, instrument_id = canonical_instrument(row.get("ts_code"), aliases)
+    trade_date = date_text(row.get("trade_date"))
+    price = decimal_text(row.get("price"), positive=True)
+    volume = Decimal(decimal_text(row.get("vol"), positive=True)) * 10000
+    amount = Decimal(decimal_text(row.get("amount"), positive=True)) * 10000
+    return {
+        "instrumentId": instrument_id,
+        "sourceCode": source_code,
+        "tradeDate": trade_date,
+        "price": price,
+        # Tushare block_trade uses 10,000 shares and CNY 10,000.
+        "volumeShares": format(volume, "f"),
+        "amountCny": format(amount, "f"),
         "sourceRowSha256": _row_sha256(row),
     }
 
