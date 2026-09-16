@@ -24,6 +24,13 @@ def cross_source_sample(value: str) -> tuple[str, str]:
     return instrument_id, trade_date
 
 
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("value must be positive")
+    return parsed
+
+
 def main():
     parser = argparse.ArgumentParser(description="A股投资平台")
     parser.add_argument(
@@ -63,10 +70,13 @@ def main():
             "candidates",
             "minute-requirements",
             "archive-minutes",
+            "fetch-minutes",
             "seal",
         ],
     )
     parser.add_argument("--instrument-id", action="append")
+    parser.add_argument("--max-windows", type=positive_int)
+    parser.add_argument("--max-sessions", type=positive_int, default=120)
     parser.add_argument("--sample", action="append", type=cross_source_sample)
     args = parser.parse_args()
     if args.command == "export-contracts":
@@ -275,6 +285,9 @@ def main():
         from platform_app.modules.experiments.minute_archive_importer import (
             MinuteArchiveImporter,
         )
+        from platform_app.modules.experiments.minute_requirement_fetcher import (
+            MinuteRequirementFetcher,
+        )
         from platform_app.modules.experiments.minute_requirement_builder import (
             MinuteRequirementBuilder,
         )
@@ -295,13 +308,19 @@ def main():
             "candidates",
             "minute-requirements",
             "archive-minutes",
+            "fetch-minutes",
             "seal",
         }:
             parser.error(
                 "episode dataset stage must be candidates, minute-requirements, "
-                "archive-minutes or seal"
+                "archive-minutes, fetch-minutes or seal"
             )
-        if args.stage in {"candidates", "minute-requirements", "archive-minutes"} and (
+        if args.stage in {
+            "candidates",
+            "minute-requirements",
+            "archive-minutes",
+            "fetch-minutes",
+        } and (
             not args.start_date
             or not args.end_date
             or not re.fullmatch(r"\d{8}", args.start_date)
@@ -311,6 +330,22 @@ def main():
             parser.error("candidates stage requires ordered YYYYMMDD date values")
         if args.stage == "archive-minutes" and not args.archive_root:
             parser.error("archive-minutes stage requires archive-root")
+        if args.stage == "fetch-minutes" and (
+            args.max_sessions > 150
+            or (
+                args.instrument_id
+                and (
+                    len(args.instrument_id) != len(set(args.instrument_id))
+                    or any(
+                        not re.fullmatch(r"(SH|SZ|BJ)\.\d{6}", value)
+                        for value in args.instrument_id
+                    )
+                )
+            )
+        ):
+            parser.error(
+                "fetch-minutes requires max-sessions <= 150 and unique valid instrument IDs"
+            )
         try:
             market_root = external_dataset_root(args.dataset_root)
             episode_root = external_dataset_root(args.episode_root)
@@ -338,6 +373,21 @@ def main():
                     results = builder.build_range(args.start_date, args.end_date)
                 for result in results:
                     print(json.dumps(result, ensure_ascii=False), flush=True)
+            elif args.stage == "fetch-minutes":
+                from platform_app.adapters.market_tushare import TushareClient
+
+                with MinuteRequirementFetcher(
+                    TushareClient(),
+                    dataset,
+                    max_sessions=args.max_sessions,
+                ) as fetcher:
+                    for result in fetcher.fetch_pending(
+                        args.start_date,
+                        args.end_date,
+                        instrument_ids=args.instrument_id,
+                        max_windows=args.max_windows,
+                    ):
+                        print(json.dumps(result, ensure_ascii=False), flush=True)
             else:
                 with CandidateEpisodeBuilder(
                     dataset,

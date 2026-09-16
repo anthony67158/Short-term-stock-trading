@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
+from platform_app.adapters.market_tushare import HistoricalMarketError
 from platform_app.modules.experiments.episode_dataset import EpisodeDataset
 from platform_app.modules.experiments.market_dataset import (
     MarketDataset,
@@ -16,6 +17,9 @@ from platform_app.modules.experiments.minute_archive_importer import (
 )
 from platform_app.modules.experiments.minute_requirement_builder import (
     MinuteRequirementBuilder,
+)
+from platform_app.modules.experiments.minute_requirement_fetcher import (
+    MinuteRequirementFetcher,
 )
 from platform_app.modules.experiments.short_horizon_policy import SHORT_HORIZON_POLICY
 
@@ -141,6 +145,47 @@ def _write_archive(root, trade_date, *, invalid_close=False):
             }
         )
     )
+
+
+def _tushare_minute_rows(trade_dates):
+    rows = []
+    for trade_date in trade_dates:
+        starts = (
+            datetime.fromisoformat(
+                f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]} 09:35:00"
+            ),
+            datetime.fromisoformat(
+                f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]} 13:05:00"
+            ),
+        )
+        times = [start + timedelta(minutes=5 * offset) for start in starts for offset in range(24)]
+        rows.extend(
+            {
+                "ts_code": "000001.SZ",
+                "trade_time": value.strftime("%Y-%m-%d %H:%M:%S"),
+                "open": "10",
+                "high": "10",
+                "low": "10",
+                "close": "10",
+                "vol": "60" if index == 47 else "20",
+                "amount": "600" if index == 47 else "200",
+            }
+            for index, value in enumerate(times)
+        )
+    return rows
+
+
+class _MinuteClient:
+    def __init__(self, rows, *, failure=None):
+        self.rows_to_return = rows
+        self.failure = failure
+        self.calls = []
+
+    def rows(self, api_name, params, fields):
+        self.calls.append((api_name, params, fields))
+        if self.failure:
+            raise HistoricalMarketError(self.failure)
+        return self.rows_to_return
 
 
 def test_builder_creates_five_session_requirements_and_marks_missing_daily(tmp_path):
@@ -347,3 +392,67 @@ def test_tushare_archive_hash_mismatch_fails_before_writes(tmp_path):
                 importer.import_range(dates[1], dates[1])
 
         assert dataset.db.execute("SELECT COUNT(*) FROM episode_minute_bars").fetchone()[0] == 0
+
+
+def test_fetcher_batches_by_instrument_window_and_accepts_only_required_dates(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    client = _MinuteClient(_tushare_minute_rows([dates[1], dates[2]]))
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        with MinuteRequirementFetcher(client, dataset) as fetcher:
+            results = list(fetcher.fetch_pending(dates[1], dates[2]))
+
+        assert len(client.calls) == 1
+        assert client.calls[0][1] == {
+            "ts_code": "000001.SZ",
+            "freq": "5min",
+            "start_date": "2026-01-02 09:30:00",
+            "end_date": "2026-01-03 15:00:00",
+        }
+        assert results[0]["accepted"] == 2
+        assert results[0]["rejected"] == 0
+        assert dataset.db.execute("SELECT COUNT(*) FROM episode_minute_bars").fetchone()[0] == 96
+
+
+def test_fetcher_records_upstream_failure_and_can_resume(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    client = _MinuteClient([], failure="MARKET_DATA_RATE_LIMITED")
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        with MinuteRequirementFetcher(client, dataset) as fetcher:
+            with pytest.raises(HistoricalMarketError, match="MARKET_DATA_RATE_LIMITED"):
+                list(fetcher.fetch_pending(dates[1], dates[2]))
+            failed = dataset.db.execute(
+                "SELECT reason, attempt_count FROM minute_requirements "
+                "WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date",
+                (dates[1], dates[2]),
+            ).fetchall()
+            assert [tuple(row) for row in failed] == [
+                ("MARKET_DATA_RATE_LIMITED", 1),
+                ("MARKET_DATA_RATE_LIMITED", 1),
+            ]
+
+            client.failure = None
+            client.rows_to_return = _tushare_minute_rows([dates[1], dates[2]])
+            resumed = list(fetcher.fetch_pending(dates[1], dates[2]))
+
+        assert resumed[0]["accepted"] == 2
+        assert dataset.db.execute(
+            "SELECT COUNT(*) FROM minute_requirements WHERE status = 'PENDING' "
+            "AND trade_date BETWEEN ? AND ?",
+            (dates[1], dates[2]),
+        ).fetchone()[0] == 0
