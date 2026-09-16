@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS minute_ingestion_attempts (
     FOREIGN KEY (instrument_id, trade_date)
         REFERENCES minute_requirements(instrument_id, trade_date)
 ) STRICT;
+CREATE INDEX IF NOT EXISTS minute_ingestion_attempt_requirement_idx
+ON minute_ingestion_attempts(instrument_id, trade_date);
 CREATE TABLE IF NOT EXISTS minute_requirement_resolutions (
     instrument_id TEXT NOT NULL,
     trade_date TEXT NOT NULL,
