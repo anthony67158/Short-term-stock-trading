@@ -41,3 +41,4 @@ class Assessment(Base):
     input_hash: Mapped[str] = mapped_column(String(64))
     evidence_ids: Mapped[list] = mapped_column(JSONB)
     output: Mapped[dict] = mapped_column(JSONB)
+    tool_trace: Mapped[list] = mapped_column(JSONB, default=list)

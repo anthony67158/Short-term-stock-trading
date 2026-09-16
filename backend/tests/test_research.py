@@ -8,6 +8,7 @@ from pydantic import SecretStr, ValidationError
 from sqlalchemy import delete, select
 
 from platform_app.adapters.database import sessions
+from platform_app.adapters.doubao_search import SearchEvidence, SearchResponse
 from platform_app.config import settings
 from platform_app.contracts.base import new_id, utcnow
 from platform_app.modules.identity.models import User
@@ -17,7 +18,11 @@ from platform_app.modules.operations import jobs
 from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.research import service, worker
 from platform_app.modules.research import agent
-from platform_app.modules.research.agent import AgentFailure, validate_output
+from platform_app.modules.research.agent import (
+    AgentFailure,
+    AgentRunResult,
+    validate_output,
+)
 from platform_app.modules.research.contracts import EvidenceInput, ResearchInput
 from platform_app.modules.research.models import Assessment, Evidence
 
@@ -99,16 +104,21 @@ def test_research_fenced_publish_cancel_and_output_validation(research_owner, mo
     raw["claims"][0]["evidence_ids"] = ["not-in-input"]
     with pytest.raises(AgentFailure, match="INVALID_EVIDENCE_REFERENCE"):
         validate_output(json.dumps(raw), job.payload)
-    monkeypatch.setattr(worker, "run_agent", lambda payload: validated)
+    result = AgentRunResult(
+        assessment=validated,
+        discovered_evidence=[],
+        tool_trace=[],
+    )
+    monkeypatch.setattr(worker, "run_agent", lambda payload: result)
     assert worker.process_one()
     with sessions()() as db:
         assert db.get(Job, job.id).status == "SUCCEEDED"
         assert db.scalar(select(Assessment).where(Assessment.job_id == job.id))
     cancelled = service.submit_research(owner, request, new_id())
 
-    def cancel_during_call(payload):
+    def cancel_during_call(_payload):
         jobs.cancel(owner, cancelled.id)
-        return validated
+        return result
 
     monkeypatch.setattr(worker, "run_agent", cancel_during_call)
     assert worker.process_one()
@@ -142,10 +152,145 @@ def test_agent_http_contract_and_auth_failure_without_retry(research_owner, monk
     monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **kwargs: original(
         **kwargs, transport=httpx.MockTransport(handle),
     ))
-    assert agent.run_agent(job.payload).thesis_status == "UNCERTAIN"
+    assert agent.run_agent(job.payload).assessment.thesis_status == "UNCERTAIN"
     assert calls == ["/v1/chat/completions"]
     monkeypatch.setattr(agent.httpx, "AsyncClient", lambda **kwargs: original(
         **kwargs, transport=httpx.MockTransport(lambda request: httpx.Response(401)),
     ))
     with pytest.raises(AgentFailure, match="AGENT_AUTH_FAILED"):
         agent.run_agent(job.payload)
+
+
+def test_agent_search_tool_adds_causal_evidence_and_trace(
+    research_owner,
+    monkeypatch,
+):
+    owner, code = research_owner
+    source = evidence(owner, code)
+    config = settings().model_copy(
+        update={
+            "agent_enabled": True,
+            "agent_api_key": SecretStr("synthetic-only"),
+            "search_enabled": True,
+            "search_api_key": SecretStr("synthetic-search"),
+            "agent_search_max_calls": 2,
+        }
+    )
+    monkeypatch.setattr(service, "settings", lambda: config)
+    monkeypatch.setattr(agent, "settings", lambda: config)
+    job = service.submit_research(
+        owner,
+        ResearchInput(
+            instrument_id=code,
+            question="检索并核验合成公司的公告证据",
+            evidence_ids=[source.id],
+        ),
+        new_id(),
+    )
+    original = httpx.AsyncClient
+    model_calls = []
+
+    def handle(request):
+        body = json.loads(request.content)
+        model_calls.append(body)
+        if len(model_calls) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {
+                                "content": None,
+                                "tool_calls": [
+                                    {
+                                        "id": "search-call-1",
+                                        "type": "function",
+                                        "function": {
+                                            "name": "doubao_search",
+                                            "arguments": json.dumps(
+                                                {
+                                                    "query": "合成公司 最新公告",
+                                                    "scope": "OFFICIAL",
+                                                    "count": 2,
+                                                }
+                                            ),
+                                        },
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                },
+            )
+        tool_payload = json.loads(body["messages"][-1]["content"])
+        discovered = tool_payload["evidence"][0]
+        final = output(job.payload)
+        final["claims"][0] = {
+            "kind": "OBSERVED",
+            "statement": discovered["quote"],
+            "evidence_ids": [discovered["id"]],
+        }
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": json.dumps(final)}}]},
+        )
+
+    class SearchClient:
+        requests = []
+
+        async def search(self, request):
+            self.requests.append(request)
+            return SearchResponse(
+                query=request.query,
+                scope=request.scope,
+                request_id="search-request-1",
+                elapsed_ms=25,
+                results=[
+                    SearchEvidence(
+                        provider_id="provider-result-1",
+                        rank=1,
+                        title="合成公司公告",
+                        site_name="交易所",
+                        url="https://example.com/official",
+                        text="这是一条早于任务时点的合成公告摘要。",
+                        published_at=(
+                            utcnow() - timedelta(hours=1)
+                        ).isoformat(),
+                        authority_level=1,
+                        authority_description="非常权威",
+                    )
+                ],
+            )
+
+    monkeypatch.setattr(
+        agent.httpx,
+        "AsyncClient",
+        lambda **kwargs: original(
+            **kwargs,
+            transport=httpx.MockTransport(handle),
+        ),
+    )
+    search = SearchClient()
+    result = agent.run_agent(job.payload, search_client=search)
+
+    assert len(model_calls) == 2
+    assert len(search.requests) == 1
+    assert search.requests[0].time_range.endswith(
+        utcnow().date().isoformat()
+    )
+    assert len(result.discovered_evidence) == 1
+    assert result.tool_trace[0]["status"] == "SUCCEEDED"
+    assert (
+        result.assessment.claims[0].evidence_ids[0]
+        == result.discovered_evidence[0]["id"]
+    )
+    monkeypatch.setattr(worker, "run_agent", lambda _payload: result)
+    assert worker.process_one()
+    with sessions()() as db:
+        assessment = db.scalar(
+            select(Assessment).where(Assessment.job_id == job.id)
+        )
+        discovered = db.get(Evidence, result.discovered_evidence[0]["id"])
+        assert assessment.tool_trace[0]["requestId"] == "search-request-1"
+        assert discovered.provenance == "SEARCH_DISCOVERED"
+        assert discovered.validation == "SEARCH_RESULT_UNVERIFIED"

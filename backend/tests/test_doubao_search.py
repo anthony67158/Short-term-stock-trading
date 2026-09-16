@@ -119,3 +119,25 @@ def test_search_does_not_follow_redirects_or_retry_auth_failure():
     with pytest.raises(SearchFailure, match="SEARCH_AUTH_FAILED"):
         asyncio.run(client.search(SearchRequest(query="test")))
     assert calls == 1
+
+
+def test_search_maps_business_quota_error_without_exposing_message():
+    client = DoubaoSearchClient(
+        config=_config(),
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={
+                    "ResponseMetadata": {
+                        "Error": {
+                            "Code": "10406",
+                            "Message": "upstream detail must not escape",
+                        }
+                    }
+                },
+            )
+        ),
+    )
+
+    with pytest.raises(SearchFailure, match="SEARCH_QUOTA_EXHAUSTED"):
+        asyncio.run(client.search(SearchRequest(query="test")))

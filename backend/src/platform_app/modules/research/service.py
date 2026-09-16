@@ -32,9 +32,16 @@ class ResearchError(ValueError):
 def capability() -> ResearchCapability:
     config = settings()
     enabled = config.agent_enabled and bool(config.agent_api_key.get_secret_value())
+    search_available = config.search_enabled and bool(
+        config.search_api_key.get_secret_value()
+    )
     return ResearchCapability(
         available=enabled, model=config.agent_model,
         reason=None if enabled else "研究推理服务尚未启用；请先完成供应商鉴权验证",
+        timeout_seconds=config.agent_timeout_seconds,
+        search_available=search_available,
+        search_max_calls=config.agent_search_max_calls if search_available else 0,
+        tools=["DOUBAO_SEARCH"] if search_available else [],
     )
 
 
@@ -124,7 +131,7 @@ def submit_research(owner: str, body: ResearchInput, key: str) -> Job:
             owner_id=owner, kind="RESEARCH", business_key=key, input_hash=digest,
             payload={"request": body.model_dump(mode="json"), "evidence": evidence,
                      "protocolVersion": PROTOCOL, "model": config.agent_model,
-                     "asOf": now.isoformat(), "deadline": (now + timedelta(minutes=5)).isoformat()},
+                     "asOf": now.isoformat(), "deadline": (now + timedelta(minutes=3)).isoformat()},
         )
         db.add(job)
         db.flush()

@@ -7,11 +7,11 @@ from platform_app.contracts.base import utcnow
 from platform_app.modules.operations import jobs
 from platform_app.modules.operations.models import Outbox
 from platform_app.modules.research.agent import AgentFailure, run_agent
-from platform_app.modules.research.models import Assessment
+from platform_app.modules.research.models import Assessment, Evidence
 
 
 def process_one() -> bool:
-    job = jobs.claim(["RESEARCH"])
+    job = jobs.claim(["RESEARCH"], lease_seconds=210)
     if not job:
         return False
     if datetime.fromisoformat(job.payload["deadline"]) <= utcnow():
@@ -21,12 +21,33 @@ def process_one() -> bool:
         jobs.finish(job)
         return True
     try:
-        output = run_agent(job.payload)
+        run = run_agent(job.payload)
     except AgentFailure as exc:
         jobs.finish(job, error=str(exc))
         return True
 
     def publish(db, current):
+        for item in run.discovered_evidence:
+            db.add(
+                Evidence(
+                    id=item["id"],
+                    owner_id=current.owner_id,
+                    instrument_id=item["instrument_id"],
+                    source_key=item["source_key"],
+                    request_hash=item["request_hash"],
+                    title=item["title"],
+                    source_url=item["source_url"],
+                    text=item["text"],
+                    quote=item["quote"],
+                    content_hash=item["content_hash"],
+                    published_at=datetime.fromisoformat(item["published_at"]),
+                    first_seen_at=datetime.fromisoformat(item["first_seen_at"]),
+                    available_at=datetime.fromisoformat(item["available_at"]),
+                    provenance=item["provenance"],
+                    validation=item["validation"],
+                )
+            )
+        db.flush()
         record = Assessment(
             owner_id=current.owner_id, instrument_id=current.payload["request"]["instrument_id"],
             job_id=current.id, protocol_version=current.payload["protocolVersion"],
@@ -34,8 +55,12 @@ def process_one() -> bool:
             input_hash=hashlib.sha256(json.dumps(
                 current.payload, sort_keys=True, ensure_ascii=False,
             ).encode()).hexdigest(),
-            evidence_ids=[item["id"] for item in current.payload["evidence"]],
-            output=output.model_dump(mode="json"),
+            evidence_ids=[
+                item["id"]
+                for item in [*current.payload["evidence"], *run.discovered_evidence]
+            ],
+            output=run.assessment.model_dump(mode="json"),
+            tool_trace=run.tool_trace,
         )
         db.add(record)
         db.flush()

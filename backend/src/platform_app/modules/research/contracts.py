@@ -26,8 +26,8 @@ class EvidenceView(EvidenceInput):
     content_hash: str
     first_seen_at: AwareDatetime
     available_at: AwareDatetime
-    provenance: Literal["USER_SUPPLIED"]
-    validation: Literal["QUOTE_MATCHED"]
+    provenance: Literal["USER_SUPPLIED", "SEARCH_DISCOVERED"]
+    validation: Literal["QUOTE_MATCHED", "SEARCH_RESULT_UNVERIFIED"]
 
 
 class EvidencePage(Contract):
@@ -70,6 +70,7 @@ class AssessmentView(Contract):
     input_hash: str
     evidence_ids: list[str]
     output: AssessmentOutput
+    tool_trace: list[dict]
     status: Literal["VALIDATED"] = "VALIDATED"
     usage: Literal["RESEARCH_ONLY"] = "RESEARCH_ONLY"
 
@@ -83,6 +84,10 @@ class ResearchCapability(Contract):
     available: bool
     model: str
     reason: str | None
+    timeout_seconds: int
+    search_available: bool
+    search_max_calls: int
+    tools: list[str]
 
 
 class JobView(Contract):
