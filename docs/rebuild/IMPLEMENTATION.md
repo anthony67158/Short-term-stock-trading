@@ -687,4 +687,39 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端托管PG、容器部署与
 - 市场页已接入异步联合扫描、任务状态和候选表。聚焦后端9项测试、Ruff、
   TypeScript检查和生产构建通过；SHADOW候选仅用于研究，不构成实盘建仓许可。
 
+### 策略实验注册、联合包v2发布与回滚（T36～T42）
+
+- PostgreSQL新增不可变`strategy_versions`、`experiments`和`release_records`。
+  策略按配置hash生成新版本，显式`DRAFT → FROZEN → EVALUATED`；同一冻结版本
+  只能消费一次确认集。实验失败、样本覆盖、排除原因和全部四组指标均保留，
+  不只展示成功结果。迁移`0013_experiment_registry`与`0014_release_registry`
+  已升级，Alembic声明无漂移。
+- 四组消融固定为完整联合、去Agent、去量化及持有公式基线；使用同一成熟样本、
+  动作反事实、费用、风险和模拟政策计算，并输出平均/中位费后收益、正收益率、
+  相对基线和95%区间。当前前瞻成熟样本为0，实验
+  `720eb394566a478987a41177bebc93b6`诚实记录为
+  `FAILED/MATURED_SAMPLE_SUPPORT_INSUFFICIENT`，四组收益均为空，不声称联合增益。
+- `joint-bundle.v2`同时绑定ranking、quant、position模型，账户回放，冻结策略，
+  消融报告，通用研究Prompt、专用Position Prompt、工具schema及Agent协议。
+  包内策略和消融工件逐文件SHA-256校验；路径穿越、组件错配、Prompt缺失、
+  指针releaseId与manifest不一致均拒绝加载。
+- 候选`joint-candidate-20260916-v3`已通过完整性预加载，并按用户指示原子切换为
+  活动`joint-shadow-20260916T123545Z-b67df08a`。指针manifest SHA回读一致，
+  数据库只有一个ACTIVE发布记录；状态为`SHADOW`、`allowsNewRisk=false`，
+  15项收益、覆盖、Agent质量和样本门禁原样保留。
+- 文件指针切换使用进程间锁、期望活动版本和`os.replace`；冲突不覆盖现有指针。
+  回滚只接受已完整预加载的v2历史包，并创建新的回滚审计记录，不改账户账本。
+  当前只有一个真实v2活动包，因此尚无真实v2历史目标可执行回滚；双v2切换与
+  回滚已由临时不可变包测试覆盖，旧v1包不冒充v2回滚目标。
+- 发布权限固定为当前活动发布记录所有者；首次发布时为最早平台用户。其他登录
+  用户可只读查看全局发布历史，不能登记候选、激活或回滚，Agent没有发布入口。
+- 策略实验室已替换占位页，提供策略版本详情、冻结/运行操作、四组指标、失败代码、
+  发布门禁、候选登记、激活历史及回滚入口。真实Chromium在1440px和390px下读取
+  当前策略、0/2,000样本消融及15项门禁，无横向页面溢出、控制台错误或失败请求；
+  截图为`test-results/strategies-experiment-desktop.png`及
+  `test-results/strategies-release-mobile.png`。
+- 全量验证为222 passed；Ruff、OpenAPI生成、TypeScript/Vite生产构建和Alembic
+  drift检查通过。T36～T42的工程能力已完成；AC14收益证据与实盘READY仍被0成熟
+  样本和既有模型门禁阻断，后续由M5每日成熟结算和受限迭代继续积累。
+
 每个切片记录实际修改、验证命令、结果、限制和提交，不记录密钥、完整私人账户或无关日志。只有实际通过的任务才更新完成状态。
