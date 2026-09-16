@@ -879,7 +879,18 @@ class MarketDatasetBuilder:
             source_code = str(row.get("ts_code") or "").upper()
             (known_rows if source_code in known_source_codes else unknown_rows).append(row)
 
-        transactions = [normalize_block_trade(row, aliases) for row in known_rows]
+        normalized = [normalize_block_trade(row, aliases) for row in known_rows]
+        transactions = []
+        source_code_outside_effective_period = []
+        for raw, row in zip(known_rows, normalized, strict=True):
+            expected_source_code = self.dataset.source_code_for_date(
+                row["instrumentId"], trade_date
+            )
+            if row["sourceCode"] == expected_source_code:
+                transactions.append(row)
+            else:
+                source_code_outside_effective_period.append(raw)
+
         expected = set(self.dataset.eligible_instruments(trade_date))
         outside_lifecycle = sorted(
             {row["instrumentId"] for row in transactions} - expected
@@ -889,12 +900,6 @@ class MarketDatasetBuilder:
                 "BLOCK_TRADE_OUTSIDE_LIFECYCLE:"
                 + ",".join(outside_lifecycle)
             )
-        for row in transactions:
-            expected_source_code = self.dataset.source_code_for_date(
-                row["instrumentId"], trade_date
-            )
-            if row["sourceCode"] != expected_source_code:
-                raise MarketDatasetError("BLOCK_TRADE_SOURCE_CODE_MISMATCH")
 
         transactions.sort(
             key=lambda row: (
@@ -953,6 +958,9 @@ class MarketDatasetBuilder:
             details={
                 "discardedNonAShareRows": _discard_audit(non_a_share_rows),
                 "discardedUnknownInstruments": _discard_audit(unknown_rows),
+                "discardedSourceCodesOutsideEffectivePeriod": _discard_audit(
+                    source_code_outside_effective_period
+                ),
                 "summaryRows": len(summaries),
             },
         )
@@ -963,6 +971,9 @@ class MarketDatasetBuilder:
             "summaryRows": len(summaries),
             "discardedNonAShareRows": len(non_a_share_rows),
             "discardedUnknownInstruments": len(unknown_rows),
+            "discardedSourceCodesOutsideEffectivePeriod": len(
+                source_code_outside_effective_period
+            ),
         }
 
     def sync_minute_partition(self, instrument_id: str, trade_date: str) -> dict:

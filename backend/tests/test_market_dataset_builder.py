@@ -195,6 +195,15 @@ def test_builder_syncs_block_trade_summaries_with_audited_discards(tmp_path):
             "buyer": "",
             "seller": "",
         },
+        {
+            "ts_code": "839729.BJ",
+            "trade_date": "20260915",
+            "price": "5",
+            "vol": "1",
+            "amount": "5",
+            "buyer": "",
+            "seller": "",
+        },
     ]
     root = tmp_path / "dataset"
     with MarketDataset(root, dataset_id="block-trades", source="TUSHARE_COMPATIBLE") as ds:
@@ -214,6 +223,7 @@ def test_builder_syncs_block_trade_summaries_with_audited_discards(tmp_path):
             "summaryRows": 1,
             "discardedNonAShareRows": 1,
             "discardedUnknownInstruments": 1,
+            "discardedSourceCodesOutsideEffectivePeriod": 1,
         }
         assert builder.sync_block_trade_partition("20260915")["status"] == "SKIPPED"
 
@@ -233,6 +243,7 @@ def test_builder_syncs_block_trade_summaries_with_audited_discards(tmp_path):
         )
         assert details["discardedNonAShareRows"]["count"] == 1
         assert details["discardedUnknownInstruments"]["count"] == 1
+        assert details["discardedSourceCodesOutsideEffectivePeriod"]["count"] == 1
 
 
 def test_builder_rejects_block_trade_outside_instrument_lifecycle(tmp_path):
