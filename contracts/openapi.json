@@ -3474,6 +3474,51 @@
         }
       }
     },
+    "/api/v1/drift-reports": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "List Drift Reports",
+        "operationId": "list_drift_reports_api_v1_drift_reports_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CycleDriftReportPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -4739,6 +4784,139 @@
         ],
         "title": "CorrectionView"
       },
+      "CycleDriftReportPage": {
+        "properties": {
+          "reports": {
+            "items": {
+              "$ref": "#/components/schemas/CycleDriftReportView"
+            },
+            "type": "array",
+            "title": "Reports"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reports"
+        ],
+        "title": "CycleDriftReportPage"
+      },
+      "CycleDriftReportView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "baselineDate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baselinedate"
+          },
+          "currentDate": {
+            "type": "string",
+            "format": "date",
+            "title": "Currentdate"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "STABLE",
+              "WARNING",
+              "UNSUPPORTED"
+            ],
+            "title": "Status"
+          },
+          "comparisonKey": {
+            "type": "string",
+            "title": "Comparisonkey"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/DriftMetric"
+            },
+            "type": "array",
+            "title": "Metrics"
+          },
+          "blockerCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blockercodes"
+          },
+          "cycleSupport": {
+            "items": {
+              "$ref": "#/components/schemas/CycleSupport"
+            },
+            "type": "array",
+            "title": "Cyclesupport"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "baselineDate",
+          "currentDate",
+          "status",
+          "comparisonKey",
+          "metrics",
+          "blockerCodes",
+          "cycleSupport",
+          "createdAt"
+        ],
+        "title": "CycleDriftReportView"
+      },
+      "CycleSupport": {
+        "properties": {
+          "horizon": {
+            "type": "string",
+            "enum": [
+              "5_TRADING_DAYS",
+              "20_TRADING_DAYS"
+            ],
+            "title": "Horizon"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ACTIVE",
+              "UNSUPPORTED"
+            ],
+            "title": "Status"
+          },
+          "reasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reasoncode"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "horizon",
+          "status"
+        ],
+        "title": "CycleSupport"
+      },
       "DatasetReference": {
         "properties": {
           "datasetId": {
@@ -4805,6 +4983,80 @@
           "actual"
         ],
         "title": "Discrepancy"
+      },
+      "DriftMetric": {
+        "properties": {
+          "metricId": {
+            "type": "string",
+            "title": "Metricid"
+          },
+          "baselineValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Baselinevalue"
+          },
+          "currentValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentvalue"
+          },
+          "delta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Delta"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          },
+          "drifted": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Drifted"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "metricId",
+          "baselineValue",
+          "currentValue",
+          "delta",
+          "threshold",
+          "drifted"
+        ],
+        "title": "DriftMetric"
       },
       "Envelope_AccountBalance_": {
         "properties": {
@@ -4965,6 +5217,22 @@
           "data"
         ],
         "title": "Envelope[CorrectionView]"
+      },
+      "Envelope_CycleDriftReportPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CycleDriftReportPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CycleDriftReportPage]"
       },
       "Envelope_EvidencePage_": {
         "properties": {

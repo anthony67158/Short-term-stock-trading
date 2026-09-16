@@ -98,3 +98,38 @@ class ImprovementProposal(Base):
         DateTime(timezone=True),
         default=utcnow,
     )
+
+
+class CycleDriftReport(Base):
+    __tablename__ = "cycle_drift_reports"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "current_date",
+            name="uq_cycle_drift_report_date",
+        ),
+        CheckConstraint(
+            "status IN ('STABLE','WARNING','UNSUPPORTED')",
+            name="status",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+        default=new_id,
+    )
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"),
+        index=True,
+    )
+    baseline_date: Mapped[date | None] = mapped_column(Date)
+    current_date: Mapped[date] = mapped_column(Date, index=True)
+    status: Mapped[str] = mapped_column(String(16), index=True)
+    comparison_key: Mapped[str] = mapped_column(String(64))
+    metrics: Mapped[dict] = mapped_column(JSONB)
+    blocker_codes: Mapped[list] = mapped_column(JSONB)
+    cycle_support: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+    )

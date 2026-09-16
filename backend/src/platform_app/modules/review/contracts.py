@@ -131,3 +131,34 @@ class StrategyAgentOutput(Contract):
         if proposed != (self.candidate_value is not None):
             raise ValueError("提案状态与参数值不一致")
         return self
+
+
+class CycleSupport(Contract):
+    horizon: Literal["5_TRADING_DAYS", "20_TRADING_DAYS"]
+    status: Literal["ACTIVE", "UNSUPPORTED"]
+    reason_code: str | None = None
+
+
+class DriftMetric(Contract):
+    metric_id: str
+    baseline_value: str | None
+    current_value: str | None
+    delta: str | None
+    threshold: str | None
+    drifted: bool | None
+
+
+class CycleDriftReportView(Contract):
+    id: str
+    baseline_date: date | None
+    current_date: date
+    status: Literal["STABLE", "WARNING", "UNSUPPORTED"]
+    comparison_key: str
+    metrics: list[DriftMetric]
+    blocker_codes: list[str]
+    cycle_support: list[CycleSupport]
+    created_at: AwareDatetime
+
+
+class CycleDriftReportPage(Contract):
+    reports: list[CycleDriftReportView]

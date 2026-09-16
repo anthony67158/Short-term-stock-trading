@@ -950,6 +950,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/drift-reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Drift Reports */
+        get: operations["list_drift_reports_api_v1_drift_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1398,6 +1415,56 @@ export interface components {
             reversalAmount: string;
             replacement?: components["schemas"]["ReplacementFact"] | null;
         };
+        /** CycleDriftReportPage */
+        CycleDriftReportPage: {
+            /** Reports */
+            reports: components["schemas"]["CycleDriftReportView"][];
+        };
+        /** CycleDriftReportView */
+        CycleDriftReportView: {
+            /** Id */
+            id: string;
+            /** Baselinedate */
+            baselineDate: string | null;
+            /**
+             * Currentdate
+             * Format: date
+             */
+            currentDate: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "STABLE" | "WARNING" | "UNSUPPORTED";
+            /** Comparisonkey */
+            comparisonKey: string;
+            /** Metrics */
+            metrics: components["schemas"]["DriftMetric"][];
+            /** Blockercodes */
+            blockerCodes: string[];
+            /** Cyclesupport */
+            cycleSupport: components["schemas"]["CycleSupport"][];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** CycleSupport */
+        CycleSupport: {
+            /**
+             * Horizon
+             * @enum {string}
+             */
+            horizon: "5_TRADING_DAYS" | "20_TRADING_DAYS";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ACTIVE" | "UNSUPPORTED";
+            /** Reasoncode */
+            reasonCode?: string | null;
+        };
         /** DatasetReference */
         DatasetReference: {
             /** Datasetid */
@@ -1420,6 +1487,21 @@ export interface components {
             expected: string;
             /** Actual */
             actual: string;
+        };
+        /** DriftMetric */
+        DriftMetric: {
+            /** Metricid */
+            metricId: string;
+            /** Baselinevalue */
+            baselineValue: string | null;
+            /** Currentvalue */
+            currentValue: string | null;
+            /** Delta */
+            delta: string | null;
+            /** Threshold */
+            threshold: string | null;
+            /** Drifted */
+            drifted: boolean | null;
         };
         /** Envelope[AccountBalance] */
         Envelope_AccountBalance_: {
@@ -1469,6 +1551,11 @@ export interface components {
         /** Envelope[CorrectionView] */
         Envelope_CorrectionView_: {
             data: components["schemas"]["CorrectionView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CycleDriftReportPage] */
+        Envelope_CycleDriftReportPage_: {
+            data: components["schemas"]["CycleDriftReportPage"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[EvidencePage] */
@@ -5288,6 +5375,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_JobView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_drift_reports_api_v1_drift_reports_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CycleDriftReportPage_"];
                 };
             };
             /** @description Validation Error */

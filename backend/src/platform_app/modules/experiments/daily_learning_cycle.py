@@ -43,6 +43,9 @@ from platform_app.modules.review.models import (
     ImprovementProposal,
     ReviewReport,
 )
+from platform_app.modules.review.drift import (
+    create_cycle_drift_report,
+)
 from platform_app.modules.review.service import (
     ReviewError,
     submit_review,
@@ -391,6 +394,10 @@ def run_daily_learning_cycle(
         as_of=now,
     )
     if not quality["passed"]:
+        drift = {
+            "status": "SKIPPED",
+            "reason": "MARKET_DATASET_QUALITY_FAILED",
+        }
         learning = {
             "stage": "DATA_QUALITY",
             "decision": "BLOCKED",
@@ -401,19 +408,28 @@ def run_daily_learning_cycle(
         if active is None or active.bundle_id != evidence["activeRelease"][
             "releaseId"
         ]:
+            drift = {
+                "status": "SKIPPED",
+                "reason": "ACTIVE_RELEASE_REGISTRY_MISMATCH",
+            }
             learning = {
                 "stage": "RELEASE",
                 "decision": "BLOCKED",
                 "errorCode": "ACTIVE_RELEASE_REGISTRY_MISMATCH",
             }
         else:
+            current_date = date.fromisoformat(
+                f"{evidence['marketDataset']['endDate'][:4]}-"
+                f"{evidence['marketDataset']['endDate'][4:6]}-"
+                f"{evidence['marketDataset']['endDate'][6:]}"
+            )
+            drift = create_cycle_drift_report(
+                active.owner_id,
+                current_date,
+            ).model_dump(mode="json", by_alias=True)
             learning = _advance_learning(
                 owner_id=active.owner_id,
-                review_date=date.fromisoformat(
-                    f"{evidence['marketDataset']['endDate'][:4]}-"
-                    f"{evidence['marketDataset']['endDate'][4:6]}-"
-                    f"{evidence['marketDataset']['endDate'][6:]}"
-                ),
+                review_date=current_date,
                 active_release_id=active.bundle_id,
             )
     report = {
@@ -426,6 +442,7 @@ def run_daily_learning_cycle(
             "violations": quality["violations"],
         },
         "settlement": settlement,
+        "drift": drift,
         "releaseEvidence": evidence,
         "learning": learning,
     }

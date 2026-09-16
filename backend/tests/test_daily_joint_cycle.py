@@ -262,6 +262,16 @@ def test_daily_learning_advances_one_resumable_stage(
             "decision": "SUBMITTED",
         },
     )
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "create_cycle_drift_report",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            model_dump=lambda **_dump_kwargs: {
+                "status": "UNSUPPORTED",
+                "blockerCodes": ["BASELINE_CYCLE_MISSING"],
+            }
+        ),
+    )
 
     report = daily_learning_cycle.run_daily_learning_cycle(
         output_root=tmp_path / "daily",

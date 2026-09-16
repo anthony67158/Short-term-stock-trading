@@ -7,7 +7,9 @@ from platform_app.modules.identity.routes import CurrentUser
 from platform_app.modules.research.contracts import JobView
 from platform_app.modules.research.routes import job_view
 from platform_app.modules.review import service
+from platform_app.modules.review import drift
 from platform_app.modules.review.contracts import (
+    CycleDriftReportPage,
     ReviewCapability,
     ReviewReportPage,
     ReviewRunInput,
@@ -76,3 +78,14 @@ def compile_improvement_proposal(
             )
         )
     )
+
+
+@router.get(
+    "/drift-reports",
+    response_model=Envelope[CycleDriftReportPage],
+)
+def list_drift_reports(
+    user: CurrentUser,
+    limit: Annotated[int, Query(ge=1, le=100)] = 30,
+):
+    return Envelope(data=drift.drift_reports(user.id, limit))
