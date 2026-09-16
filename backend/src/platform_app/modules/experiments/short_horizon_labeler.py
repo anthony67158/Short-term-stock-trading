@@ -8,19 +8,23 @@ from platform_app.modules.experiments.cash_equity_fees import (
 )
 
 LABEL_SIMULATION_POLICY = {
-    "policyVersion": "short-horizon-label-simulation.v1",
+    "policyVersion": "short-horizon-label-simulation.v2",
     "entryFillPrice": "LIMIT_PRICE",
     "pFillDefinition": "AT_LEAST_ONE_BOARD_LOT",
+    "pFullFillDefinition": "REQUESTED_SHARES_FILLED",
     "buyLotShares": 100,
+    "sizeAuthority": "REQUEST_CONTEXT_AND_ACCOUNT_CONSTRAINTS",
+    "upstreamTargetNotionalRole": "REFERENCE_ONLY",
+    "orderSizeScenarios": {
+        "includeOneBoardLot": True,
+        "referenceNotionalCny": "100000",
+        "medianDailyAmountBps": ["5", "20", "100"],
+    },
     "tPlusOne": "ENTRY_SESSION_TRIGGER_EXECUTES_NEXT_SESSION_OPEN",
     "terminalPriceAuthority": "CANONICAL_DAILY_CLOSE",
     "marketExitSlippageBps": CASH_EQUITY_FEE_POLICY["marketExitSlippageBps"]["value"],
     "feePolicyVersion": CASH_EQUITY_FEE_POLICY["policyVersion"],
 }
-
-
-class LabelUnavailable(ValueError):
-    pass
 
 
 def _decimal(value) -> Decimal:
@@ -50,7 +54,46 @@ def _trigger(bar: dict, stop_price: Decimal, take_price: Decimal) -> str | None:
     return None
 
 
-def simulate_buy_limit_episode(
+def order_size_scenarios(
+    *,
+    decision_close: str,
+    median_amount20_cny: str,
+) -> list[dict]:
+    price = _decimal(decision_close)
+    median_amount = _decimal(median_amount20_cny)
+    lot = LABEL_SIMULATION_POLICY["buyLotShares"]
+    if price <= 0 or median_amount <= 0:
+        raise ValueError("ORDER_SIZE_SCENARIO_INPUT_INVALID")
+    configured = LABEL_SIMULATION_POLICY["orderSizeScenarios"]
+    requested = [("ONE_BOARD_LOT", price * lot)]
+    requested.append(("REFERENCE_100K", _decimal(configured["referenceNotionalCny"])))
+    requested.extend(
+        (
+            f"MEDIAN_AMOUNT_{basis_points}_BPS",
+            median_amount * _decimal(basis_points) / Decimal("10000"),
+        )
+        for basis_points in configured["medianDailyAmountBps"]
+    )
+    by_shares: dict[int, list[str]] = {}
+    for scenario_id, target_notional in requested:
+        target_shares = int(
+            (target_notional / price / lot).to_integral_value(rounding=ROUND_FLOOR)
+        ) * lot
+        if target_shares >= lot:
+            by_shares.setdefault(target_shares, []).append(scenario_id)
+    return [
+        {
+            "scenarioIds": scenario_ids,
+            "reference100k": "REFERENCE_100K" in scenario_ids,
+            "targetShares": target_shares,
+            "targetNotionalCny": _text(price * target_shares),
+            "targetToMedianAmount": _text(price * target_shares / median_amount),
+        }
+        for target_shares, scenario_ids in sorted(by_shares.items())
+    ]
+
+
+def simulate_buy_limit_path(
     *,
     instrument_id: str,
     board: str,
@@ -77,17 +120,11 @@ def simulate_buy_limit_episode(
 
     limit = _decimal(decision_close)
     lot = LABEL_SIMULATION_POLICY["buyLotShares"]
-    target_notional = _decimal(execution_policy["targetNotionalCny"])
-    target_shares = int(
-        (target_notional / limit / lot).to_integral_value(rounding=ROUND_FLOOR)
-    ) * lot
-    if target_shares <= 0:
-        raise LabelUnavailable("TARGET_BELOW_ONE_LOT")
     participation = _decimal(execution_policy["maximumBarParticipationRate"])
     stop_price = limit * (Decimal("1") + _decimal(label_policy["stopLossReturn"]))
     take_price = limit * (Decimal("1") + _decimal(label_policy["takeProfitReturn"]))
 
-    filled_shares = 0
+    fill_capacity_shares = 0
     queued_t1_trigger = None
     exit_reason = None
     exit_date = None
@@ -110,9 +147,9 @@ def simulate_buy_limit_episode(
                     rounding=ROUND_FLOOR
                 )
             ) * lot
-            filled_shares += min(available, target_shares - filled_shares)
+            fill_capacity_shares += available
 
-        if filled_shares <= 0:
+        if fill_capacity_shares <= 0:
             continue
         trigger = _trigger(row, stop_price, take_price)
         if not trigger:
@@ -129,60 +166,89 @@ def simulate_buy_limit_episode(
         )
         break
 
-    fill_ratio = Decimal(filled_shares) / Decimal(target_shares)
-    if filled_shares == 0:
-        return {
-            "instrumentId": instrument_id,
-            "board": board,
-            "decisionDate": decision_date,
-            "pFillLabel": 0,
-            "fillRatio": "0",
-            "filledShares": 0,
-            "targetShares": target_shares,
-            "pWinGivenFillLabel": None,
-            "netReturnGivenFill": None,
-            "stopHazardLabel": None,
-            "exitReason": "NO_FILL",
-            "exitDate": None,
-        }
-
-    if raw_exit_price is None:
+    if fill_capacity_shares > 0 and raw_exit_price is None:
         exit_reason = "TERMINAL"
         exit_date = trade_dates[-1]
         raw_exit_price = _decimal(terminal_close)
-    executed_exit_price = _exit_price(raw_exit_price)
-    buy_gross = limit * filled_shares
-    sell_gross = executed_exit_price * filled_shares
+    return {
+        "instrumentId": instrument_id,
+        "board": board,
+        "decisionDate": decision_date,
+        "entryDate": trade_dates[0],
+        "entryPrice": _text(limit),
+        "fillCapacityShares": fill_capacity_shares,
+        "exitPrice": _text(_exit_price(raw_exit_price)) if raw_exit_price else None,
+        "exitReason": exit_reason or "NO_FILL",
+        "exitDate": exit_date,
+    }
+
+
+def label_order_scenario(path: dict, scenario: dict) -> dict:
+    target_shares = scenario["targetShares"]
+    filled_shares = min(path["fillCapacityShares"], target_shares)
+    fill_ratio = Decimal(filled_shares) / Decimal(target_shares)
+    base = {
+        **path,
+        **scenario,
+        "pFillLabel": int(filled_shares >= LABEL_SIMULATION_POLICY["buyLotShares"]),
+        "pFullFillLabel": int(filled_shares == target_shares),
+        "fillRatio": _text(fill_ratio),
+        "filledShares": filled_shares,
+    }
+    if filled_shares == 0:
+        return {
+            **base,
+            "pWinGivenFillLabel": None,
+            "netReturnGivenFill": None,
+            "stopHazardLabel": None,
+            "buyFeesCny": None,
+            "sellFeesCny": None,
+        }
+    entry_price = _decimal(path["entryPrice"])
+    exit_price = _decimal(path["exitPrice"])
+    buy_gross = entry_price * filled_shares
+    sell_gross = exit_price * filled_shares
     buy_fees = calculate_cash_equity_fees(
         side="BUY",
         gross_amount=buy_gross,
-        board=board,
-        trade_date=trade_dates[0],
+        board=path["board"],
+        trade_date=path["entryDate"],
     )
     sell_fees = calculate_cash_equity_fees(
         side="SELL",
         gross_amount=sell_gross,
-        board=board,
-        trade_date=exit_date,
+        board=path["board"],
+        trade_date=path["exitDate"],
     )
     net_return = (
         sell_gross - sell_fees["totalCny"] - buy_gross - buy_fees["totalCny"]
     ) / (buy_gross + buy_fees["totalCny"])
     return {
-        "instrumentId": instrument_id,
-        "board": board,
-        "decisionDate": decision_date,
-        "pFillLabel": 1,
-        "fillRatio": _text(fill_ratio),
-        "filledShares": filled_shares,
-        "targetShares": target_shares,
-        "entryPrice": _text(limit),
-        "exitPrice": _text(executed_exit_price),
+        **base,
         "pWinGivenFillLabel": int(net_return > 0),
         "netReturnGivenFill": _text(net_return),
-        "stopHazardLabel": int(exit_reason in {"STOP", "T1_DEFERRED_STOP"}),
-        "exitReason": exit_reason,
-        "exitDate": exit_date,
+        "stopHazardLabel": int(path["exitReason"] in {"STOP", "T1_DEFERRED_STOP"}),
         "buyFeesCny": _text(buy_fees["totalCny"]),
         "sellFeesCny": _text(sell_fees["totalCny"]),
     }
+
+
+def simulate_buy_limit_episode(
+    *,
+    target_shares: int,
+    **path_arguments,
+) -> dict:
+    if (
+        target_shares < LABEL_SIMULATION_POLICY["buyLotShares"]
+        or target_shares % LABEL_SIMULATION_POLICY["buyLotShares"]
+    ):
+        raise ValueError("LABEL_TARGET_SHARES_INVALID")
+    path = simulate_buy_limit_path(**path_arguments)
+    scenario = {
+        "scenarioIds": ["EXPLICIT_TARGET_SHARES"],
+        "reference100k": False,
+        "targetShares": target_shares,
+        "targetNotionalCny": _text(_decimal(path["entryPrice"]) * target_shares),
+        "targetToMedianAmount": None,
+    }
+    return label_order_scenario(path, scenario)

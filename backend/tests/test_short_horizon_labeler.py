@@ -9,7 +9,7 @@ from platform_app.modules.experiments.cash_equity_fees import (
     transfer_fee_rate,
 )
 from platform_app.modules.experiments.short_horizon_labeler import (
-    LabelUnavailable,
+    order_size_scenarios,
     simulate_buy_limit_episode,
 )
 from platform_app.modules.experiments.short_horizon_policy import SHORT_HORIZON_POLICY
@@ -55,6 +55,7 @@ def _simulate(bars, dates):
         terminal_close="10.5",
         execution_policy=SHORT_HORIZON_POLICY["executionPolicy"],
         label_policy=SHORT_HORIZON_POLICY["labelPolicy"],
+        target_shares=10000,
     )
 
 
@@ -128,9 +129,34 @@ def test_same_bar_stop_and_take_uses_stop_first():
     assert result["stopHazardLabel"] == 1
 
 
-def test_target_below_one_board_lot_is_explicitly_unavailable():
+def test_high_price_stock_keeps_one_lot_when_reference_is_too_small():
     dates = [f"2026010{day}" for day in range(2, 7)]
-    with pytest.raises(LabelUnavailable, match="TARGET_BELOW_ONE_LOT"):
+    scenarios = order_size_scenarios(
+        decision_close="1001",
+        median_amount20_cny="100000000",
+    )
+
+    assert "ONE_BOARD_LOT" in scenarios[0]["scenarioIds"]
+    assert scenarios[0]["targetShares"] == 100
+    assert not any(row["reference100k"] for row in scenarios)
+    result = simulate_buy_limit_episode(
+        instrument_id="SH.600000",
+        board="MAIN",
+        decision_date="20260101",
+        trade_dates=dates,
+        decision_close="1001",
+        bars=_bars(dates, price="1001"),
+        terminal_close="1001",
+        execution_policy=SHORT_HORIZON_POLICY["executionPolicy"],
+        label_policy=SHORT_HORIZON_POLICY["labelPolicy"],
+        target_shares=100,
+    )
+    assert result["pFillLabel"] == 1
+
+
+def test_target_shares_must_be_a_board_lot():
+    dates = [f"2026010{day}" for day in range(2, 7)]
+    with pytest.raises(ValueError, match="LABEL_TARGET_SHARES_INVALID"):
         simulate_buy_limit_episode(
             instrument_id="SH.600000",
             board="MAIN",
@@ -141,4 +167,5 @@ def test_target_below_one_board_lot_is_explicitly_unavailable():
             terminal_close="1001",
             execution_policy=SHORT_HORIZON_POLICY["executionPolicy"],
             label_policy=SHORT_HORIZON_POLICY["labelPolicy"],
+            target_shares=50,
         )

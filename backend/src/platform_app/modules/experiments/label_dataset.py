@@ -13,11 +13,12 @@ from platform_app.modules.experiments.cash_equity_fees import CASH_EQUITY_FEE_PO
 from platform_app.modules.experiments.episode_dataset import canonical_json, canonical_sha256
 from platform_app.modules.experiments.short_horizon_labeler import (
     LABEL_SIMULATION_POLICY,
-    LabelUnavailable,
-    simulate_buy_limit_episode,
+    label_order_scenario,
+    order_size_scenarios,
+    simulate_buy_limit_path,
 )
 
-SCHEMA_VERSION = "label-dataset.v1"
+SCHEMA_VERSION = "label-dataset.v2"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS label_dataset_metadata (
@@ -36,16 +37,24 @@ CREATE TABLE IF NOT EXISTS label_partitions (
     candidate_count INTEGER NOT NULL CHECK (candidate_count >= 0),
     eligible_count INTEGER NOT NULL CHECK (eligible_count >= 0),
     unavailable_count INTEGER NOT NULL CHECK (unavailable_count >= 0),
+    scenario_count INTEGER NOT NULL CHECK (scenario_count >= 0),
     payload_sha256 TEXT NOT NULL,
     completed_at TEXT NOT NULL
 ) STRICT;
 CREATE TABLE IF NOT EXISTS episode_labels (
-    episode_id TEXT PRIMARY KEY,
+    episode_id TEXT NOT NULL,
     decision_date TEXT NOT NULL REFERENCES label_partitions(decision_date),
     instrument_id TEXT NOT NULL,
     board TEXT NOT NULL,
+    scenario_ids_json TEXT NOT NULL,
+    reference_100k INTEGER NOT NULL CHECK (reference_100k IN (0, 1)),
+    median_amount20_cny TEXT NOT NULL,
+    target_notional_cny TEXT NOT NULL,
+    target_to_median_amount TEXT NOT NULL,
     p_fill_label INTEGER NOT NULL CHECK (p_fill_label IN (0, 1)),
+    p_full_fill_label INTEGER NOT NULL CHECK (p_full_fill_label IN (0, 1)),
     fill_ratio TEXT NOT NULL,
+    fill_capacity_shares INTEGER NOT NULL CHECK (fill_capacity_shares >= 0),
     filled_shares INTEGER NOT NULL CHECK (filled_shares >= 0),
     target_shares INTEGER NOT NULL CHECK (target_shares > 0),
     entry_price TEXT,
@@ -57,7 +66,8 @@ CREATE TABLE IF NOT EXISTS episode_labels (
     exit_date TEXT,
     buy_fees_cny TEXT,
     sell_fees_cny TEXT,
-    source_row_sha256 TEXT NOT NULL
+    source_row_sha256 TEXT NOT NULL,
+    PRIMARY KEY (episode_id, target_shares)
 ) STRICT;
 CREATE TABLE IF NOT EXISTS label_partition_rejections (
     decision_date TEXT NOT NULL REFERENCES label_partitions(decision_date),
@@ -197,7 +207,7 @@ class LabelDataset:
         if not re.fullmatch(r"\d{8}", decision_date):
             raise LabelDatasetError("LABEL_PARTITION_DATE_INVALID")
         existing = self.db.execute(
-            "SELECT candidate_count, eligible_count, unavailable_count "
+            "SELECT candidate_count, eligible_count, unavailable_count, scenario_count "
             "FROM label_partitions WHERE decision_date = ?",
             (decision_date,),
         ).fetchone()
@@ -208,6 +218,7 @@ class LabelDataset:
                 "candidateCount": existing["candidate_count"],
                 "eligibleCount": existing["eligible_count"],
                 "unavailableCount": existing["unavailable_count"],
+                "scenarioCount": existing["scenario_count"],
             }
 
         candidate_count = self.episodes.execute(
@@ -216,7 +227,8 @@ class LabelDataset:
         ).fetchone()[0]
         rows = self.episodes.execute(
             "WITH eligible AS ("
-            "SELECT e.episode_id, e.instrument_id, e.board, e.decision_date "
+            "SELECT e.episode_id, e.instrument_id, e.board, e.decision_date, "
+            "e.features_json "
             "FROM candidate_episodes e "
             "JOIN episode_minute_requirements l ON l.episode_id = e.episode_id "
             "JOIN minute_requirements r "
@@ -224,7 +236,8 @@ class LabelDataset:
             "WHERE e.decision_date = ? GROUP BY e.episode_id "
             "HAVING COUNT(*) = 5 AND SUM(r.status = 'COMPLETED') = 5"
             ") "
-            "SELECT e.episode_id, e.instrument_id, e.board, d0.close AS decision_close, "
+            "SELECT e.episode_id, e.instrument_id, e.board, e.features_json, "
+            "d0.close AS decision_close, "
             "l.session_offset, l.trade_date, b.bar_end_shanghai, b.open, b.high, "
             "b.low, b.close, b.volume_shares, d4.close AS terminal_close "
             "FROM eligible e "
@@ -254,6 +267,7 @@ class LabelDataset:
             path_eligible_count += 1
             episode_rows = [dict(row) for row in group]
             first = episode_rows[0]
+            features = json.loads(first["features_json"])
             trade_dates = list(
                 dict.fromkeys(row["trade_date"] for row in episode_rows)
             )
@@ -269,45 +283,53 @@ class LabelDataset:
                 }
                 for row in episode_rows
             ]
-            try:
-                label = simulate_buy_limit_episode(
-                    instrument_id=first["instrument_id"],
-                    board=first["board"],
-                    decision_date=decision_date,
-                    trade_dates=trade_dates,
-                    decision_close=first["decision_close"],
-                    bars=bars,
-                    terminal_close=first["terminal_close"],
-                    execution_policy=self.episode_policy["executionPolicy"],
-                    label_policy=self.episode_policy["labelPolicy"],
+            path = simulate_buy_limit_path(
+                instrument_id=first["instrument_id"],
+                board=first["board"],
+                decision_date=decision_date,
+                trade_dates=trade_dates,
+                decision_close=first["decision_close"],
+                bars=bars,
+                terminal_close=first["terminal_close"],
+                execution_policy=self.episode_policy["executionPolicy"],
+                label_policy=self.episode_policy["labelPolicy"],
+            )
+            median_amount = features["medianAmount20Cny"]
+            for scenario in order_size_scenarios(
+                decision_close=first["decision_close"],
+                median_amount20_cny=median_amount,
+            ):
+                labels.append(
+                    {
+                        "episodeId": episode_id,
+                        "medianAmount20Cny": median_amount,
+                        **label_order_scenario(path, scenario),
+                    }
                 )
-            except LabelUnavailable as exc:
-                reason = str(exc)
-                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
-                continue
-            labels.append({"episodeId": episode_id, **label})
 
         path_unavailable = candidate_count - path_eligible_count
         if path_unavailable:
             rejection_counts["MINUTE_PATH_UNAVAILABLE"] = path_unavailable
-        unavailable_count = candidate_count - len(labels)
+        unavailable_count = candidate_count - path_eligible_count
         payload_hash = canonical_sha256(
             {
                 "decisionDate": decision_date,
                 "candidateCount": candidate_count,
                 "unavailableCount": unavailable_count,
+                "scenarioCount": len(labels),
                 "rejections": rejection_counts,
                 "labels": labels,
             }
         )
         try:
             self.db.execute(
-                "INSERT INTO label_partitions VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO label_partitions VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     decision_date,
                     candidate_count,
-                    len(labels),
+                    path_eligible_count,
                     unavailable_count,
+                    len(labels),
                     payload_hash,
                     _now(),
                 ),
@@ -316,14 +338,22 @@ class LabelDataset:
                 source_hash = canonical_sha256(row)
                 self.db.execute(
                     "INSERT INTO episode_labels VALUES "
-                    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                    "?, ?, ?, ?, ?)",
                     (
                         row["episodeId"],
                         decision_date,
                         row["instrumentId"],
                         row["board"],
+                        canonical_json(row["scenarioIds"]),
+                        int(row["reference100k"]),
+                        row["medianAmount20Cny"],
+                        row["targetNotionalCny"],
+                        row["targetToMedianAmount"],
                         row["pFillLabel"],
+                        row["pFullFillLabel"],
                         row["fillRatio"],
+                        row["fillCapacityShares"],
                         row["filledShares"],
                         row["targetShares"],
                         row.get("entryPrice"),
@@ -351,8 +381,9 @@ class LabelDataset:
             "decisionDate": decision_date,
             "status": "COMPLETED",
             "candidateCount": candidate_count,
-            "eligibleCount": len(labels),
+            "eligibleCount": path_eligible_count,
             "unavailableCount": unavailable_count,
+            "scenarioCount": len(labels),
             "rejections": rejection_counts,
         }
 
@@ -368,7 +399,9 @@ class LabelDataset:
         metadata = dict(self.db.execute("SELECT * FROM label_dataset_metadata").fetchone())
         totals = dict(
             self.db.execute(
-                "SELECT COUNT(*) AS labels, SUM(p_fill_label) AS fills, "
+                "SELECT COUNT(DISTINCT episode_id) AS episodes, "
+                "COUNT(*) AS scenarios, SUM(p_fill_label) AS any_fills, "
+                "SUM(p_full_fill_label) AS full_fills, "
                 "SUM(CASE WHEN p_fill_label = 1 THEN p_win_given_fill_label ELSE 0 END) "
                 "AS wins, SUM(CASE WHEN p_fill_label = 1 THEN stop_hazard_label ELSE 0 END) "
                 "AS stops FROM episode_labels"
@@ -377,7 +410,8 @@ class LabelDataset:
         board_counts = {
             row["board"]: row["count"]
             for row in self.db.execute(
-                "SELECT board, COUNT(*) AS count FROM episode_labels GROUP BY board"
+                "SELECT board, COUNT(DISTINCT episode_id) AS count "
+                "FROM episode_labels GROUP BY board"
             )
         }
         rejection_counts = {

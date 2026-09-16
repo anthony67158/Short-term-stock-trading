@@ -155,15 +155,23 @@ def test_label_dataset_builds_replays_and_seals_bound_labels(tmp_path):
     ) as labels:
         result = labels.build_partition(dates[0])
         replay = labels.build_partition(dates[0])
-        row = labels.db.execute("SELECT * FROM episode_labels").fetchone()
+        reference = labels.db.execute(
+            "SELECT * FROM episode_labels WHERE reference_100k = 1"
+        ).fetchone()
+        one_lot = labels.db.execute(
+            "SELECT * FROM episode_labels WHERE target_shares = 100"
+        ).fetchone()
         manifest = labels.seal()
 
     assert result["eligibleCount"] == 1
     assert result["unavailableCount"] == 0
+    assert result["scenarioCount"] == 5
     assert replay["status"] == "SKIPPED"
-    assert row["p_fill_label"] == 1
-    assert row["filled_shares"] == 10000
-    assert row["exit_reason"] == "TERMINAL"
-    assert manifest["schemaVersion"] == "label-dataset.v1"
-    assert manifest["labels"]["labels"] == 1
+    assert reference["p_fill_label"] == 1
+    assert reference["filled_shares"] == 10000
+    assert reference["exit_reason"] == "TERMINAL"
+    assert one_lot["p_full_fill_label"] == 1
+    assert manifest["schemaVersion"] == "label-dataset.v2"
+    assert manifest["labels"]["episodes"] == 1
+    assert manifest["labels"]["scenarios"] == 5
     assert manifest["labelsByBoard"] == {"MAIN": 1}
