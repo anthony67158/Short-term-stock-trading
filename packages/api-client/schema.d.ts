@@ -743,6 +743,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategy-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Strategy Versions */
+        get: operations["list_strategy_versions_api_v1_strategy_versions_get"];
+        put?: never;
+        /** Create Strategy Version */
+        post: operations["create_strategy_version_api_v1_strategy_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategy-versions/{strategy_version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Strategy Version */
+        get: operations["get_strategy_version_api_v1_strategy_versions__strategy_version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategy-versions/{strategy_version_id}/freeze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Freeze Strategy Version */
+        post: operations["freeze_strategy_version_api_v1_strategy_versions__strategy_version_id__freeze_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/experiments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Experiments */
+        get: operations["list_experiments_api_v1_experiments_get"];
+        put?: never;
+        /** Create Experiment */
+        post: operations["create_experiment_api_v1_experiments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/experiments/{experiment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Experiment */
+        get: operations["get_experiment_api_v1_experiments__experiment_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -764,6 +851,58 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AblationMetric */
+        AblationMetric: {
+            /** Samplecount */
+            sampleCount: number;
+            /** Meannetreturn */
+            meanNetReturn: string | null;
+            /** Mediannetreturn */
+            medianNetReturn: string | null;
+            /** Positiverate */
+            positiveRate: number | null;
+            /** Meandeltavsformula */
+            meanDeltaVsFormula: string | null;
+            /** Confidence95Lower */
+            confidence95Lower: string | null;
+            /** Confidence95Upper */
+            confidence95Upper: string | null;
+        };
+        /** AblationResult */
+        AblationResult: {
+            /**
+             * Schemaversion
+             * @default four-way-ablation.v1
+             * @constant
+             */
+            schemaVersion: "four-way-ablation.v1";
+            /**
+             * Evaluationstatus
+             * @enum {string}
+             */
+            evaluationStatus: "VALID" | "INSUFFICIENT";
+            dataset: components["schemas"]["DatasetReference"];
+            /** Confirmationsetid */
+            confirmationSetId: string;
+            /** Minimumeffectivesamples */
+            minimumEffectiveSamples: number;
+            /** Effectivesamples */
+            effectiveSamples: number;
+            /** Excludedsamples */
+            excludedSamples: number;
+            /** Exclusionreasons */
+            exclusionReasons: {
+                [key: string]: number;
+            };
+            /** Comparatorpolicy */
+            comparatorPolicy: {
+                [key: string]: string;
+            };
+            /** Variants */
+            variants: {
+                [key: string]: components["schemas"]["AblationMetric"];
+            };
+        };
         /** AccountBalance */
         AccountBalance: {
             account: components["schemas"]["AccountView"];
@@ -1139,6 +1278,13 @@ export interface components {
             reversalAmount: string;
             replacement?: components["schemas"]["ReplacementFact"] | null;
         };
+        /** DatasetReference */
+        DatasetReference: {
+            /** Datasetid */
+            datasetId: string;
+            /** Sha256 */
+            sha256: string;
+        };
         /** DecisionPlanInput */
         DecisionPlanInput: {
             /** Expectedversion */
@@ -1223,6 +1369,16 @@ export interface components {
         /** Envelope[ExecutionView] */
         Envelope_ExecutionView_: {
             data: components["schemas"]["ExecutionView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[ExperimentPage] */
+        Envelope_ExperimentPage_: {
+            data: components["schemas"]["ExperimentPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[ExperimentView] */
+        Envelope_ExperimentView_: {
+            data: components["schemas"]["ExperimentView"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[Health] */
@@ -1323,6 +1479,16 @@ export interface components {
         /** Envelope[ResearchCapability] */
         Envelope_ResearchCapability_: {
             data: components["schemas"]["ResearchCapability"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[StrategyVersionPage] */
+        Envelope_StrategyVersionPage_: {
+            data: components["schemas"]["StrategyVersionPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[StrategyVersionView] */
+        Envelope_StrategyVersionView_: {
+            data: components["schemas"]["StrategyVersionView"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[TransferPage] */
@@ -1502,6 +1668,63 @@ export interface components {
             correctionId?: string | null;
             /** Planid */
             planId?: string | null;
+        };
+        /** ExperimentInput */
+        ExperimentInput: {
+            /** Strategyversionid */
+            strategyVersionId: string;
+            /**
+             * Kind
+             * @default FOUR_WAY_ABLATION
+             * @constant
+             */
+            kind: "FOUR_WAY_ABLATION";
+        };
+        /** ExperimentPage */
+        ExperimentPage: {
+            /** Experiments */
+            experiments: components["schemas"]["ExperimentView"][];
+        };
+        /** ExperimentView */
+        ExperimentView: {
+            /** Id */
+            id: string;
+            /** Strategyversionid */
+            strategyVersionId: string;
+            /**
+             * Kind
+             * @constant
+             */
+            kind: "FOUR_WAY_ABLATION";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "SUCCEEDED" | "FAILED";
+            /** Confighash */
+            configHash: string;
+            /** Confirmationsetid */
+            confirmationSetId: string;
+            /** Samplecount */
+            sampleCount: number;
+            result: components["schemas"]["AblationResult"];
+            /** Failurecode */
+            failureCode: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Finishedat
+             * Format: date-time
+             */
+            finishedAt: string;
+        };
+        /** FreezeStrategyInput */
+        FreezeStrategyInput: {
+            /** Expectedrevision */
+            expectedRevision: number;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -1712,6 +1935,7 @@ export interface components {
             /** Blockercodes */
             blockerCodes?: string[];
         };
+        JsonValue: unknown;
         /** LoginInput */
         LoginInput: {
             /** Username */
@@ -2262,6 +2486,114 @@ export interface components {
             question: string;
             /** Evidenceids */
             evidenceIds: string[];
+        };
+        /** SplitContract */
+        SplitContract: {
+            /** Trainend */
+            trainEnd: string;
+            /** Calibrationstart */
+            calibrationStart: string;
+            /** Calibrationend */
+            calibrationEnd: string;
+            /** Confirmationstart */
+            confirmationStart: string;
+            /** Confirmationend */
+            confirmationEnd: string;
+            /** Embargosessions */
+            embargoSessions: number;
+        };
+        /** StrategyVersionInput */
+        StrategyVersionInput: {
+            /** Strategykey */
+            strategyKey: string;
+            /** Name */
+            name: string;
+            /** Hypothesis */
+            hypothesis: string;
+            /** Scope */
+            scope: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Config */
+            config: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            dataset: components["schemas"]["DatasetReference"];
+            split: components["schemas"]["SplitContract"];
+            /** Releasepolicy */
+            releasePolicy: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Feepolicyversion */
+            feePolicyVersion: string;
+            /** Riskpolicyversion */
+            riskPolicyVersion: string;
+            /** Simulationpolicyversion */
+            simulationPolicyVersion: string;
+            /** Confirmationsetid */
+            confirmationSetId: string;
+            /** Minimumeffectivesamples */
+            minimumEffectiveSamples: number;
+        };
+        /** StrategyVersionPage */
+        StrategyVersionPage: {
+            /** Strategyversions */
+            strategyVersions: components["schemas"]["StrategyVersionView"][];
+        };
+        /** StrategyVersionView */
+        StrategyVersionView: {
+            /** Id */
+            id: string;
+            /** Strategykey */
+            strategyKey: string;
+            /** Version */
+            version: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "DRAFT" | "FROZEN" | "EVALUATED";
+            /** Name */
+            name: string;
+            /** Hypothesis */
+            hypothesis: string;
+            /** Scope */
+            scope: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Config */
+            config: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            dataset: components["schemas"]["DatasetReference"];
+            split: components["schemas"]["SplitContract"];
+            /** Releasepolicy */
+            releasePolicy: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Feepolicyversion */
+            feePolicyVersion: string;
+            /** Riskpolicyversion */
+            riskPolicyVersion: string;
+            /** Simulationpolicyversion */
+            simulationPolicyVersion: string;
+            /** Confirmationsetid */
+            confirmationSetId: string;
+            /** Minimumeffectivesamples */
+            minimumEffectiveSamples: number;
+            /** Confighash */
+            configHash: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Frozenat */
+            frozenAt: string | null;
+            /** Evaluatedat */
+            evaluatedAt: string | null;
         };
         /**
          * TransferInput
@@ -4036,6 +4368,235 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_NotificationView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_strategy_versions_api_v1_strategy_versions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_StrategyVersionPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_strategy_version_api_v1_strategy_versions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyVersionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_StrategyVersionView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_strategy_version_api_v1_strategy_versions__strategy_version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_StrategyVersionView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    freeze_strategy_version_api_v1_strategy_versions__strategy_version_id__freeze_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FreezeStrategyInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_StrategyVersionView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_experiments_api_v1_experiments_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExperimentPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_experiment_api_v1_experiments_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExperimentInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExperimentView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_experiment_api_v1_experiments__experiment_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_ExperimentView_"];
                 };
             };
             /** @description Validation Error */

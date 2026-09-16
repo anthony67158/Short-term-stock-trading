@@ -2747,6 +2747,336 @@
         }
       }
     },
+    "/api/v1/strategy-versions": {
+      "post": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Create Strategy Version",
+        "operationId": "create_strategy_version_api_v1_strategy_versions_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyVersionInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_StrategyVersionView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "List Strategy Versions",
+        "operationId": "list_strategy_versions_api_v1_strategy_versions_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_StrategyVersionPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategy-versions/{strategy_version_id}": {
+      "get": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Get Strategy Version",
+        "operationId": "get_strategy_version_api_v1_strategy_versions__strategy_version_id__get",
+        "parameters": [
+          {
+            "name": "strategy_version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_StrategyVersionView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategy-versions/{strategy_version_id}/freeze": {
+      "post": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Freeze Strategy Version",
+        "operationId": "freeze_strategy_version_api_v1_strategy_versions__strategy_version_id__freeze_post",
+        "parameters": [
+          {
+            "name": "strategy_version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Strategy Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreezeStrategyInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_StrategyVersionView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/experiments": {
+      "post": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Create Experiment",
+        "operationId": "create_experiment_api_v1_experiments_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExperimentInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExperimentView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "List Experiments",
+        "operationId": "list_experiments_api_v1_experiments_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExperimentPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/experiments/{experiment_id}": {
+      "get": {
+        "tags": [
+          "experiments"
+        ],
+        "summary": "Get Experiment",
+        "operationId": "get_experiment_api_v1_experiments__experiment_id__get",
+        "parameters": [
+          {
+            "name": "experiment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Experiment Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_ExperimentView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -2768,6 +3098,172 @@
   },
   "components": {
     "schemas": {
+      "AblationMetric": {
+        "properties": {
+          "sampleCount": {
+            "type": "integer",
+            "title": "Samplecount"
+          },
+          "meanNetReturn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meannetreturn"
+          },
+          "medianNetReturn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mediannetreturn"
+          },
+          "positiveRate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positiverate"
+          },
+          "meanDeltaVsFormula": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meandeltavsformula"
+          },
+          "confidence95Lower": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence95Lower"
+          },
+          "confidence95Upper": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence95Upper"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sampleCount",
+          "meanNetReturn",
+          "medianNetReturn",
+          "positiveRate",
+          "meanDeltaVsFormula",
+          "confidence95Lower",
+          "confidence95Upper"
+        ],
+        "title": "AblationMetric"
+      },
+      "AblationResult": {
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "four-way-ablation.v1",
+            "title": "Schemaversion",
+            "default": "four-way-ablation.v1"
+          },
+          "evaluationStatus": {
+            "type": "string",
+            "enum": [
+              "VALID",
+              "INSUFFICIENT"
+            ],
+            "title": "Evaluationstatus"
+          },
+          "dataset": {
+            "$ref": "#/components/schemas/DatasetReference"
+          },
+          "confirmationSetId": {
+            "type": "string",
+            "title": "Confirmationsetid"
+          },
+          "minimumEffectiveSamples": {
+            "type": "integer",
+            "title": "Minimumeffectivesamples"
+          },
+          "effectiveSamples": {
+            "type": "integer",
+            "title": "Effectivesamples"
+          },
+          "excludedSamples": {
+            "type": "integer",
+            "title": "Excludedsamples"
+          },
+          "exclusionReasons": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Exclusionreasons"
+          },
+          "comparatorPolicy": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Comparatorpolicy"
+          },
+          "variants": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AblationMetric"
+            },
+            "propertyNames": {
+              "enum": [
+                "JOINT",
+                "NO_AGENT",
+                "NO_QUANT",
+                "FORMULA"
+              ]
+            },
+            "type": "object",
+            "title": "Variants"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "evaluationStatus",
+          "dataset",
+          "confirmationSetId",
+          "minimumEffectiveSamples",
+          "effectiveSamples",
+          "excludedSamples",
+          "exclusionReasons",
+          "comparatorPolicy",
+          "variants"
+        ],
+        "title": "AblationResult"
+      },
       "AccountBalance": {
         "properties": {
           "account": {
@@ -3846,6 +4342,29 @@
         ],
         "title": "CorrectionView"
       },
+      "DatasetReference": {
+        "properties": {
+          "datasetId": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Datasetid"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "datasetId",
+          "sha256"
+        ],
+        "title": "DatasetReference"
+      },
       "DecisionPlanInput": {
         "properties": {
           "expectedVersion": {
@@ -4113,6 +4632,38 @@
           "data"
         ],
         "title": "Envelope[ExecutionView]"
+      },
+      "Envelope_ExperimentPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExperimentPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ExperimentPage]"
+      },
+      "Envelope_ExperimentView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExperimentView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[ExperimentView]"
       },
       "Envelope_Health_": {
         "properties": {
@@ -4433,6 +4984,38 @@
           "data"
         ],
         "title": "Envelope[ResearchCapability]"
+      },
+      "Envelope_StrategyVersionPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StrategyVersionPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[StrategyVersionPage]"
+      },
+      "Envelope_StrategyVersionView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/StrategyVersionView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[StrategyVersionView]"
       },
       "Envelope_TransferPage_": {
         "properties": {
@@ -4935,6 +5518,138 @@
           "accountVersion"
         ],
         "title": "ExecutionView"
+      },
+      "ExperimentInput": {
+        "properties": {
+          "strategyVersionId": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Strategyversionid"
+          },
+          "kind": {
+            "type": "string",
+            "const": "FOUR_WAY_ABLATION",
+            "title": "Kind",
+            "default": "FOUR_WAY_ABLATION"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategyVersionId"
+        ],
+        "title": "ExperimentInput"
+      },
+      "ExperimentPage": {
+        "properties": {
+          "experiments": {
+            "items": {
+              "$ref": "#/components/schemas/ExperimentView"
+            },
+            "type": "array",
+            "title": "Experiments"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "experiments"
+        ],
+        "title": "ExperimentPage"
+      },
+      "ExperimentView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "strategyVersionId": {
+            "type": "string",
+            "title": "Strategyversionid"
+          },
+          "kind": {
+            "type": "string",
+            "const": "FOUR_WAY_ABLATION",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCEEDED",
+              "FAILED"
+            ],
+            "title": "Status"
+          },
+          "configHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Confighash"
+          },
+          "confirmationSetId": {
+            "type": "string",
+            "title": "Confirmationsetid"
+          },
+          "sampleCount": {
+            "type": "integer",
+            "title": "Samplecount"
+          },
+          "result": {
+            "$ref": "#/components/schemas/AblationResult"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurecode"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "finishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Finishedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "strategyVersionId",
+          "kind",
+          "status",
+          "configHash",
+          "confirmationSetId",
+          "sampleCount",
+          "result",
+          "failureCode",
+          "createdAt",
+          "finishedAt"
+        ],
+        "title": "ExperimentView"
+      },
+      "FreezeStrategyInput": {
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedrevision"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedRevision"
+        ],
+        "title": "FreezeStrategyInput"
       },
       "HTTPValidationError": {
         "properties": {
@@ -5571,6 +6286,7 @@
         ],
         "title": "JointReleaseReference"
       },
+      "JsonValue": {},
       "LoginInput": {
         "properties": {
           "username": {
@@ -7192,6 +7908,317 @@
           "evidenceIds"
         ],
         "title": "ResearchInput"
+      },
+      "SplitContract": {
+        "properties": {
+          "trainEnd": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "title": "Trainend"
+          },
+          "calibrationStart": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "title": "Calibrationstart"
+          },
+          "calibrationEnd": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "title": "Calibrationend"
+          },
+          "confirmationStart": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "title": "Confirmationstart"
+          },
+          "confirmationEnd": {
+            "type": "string",
+            "pattern": "^\\d{8}$",
+            "title": "Confirmationend"
+          },
+          "embargoSessions": {
+            "type": "integer",
+            "maximum": 252.0,
+            "minimum": 0.0,
+            "title": "Embargosessions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trainEnd",
+          "calibrationStart",
+          "calibrationEnd",
+          "confirmationStart",
+          "confirmationEnd",
+          "embargoSessions"
+        ],
+        "title": "SplitContract"
+      },
+      "StrategyVersionInput": {
+        "properties": {
+          "strategyKey": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Strategykey"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 120,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Name"
+          },
+          "hypothesis": {
+            "type": "string",
+            "maxLength": 1000,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Hypothesis"
+          },
+          "scope": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Scope"
+          },
+          "config": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Config"
+          },
+          "dataset": {
+            "$ref": "#/components/schemas/DatasetReference"
+          },
+          "split": {
+            "$ref": "#/components/schemas/SplitContract"
+          },
+          "releasePolicy": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Releasepolicy"
+          },
+          "feePolicyVersion": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Feepolicyversion"
+          },
+          "riskPolicyVersion": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Riskpolicyversion"
+          },
+          "simulationPolicyVersion": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Simulationpolicyversion"
+          },
+          "confirmationSetId": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9._:-]+$",
+            "title": "Confirmationsetid"
+          },
+          "minimumEffectiveSamples": {
+            "type": "integer",
+            "maximum": 1000000.0,
+            "minimum": 1.0,
+            "title": "Minimumeffectivesamples"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategyKey",
+          "name",
+          "hypothesis",
+          "scope",
+          "config",
+          "dataset",
+          "split",
+          "releasePolicy",
+          "feePolicyVersion",
+          "riskPolicyVersion",
+          "simulationPolicyVersion",
+          "confirmationSetId",
+          "minimumEffectiveSamples"
+        ],
+        "title": "StrategyVersionInput"
+      },
+      "StrategyVersionPage": {
+        "properties": {
+          "strategyVersions": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyVersionView"
+            },
+            "type": "array",
+            "title": "Strategyversions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategyVersions"
+        ],
+        "title": "StrategyVersionPage"
+      },
+      "StrategyVersionView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "strategyKey": {
+            "type": "string",
+            "title": "Strategykey"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "DRAFT",
+              "FROZEN",
+              "EVALUATED"
+            ],
+            "title": "Status"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "hypothesis": {
+            "type": "string",
+            "title": "Hypothesis"
+          },
+          "scope": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Scope"
+          },
+          "config": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Config"
+          },
+          "dataset": {
+            "$ref": "#/components/schemas/DatasetReference"
+          },
+          "split": {
+            "$ref": "#/components/schemas/SplitContract"
+          },
+          "releasePolicy": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "type": "object",
+            "title": "Releasepolicy"
+          },
+          "feePolicyVersion": {
+            "type": "string",
+            "title": "Feepolicyversion"
+          },
+          "riskPolicyVersion": {
+            "type": "string",
+            "title": "Riskpolicyversion"
+          },
+          "simulationPolicyVersion": {
+            "type": "string",
+            "title": "Simulationpolicyversion"
+          },
+          "confirmationSetId": {
+            "type": "string",
+            "title": "Confirmationsetid"
+          },
+          "minimumEffectiveSamples": {
+            "type": "integer",
+            "title": "Minimumeffectivesamples"
+          },
+          "configHash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Confighash"
+          },
+          "revision": {
+            "type": "integer",
+            "title": "Revision"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          },
+          "frozenAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frozenat"
+          },
+          "evaluatedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evaluatedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "strategyKey",
+          "version",
+          "status",
+          "name",
+          "hypothesis",
+          "scope",
+          "config",
+          "dataset",
+          "split",
+          "releasePolicy",
+          "feePolicyVersion",
+          "riskPolicyVersion",
+          "simulationPolicyVersion",
+          "confirmationSetId",
+          "minimumEffectiveSamples",
+          "configHash",
+          "revision",
+          "createdAt",
+          "frozenAt",
+          "evaluatedAt"
+        ],
+        "title": "StrategyVersionView"
       },
       "TransferInput": {
         "properties": {

@@ -7,7 +7,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from platform_app.adapters.database import engine
 from platform_app.config import settings
 from platform_app.contracts.base import (
-    Contract, Envelope, ErrorDetail, ErrorEnvelope, new_id,
+    Contract,
+    Envelope,
+    ErrorDetail,
+    ErrorEnvelope,
+    new_id,
 )
 from platform_app.modules.identity.routes import router as identity_router
 from platform_app.modules.identity.service import IdentityError
@@ -23,6 +27,8 @@ from platform_app.modules.decisions.monitoring import MonitorError
 from platform_app.modules.decisions.candidates import CandidateError
 from platform_app.modules.operations.routes import router as operations_router
 from platform_app.modules.operations.notifications import NotificationError
+from platform_app.modules.experiments.routes import router as experiment_router
+from platform_app.modules.experiments.service import ExperimentError
 
 app = FastAPI(title="A股投资平台", version="0.1.0")
 app.include_router(identity_router)
@@ -31,6 +37,7 @@ app.include_router(market_router)
 app.include_router(research_router)
 app.include_router(decision_router)
 app.include_router(operations_router)
+app.include_router(experiment_router)
 
 
 @app.middleware("http")
@@ -59,14 +66,19 @@ async def request_boundary(request: Request, call_next):
 @app.exception_handler(MonitorError)
 @app.exception_handler(CandidateError)
 @app.exception_handler(NotificationError)
+@app.exception_handler(ExperimentError)
 async def identity_error(_request, exc):
     return error_response(exc.code, exc.message, exc.status)
 
 
 def error_response(code: str, message: str, status: int):
-    body = ErrorEnvelope(error=ErrorDetail(
-        code=code, message=message, retryable=status in (409, 429, 503),
-    ))
+    body = ErrorEnvelope(
+        error=ErrorDetail(
+            code=code,
+            message=message,
+            retryable=status in (409, 429, 503),
+        )
+    )
     return JSONResponse(body.model_dump(mode="json", by_alias=True), status_code=status)
 
 
