@@ -13,6 +13,13 @@ from platform_app.modules.experiments.account_backtest import (
 from platform_app.modules.experiments.position_action_model import (
     PositionActionBundle,
 )
+from platform_app.modules.decisions.position_contracts import (
+    JointReleaseReference,
+    POSITION_AGENT_PROTOCOL_VERSION,
+    PositionDecision,
+    PositionDecisionRequest,
+)
+from platform_app.modules.decisions.position_engine import arbitrate_position
 from platform_app.modules.experiments.quant_model_bundle import QuantModelBundle
 from platform_app.modules.experiments.ranking_model_bundle import RankingModelBundle
 from platform_app.modules.research.agent import ASSESSMENT_TOOL, SEARCH_TOOL, SYSTEM
@@ -164,6 +171,7 @@ def write_joint_candidate(
         "agent": {
             "model": agent_model,
             "protocolVersion": ASSESSMENT_PROTOCOL_VERSION,
+            "positionProtocolVersion": POSITION_AGENT_PROTOCOL_VERSION,
             "featureSchemaVersion": AGENT_FEATURE_SCHEMA_VERSION,
             "featureNames": AGENT_FEATURE_NAMES,
             "promptSha256": _sha256_bytes(SYSTEM.encode()),
@@ -202,8 +210,38 @@ class JointBundle:
             != AGENT_FEATURE_NAMES
         ):
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
+        if self.manifest.get("releaseStatus") == "READY" and (
+            self.manifest.get("releaseBlockers")
+            or self.manifest.get("missingArtifacts")
+            or self.manifest.get("agent", {}).get("positionProtocolVersion")
+            != POSITION_AGENT_PROTOCOL_VERSION
+        ):
+            raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
         if require_ready and self.manifest.get("releaseStatus") != "READY":
             raise JointBundleError("JOINT_BUNDLE_NOT_RELEASED")
+
+    def position_release(self) -> JointReleaseReference:
+        components = self.manifest.get("components", {})
+        return JointReleaseReference(
+            release_id=self.manifest["bundleId"],
+            status=self.manifest["releaseStatus"],
+            position_model_bundle_id=components.get("positionModelBundleId"),
+            position_model_artifact_sha256=components.get(
+                "positionModelArtifactSha256"
+            ),
+            agent_protocol_version=self.manifest.get("agent", {}).get(
+                "positionProtocolVersion"
+            ),
+            blocker_codes=self.manifest.get("releaseBlockers", []),
+        )
+
+    def arbitrate_position(
+        self,
+        request: PositionDecisionRequest,
+    ) -> PositionDecision:
+        if request.release != self.position_release():
+            raise JointBundleError("JOINT_RELEASE_REFERENCE_MISMATCH")
+        return arbitrate_position(request)
 
     def unavailable_decision(self) -> dict:
         if self.manifest.get("releaseStatus") == "READY":

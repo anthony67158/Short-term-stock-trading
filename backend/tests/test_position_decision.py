@@ -1,3 +1,4 @@
+import json
 from datetime import timedelta
 
 import pytest
@@ -6,9 +7,19 @@ from pydantic import ValidationError
 from platform_app.contracts.base import utcnow
 from platform_app.modules.decisions.position_contracts import (
     ActionValueEstimate,
+    HardRiskState,
+    JointReleaseReference,
     PositionAssessment,
+    PositionConstraints,
+    PositionDecisionRequest,
     PositionEvidenceSignal,
     PositionValueReference,
+)
+from platform_app.modules.decisions.position_engine import arbitrate_position
+from platform_app.modules.experiments.joint_bundle import (
+    AGENT_FEATURE_NAMES,
+    JointBundle,
+    JointBundleError,
 )
 from platform_app.modules.research.contracts import Claim
 
@@ -95,6 +106,54 @@ def position_assessment(now=None, *, thesis_status="SUPPORTED"):
     )
 
 
+def decision_request(
+    now=None,
+    *,
+    release_status="READY",
+    thesis_status="SUPPORTED",
+    hard_stop=False,
+    sellable=1000,
+):
+    now = now or utcnow()
+    blockers = [] if release_status == "READY" else ["JOINT_ABLATION_PENDING"]
+    return PositionDecisionRequest(
+        decision_id="decision-1",
+        context_id="context-1",
+        as_of=now,
+        valid_until=now + timedelta(minutes=10),
+        release=JointReleaseReference(
+            release_id="joint-v1",
+            status=release_status,
+            position_model_bundle_id="position-v1" if release_status == "READY" else None,
+            position_model_artifact_sha256="a" * 64 if release_status == "READY" else None,
+            agent_protocol_version="position-assessment.v1" if release_status == "READY" else None,
+            blocker_codes=blockers,
+        ),
+        constraints=PositionConstraints(
+            account_id="account-1",
+            account_version=3,
+            instrument_id="SZ.000001",
+            current_quantity_shares=1000,
+            sellable_quantity_shares=sellable,
+            max_target_quantity_shares=1200,
+            lot_size_shares=100,
+            allowed_actions={"HOLD", "ADD", "REDUCE", "EXIT"},
+            quantity_rule_version="a-share-lot-v1",
+            fee_policy_version="fees-v1",
+        ),
+        hard_risk=HardRiskState(
+            policy_version="risk-v1",
+            source_snapshot_id="risk-snapshot-1",
+            as_of=now - timedelta(seconds=5),
+            valid_until=now + timedelta(minutes=1),
+            hard_stop_triggered=hard_stop,
+            reason_codes=["STOP_PRICE_BREACHED"] if hard_stop else [],
+        ),
+        quant=value_reference(now),
+        agent=position_assessment(now, thesis_status=thesis_status),
+    )
+
+
 def test_position_contract_requires_complete_zero_based_action_vector():
     reference = value_reference()
     assert {value.action for value in reference.values} == {
@@ -119,3 +178,108 @@ def test_position_assessment_preserves_vendor_methodology_and_causal_time():
     )
     with pytest.raises(ValidationError, match="证据时间"):
         PositionAssessment.model_validate(invalid)
+
+
+def test_unreleased_joint_bundle_is_none_not_hold():
+    decision = arbitrate_position(decision_request(release_status="UNAVAILABLE"))
+    assert decision.status == "UNAVAILABLE"
+    assert decision.action == "NONE"
+    assert decision.target_quantity_shares is None
+    assert decision.reason_codes == ["JOINT_ABLATION_PENDING"]
+
+
+def test_hard_stop_preempts_unavailable_joint_bundle_and_uses_sellable_quantity():
+    request = decision_request(
+        release_status="UNAVAILABLE",
+        hard_stop=True,
+        sellable=600,
+    )
+    decision = arbitrate_position(request)
+    assert decision.status == "READY"
+    assert decision.action == "REDUCE"
+    assert decision.target_quantity_shares == 400
+    assert decision.delta_quantity_shares == -600
+    assert decision.model_prediction_ref is None
+    assert decision.agent_contribution_ref is None
+
+
+def test_hard_stop_without_sellable_shares_preserves_unavailable_state():
+    decision = arbitrate_position(
+        decision_request(hard_stop=True, sellable=0)
+    )
+    assert decision.status == "UNAVAILABLE"
+    assert decision.action == "NONE"
+    assert "HARD_STOP_EXECUTION_BLOCKED" in decision.reason_codes
+
+
+def test_ready_joint_decision_selects_feasible_quant_value_with_agent_gate():
+    decision = arbitrate_position(decision_request())
+    assert decision.status == "READY"
+    assert decision.action == "ADD"
+    assert decision.target_quantity_shares == 1200
+    assert decision.expected_delta_return_vs_hold == 0.03
+    assert decision.assessment_ids == ["assessment-1"]
+    assert decision.evidence_ids == ["evidence-1"]
+
+
+def test_agent_quant_conflict_does_not_expand_risk():
+    decision = arbitrate_position(
+        decision_request(thesis_status="WEAKENED")
+    )
+    assert decision.status == "UNAVAILABLE"
+    assert decision.action == "NONE"
+    assert decision.reason_codes == ["AGENT_QUANT_CONFLICT_REQUIRES_REVIEW"]
+
+
+def test_future_available_agent_signal_fails_closed():
+    request = decision_request()
+    raw = request.agent.model_dump()
+    raw["signals"][0]["published_at"] = request.as_of + timedelta(seconds=1)
+    raw["signals"][0]["first_seen_at"] = request.as_of + timedelta(seconds=2)
+    raw["signals"][0]["available_at"] = request.as_of + timedelta(seconds=3)
+    request = request.model_copy(
+        update={"agent": PositionAssessment.model_validate(raw)}
+    )
+    decision = arbitrate_position(request)
+    assert decision.status == "UNAVAILABLE"
+    assert decision.reason_codes == ["JOINT_INPUT_NOT_CAUSAL_OR_EXPIRED"]
+
+
+def test_joint_bundle_binds_runtime_position_release(tmp_path):
+    root = tmp_path / "joint"
+    root.mkdir()
+    (root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "bundleId": "joint-v1",
+                "schemaVersion": "joint-bundle.v1",
+                "releaseStatus": "UNAVAILABLE",
+                "releaseBlockers": ["JOINT_ABLATION_PENDING"],
+                "components": {
+                    "positionModelBundleId": "position-v1",
+                    "positionModelArtifactSha256": "a" * 64,
+                },
+                "agent": {
+                    "promptSha256": "b" * 64,
+                    "featureNames": AGENT_FEATURE_NAMES,
+                    "positionProtocolVersion": "position-assessment.v1",
+                },
+                "missingArtifacts": ["trained-joint-model"],
+            }
+        )
+    )
+    bundle = JointBundle(root, require_ready=False)
+    request = decision_request(release_status="UNAVAILABLE").model_copy(
+        update={"release": bundle.position_release()}
+    )
+    assert bundle.arbitrate_position(request).action == "NONE"
+    with pytest.raises(JointBundleError, match="JOINT_RELEASE_REFERENCE_MISMATCH"):
+        bundle.arbitrate_position(
+            request.model_copy(
+                update={
+                    "release": request.release.model_copy(
+                        update={"release_id": "forged-release"}
+                    )
+                }
+            )
+        )

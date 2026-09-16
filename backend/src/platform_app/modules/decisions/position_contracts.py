@@ -202,6 +202,8 @@ class PositionConstraints(Contract):
             raise ValueError("可卖数量不能超过当前持仓")
         if self.max_target_quantity_shares < self.current_quantity_shares:
             raise ValueError("最大目标数量不能低于当前持仓")
+        if "HOLD" not in self.allowed_actions:
+            raise ValueError("HOLD必须始终是合法候选动作")
         return self
 
 
