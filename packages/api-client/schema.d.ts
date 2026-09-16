@@ -624,6 +624,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/decisions/{decision_id}/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create Decision Plan */
+        post: operations["create_decision_plan_api_v1_decisions__decision_id__plans_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -976,6 +993,11 @@ export interface components {
             /** Reversalamount */
             reversalAmount: string;
             replacement?: components["schemas"]["ReplacementFact"] | null;
+        };
+        /** DecisionPlanInput */
+        DecisionPlanInput: {
+            /** Expectedversion */
+            expectedVersion: number;
         };
         /** Discrepancy */
         Discrepancy: {
@@ -1631,6 +1653,8 @@ export interface components {
         PlanView: {
             /** Id */
             id: string;
+            /** Decisionid */
+            decisionId?: string | null;
             /** Instrumentid */
             instrumentId: string;
             /**
@@ -1672,21 +1696,21 @@ export interface components {
             /**
              * Source
              * @default USER
-             * @constant
+             * @enum {string}
              */
-            source: "USER";
+            source: "USER" | "SYSTEM_DECISION";
             /**
              * Scope
              * @default MANUAL_LEDGER_PLAN
-             * @constant
+             * @enum {string}
              */
-            scope: "MANUAL_LEDGER_PLAN";
+            scope: "MANUAL_LEDGER_PLAN" | "JOINT_DECISION_PLAN";
             /**
              * Executioneligibility
              * @default NOT_ASSESSED
-             * @constant
+             * @enum {string}
              */
-            executionEligibility: "NOT_ASSESSED";
+            executionEligibility: "NOT_ASSESSED" | "USER_CONFIRMED";
         };
         /** PositionDecision */
         PositionDecision: {
@@ -3515,6 +3539,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_PositionDecision_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_decision_plan_api_v1_decisions__decision_id__plans_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecisionPlanInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_PlanView_"];
                 };
             };
             /** @description Validation Error */

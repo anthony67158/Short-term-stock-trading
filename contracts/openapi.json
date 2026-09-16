@@ -2412,6 +2412,69 @@
         }
       }
     },
+    "/api/v1/decisions/{decision_id}/plans": {
+      "post": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Create Decision Plan",
+        "operationId": "create_decision_plan_api_v1_decisions__decision_id__plans_post",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionPlanInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PlanView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -3419,6 +3482,21 @@
           "reversalAmount"
         ],
         "title": "CorrectionView"
+      },
+      "DecisionPlanInput": {
+        "properties": {
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expectedVersion"
+        ],
+        "title": "DecisionPlanInput"
       },
       "Discrepancy": {
         "properties": {
@@ -5290,6 +5368,17 @@
             "type": "string",
             "title": "Id"
           },
+          "decisionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decisionid"
+          },
           "instrumentId": {
             "type": "string",
             "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
@@ -5372,19 +5461,28 @@
           },
           "source": {
             "type": "string",
-            "const": "USER",
+            "enum": [
+              "USER",
+              "SYSTEM_DECISION"
+            ],
             "title": "Source",
             "default": "USER"
           },
           "scope": {
             "type": "string",
-            "const": "MANUAL_LEDGER_PLAN",
+            "enum": [
+              "MANUAL_LEDGER_PLAN",
+              "JOINT_DECISION_PLAN"
+            ],
             "title": "Scope",
             "default": "MANUAL_LEDGER_PLAN"
           },
           "executionEligibility": {
             "type": "string",
-            "const": "NOT_ASSESSED",
+            "enum": [
+              "NOT_ASSESSED",
+              "USER_CONFIRMED"
+            ],
             "title": "Executioneligibility",
             "default": "NOT_ASSESSED"
           }

@@ -1,6 +1,7 @@
 import hashlib
 import json
 from datetime import timedelta
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -35,6 +36,13 @@ from platform_app.modules.learning.models import ProspectiveSample
 from platform_app.modules.operations import jobs
 from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.portfolio.models import Account, PositionLot
+from platform_app.modules.portfolio.models import ExecutionPlan
+from platform_app.modules.portfolio.plan_contracts import (
+    DecisionPlanInput,
+    PlanInput,
+    PlanView,
+)
+from platform_app.modules.portfolio import plans
 from platform_app.modules.portfolio.service import owned_account
 from platform_app.kernel.trading import trading_date
 
@@ -410,4 +418,96 @@ def current_decisions(
             next_cursor=(
                 rows[limit - 1].instrument_id if len(rows) > limit else None
             ),
+        )
+
+
+def create_execution_plan(
+    owner_id: str,
+    decision_id: str,
+    body: DecisionPlanInput,
+    key: str,
+) -> PlanView:
+    with sessions().begin() as db:
+        record = db.scalar(
+            select(DecisionRecord).where(
+                DecisionRecord.id == decision_id,
+                DecisionRecord.owner_id == owner_id,
+            )
+        )
+        if record is None:
+            raise DecisionError(
+                "DECISION_NOT_FOUND",
+                "决策不存在或无权访问",
+                404,
+            )
+        existing = db.scalar(
+            select(ExecutionPlan).where(
+                ExecutionPlan.decision_id == decision_id,
+            )
+        )
+        if existing is not None:
+            return plans.plan_view(existing)
+        pointer = db.get(
+            CurrentDecision,
+            (record.account_id, record.instrument_id),
+        )
+        decision = PositionDecision.model_validate(record.payload)
+        if pointer is None or pointer.decision_id != decision_id:
+            raise DecisionError(
+                "DECISION_SUPERSEDED",
+                "该决策已被更新，请使用当前建议",
+                409,
+            )
+        now = utcnow()
+        if decision.status != "READY" or decision.valid_until <= now:
+            raise DecisionError(
+                "DECISION_NOT_EXECUTABLE",
+                "该决策当前不可生成计划",
+                409,
+            )
+        if decision.action == "HOLD":
+            raise DecisionError(
+                "DECISION_HAS_NO_TRADE",
+                "保持持仓不需要生成执行计划",
+                422,
+            )
+        if decision.account_version != body.expected_version:
+            raise DecisionError(
+                "ACCOUNT_VERSION_CONFLICT",
+                "账户已有变化，请重新评估后再生成计划",
+                409,
+            )
+        side = "BUY" if decision.action == "ADD" else "SELL"
+        quantity = abs(decision.delta_quantity_shares or 0)
+        price = (
+            decision.price_upper
+            if side == "BUY"
+            else decision.price_lower
+        )
+        if quantity == 0 or price is None:
+            raise DecisionError(
+                "DECISION_EXECUTION_CONTRACT_INCOMPLETE",
+                "决策缺少可执行数量或价格边界",
+                422,
+            )
+        plan = PlanInput(
+            instrument_id=decision.instrument_id,
+            side=side,
+            quantity_shares=quantity,
+            limit_price=price,
+            fee_budget=decision.estimated_costs or Decimal(0),
+            expires_at=decision.valid_until,
+            reason=(
+                f"联合决策 {decision.decision_id}: {decision.decision_reason}"
+            )[:300],
+            expected_version=body.expected_version,
+        )
+        return plans.create_plan_in_session(
+            db,
+            owner_id,
+            record.account_id,
+            plan,
+            key,
+            source="SYSTEM_DECISION",
+            decision_id=decision_id,
         )

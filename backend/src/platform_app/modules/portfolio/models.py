@@ -253,12 +253,23 @@ class ExecutionPlan(Base):
             "status IN ('CONFIRMED','PARTIALLY_RECORDED','COMPLETED',"
             "'CANCELLED','EXPIRED','INVALIDATED')", name="status"),
         CheckConstraint("side IN ('BUY','SELL')", name="side"),
+        CheckConstraint("source IN ('USER','SYSTEM_DECISION')", name="source"),
         CheckConstraint("quantity_shares > 0 AND recorded_shares >= 0", name="quantity"),
         CheckConstraint("reserved_cash >= 0 AND reserved_shares >= 0", name="reservation"),
+        CheckConstraint(
+            "(source = 'USER' AND decision_id IS NULL) OR "
+            "(source = 'SYSTEM_DECISION' AND decision_id IS NOT NULL)",
+            name="source_link",
+        ),
     )
     id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
     account_id: Mapped[str] = mapped_column(ForeignKey("investment_accounts.id"), index=True)
     instrument_id: Mapped[str] = mapped_column(ForeignKey("instruments.id"))
+    decision_id: Mapped[str | None] = mapped_column(
+        ForeignKey("decisions.id"),
+        unique=True,
+    )
+    source: Mapped[str] = mapped_column(String(24), default="USER")
     side: Mapped[str] = mapped_column(String(4))
     quantity_shares: Mapped[int] = mapped_column(Integer)
     limit_price: Mapped[Decimal] = mapped_column(Numeric(18, 4))

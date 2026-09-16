@@ -58,57 +58,83 @@ def receipt(db, account_id, key, body):
         return PlanView.model_validate(event.result)
 
 
+def create_plan_in_session(
+    db,
+    user_id: str,
+    account_id: str,
+    body: PlanInput,
+    key: str,
+    *,
+    source: str = "USER",
+    decision_id: str | None = None,
+):
+    account = owned_account(db, user_id, account_id, lock=True)
+    existing = receipt(db, account_id, "create:" + key, body)
+    if existing:
+        return existing
+    if account.version != body.expected_version:
+        raise PortfolioError("ACCOUNT_VERSION_CONFLICT", "账户已有变化，请刷新计划")
+    from platform_app.modules.portfolio.reconciliation import reconcile
+
+    if not reconcile(user_id, account_id, db_session=db).matches:
+        raise PortfolioError("LEDGER_MISMATCH", "账本存在差异，请先核对", 422)
+    now = utcnow()
+    if not now < body.expires_at or trading_date(body.expires_at) != trading_date(now):
+        raise PortfolioError("PLAN_EXPIRY", "计划有效期须在当前上海日期内且晚于当前时间", 422)
+    instrument = db.get(Instrument, body.instrument_id)
+    if not instrument:
+        raise PortfolioError("INSTRUMENT_NOT_FOUND", "证券尚未建立档案", 422)
+    current_plans = active_plans(db, account_id, now)
+    if len(current_plans) >= 100:
+        raise PortfolioError("PLAN_LIMIT", "未完成计划已达100条，请先整理", 422)
+    sellable = db.scalar(select(func.coalesce(func.sum(
+        PositionLot.remaining_quantity), 0)).where(
+            PositionLot.account_id == account_id,
+            PositionLot.instrument_id == body.instrument_id,
+            PositionLot.acquired_date < trading_date(now)))
+    reserved_shares = sum(plan.reserved_shares for plan in current_plans
+                          if plan.instrument_id == body.instrument_id)
+    try:
+        rule = quantity_rule(instrument.exchange, instrument.board, trading_date(now))
+        # Whole-account sellable quantity determines odd-lot eligibility.
+        validate_order_quantity(rule, body.side, body.quantity_shares, sellable)
+    except ValueError as exc:
+        raise PortfolioError("PLAN_QUANTITY", str(exc), 422) from exc
+    if body.limit_price != money(body.limit_price):
+        raise PortfolioError("PLAN_PRICE_TICK", "A股限价须以0.01元递增", 422)
+    reserve = money(body.limit_price * body.quantity_shares) + body.fee_budget
+    if reserve >= Decimal("1000000000000000000"):
+        raise PortfolioError("PLAN_AMOUNT", "计划金额超过支持范围", 422)
+    if body.side == "BUY" and reserve > cash_total(db, account_id) - sum(
+            plan.reserved_cash for plan in current_plans):
+        raise PortfolioError("PLAN_CASH_RESERVED", "扣除其他计划预留后现金不足", 422)
+    if body.side == "SELL" and body.quantity_shares > sellable - reserved_shares:
+        raise PortfolioError("PLAN_SHARES_RESERVED", "扣除其他计划预留后可卖股数不足", 422)
+    account.version += 1
+    plan = ExecutionPlan(
+        account_id=account_id,
+        source=source,
+        decision_id=decision_id,
+        **body.model_dump(exclude={"expected_version"}),
+        status="CONFIRMED",
+        reserved_cash=reserve if body.side == "BUY" else Decimal(0),
+        reserved_shares=body.quantity_shares if body.side == "SELL" else 0,
+    )
+    db.add(plan)
+    return emit(
+        db,
+        account,
+        plan,
+        "CREATE",
+        "create:" + key,
+        fingerprint(body),
+        body.reason,
+    )
+
+
 def create_plan(user_id: str, account_id: str, body: PlanInput, key: str):
     with sessions().begin() as db:
-        account = owned_account(db, user_id, account_id, lock=True)
-        existing = receipt(db, account_id, "create:" + key, body)
-        if existing:
-            return existing
-        if account.version != body.expected_version:
-            raise PortfolioError("ACCOUNT_VERSION_CONFLICT", "账户已有变化，请刷新计划")
-        from platform_app.modules.portfolio.reconciliation import reconcile
-        if not reconcile(user_id, account_id, db_session=db).matches:
-            raise PortfolioError("LEDGER_MISMATCH", "账本存在差异，请先核对", 422)
-        now = utcnow()
-        if not now < body.expires_at or trading_date(body.expires_at) != trading_date(now):
-            raise PortfolioError("PLAN_EXPIRY", "人工计划有效期须在当前上海日期内且晚于当前时间", 422)
-        instrument = db.get(Instrument, body.instrument_id)
-        if not instrument:
-            raise PortfolioError("INSTRUMENT_NOT_FOUND", "证券尚未建立档案", 422)
-        plans = active_plans(db, account_id, now)
-        if len(plans) >= 100:
-            raise PortfolioError("PLAN_LIMIT", "未完成计划已达100条，请先整理", 422)
-        sellable = db.scalar(select(func.coalesce(func.sum(
-            PositionLot.remaining_quantity), 0)).where(
-                PositionLot.account_id == account_id,
-                PositionLot.instrument_id == body.instrument_id,
-                PositionLot.acquired_date < trading_date(now)))
-        reserved_shares = sum(plan.reserved_shares for plan in plans
-                              if plan.instrument_id == body.instrument_id)
-        try:
-            rule = quantity_rule(instrument.exchange, instrument.board, trading_date(now))
-            # Whole-account sellable quantity determines odd-lot eligibility.
-            validate_order_quantity(rule, body.side, body.quantity_shares, sellable)
-        except ValueError as exc:
-            raise PortfolioError("PLAN_QUANTITY", str(exc), 422) from exc
-        if body.limit_price != money(body.limit_price):
-            raise PortfolioError("PLAN_PRICE_TICK", "A股限价须以0.01元递增", 422)
-        reserve = money(body.limit_price * body.quantity_shares) + body.fee_budget
-        if reserve >= Decimal("1000000000000000000"):
-            raise PortfolioError("PLAN_AMOUNT", "计划金额超过支持范围", 422)
-        if body.side == "BUY" and reserve > cash_total(db, account_id) - sum(
-                plan.reserved_cash for plan in plans):
-            raise PortfolioError("PLAN_CASH_RESERVED", "扣除其他计划预留后现金不足", 422)
-        if body.side == "SELL" and body.quantity_shares > sellable - reserved_shares:
-            raise PortfolioError("PLAN_SHARES_RESERVED", "扣除其他计划预留后可卖股数不足", 422)
-        account.version += 1
-        plan = ExecutionPlan(
-            account_id=account_id, **body.model_dump(exclude={"expected_version"}),
-            status="CONFIRMED", reserved_cash=reserve if body.side == "BUY" else Decimal(0),
-            reserved_shares=body.quantity_shares if body.side == "SELL" else 0,
-        )
-        db.add(plan)
-        return emit(db, account, plan, "CREATE", "create:" + key, fingerprint(body), body.reason)
+        return create_plan_in_session(db, user_id, account_id, body, key)
 
 
 def cancel_plan(user_id: str, account_id: str, plan_id: str, body: PlanCancel, key: str):

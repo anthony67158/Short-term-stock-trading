@@ -70,8 +70,8 @@ export function Plans({ account }: { account: Account }) {
   }, [summary?.accountVersion, account.version, account.id, cache]);
   const rows = history.data?.pages.flatMap((page) => page.plans) ?? [];
   return <section className="ledger-section">
-    <div className="section-toolbar"><h2>人工计划与预留</h2><Button onClick={() => { create.reset(); setEditing(true); }} disabled={editing}>创建人工计划</Button></div>
-    <p className="source-note">确认只预留账本资源，不代表券商报单。当前为自主人工计划，尚未评估行情、权限或仓位风险，不是系统投资建议。</p>
+    <div className="section-toolbar"><h2>执行计划与预留</h2><Button onClick={() => { create.reset(); setEditing(true); }} disabled={editing}>创建人工计划</Button></div>
+    <p className="source-note">确认计划只预留账本资源，不代表券商成交；联合计划保留来源决策，实际成交仍需人工录入。</p>
     {summary && <p>计划预留：{summary.reservedCash} 元 · 可支配现金：{summary.spendableCash} 元</p>}
     {create.isSuccess && !editing && <p role="status" className="save-notice">计划已确认，现金与持仓事实未改变。</p>}
     {editing && <form className="inline-form" onSubmit={submit}>
@@ -89,8 +89,8 @@ export function Plans({ account }: { account: Account }) {
     {history.isPending ? <p role="status">正在读取计划…</p> : history.isError ? <div role="alert">{errorMessage(history.error)}<Button onClick={() => history.refetch()}>重读计划</Button></div>
       : rows.length === 0 ? <p className="secondary">尚无计划。</p> :
         <div className="table-scroll" role="region" aria-label="人工计划，可横向滚动" tabIndex={0}><table>
-          <thead><tr><th>股票 / 方向</th><th>已记录 / 计划股数</th><th>预留现金 / 股数</th><th>状态</th><th>关联编号</th><th>操作</th></tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.id}><td>{row.instrumentId} · {row.side === "BUY" ? "买入" : "卖出"}</td><td>{row.recordedShares} / {row.quantityShares}</td><td>{row.reservedCash} 元 / {row.reservedShares} 股</td><td>{labels[row.status]}</td><td>{row.id}</td><td>{["CONFIRMED", "PARTIALLY_RECORDED"].includes(row.status) ? <Button onClick={() => { cancel.reset(); setCancelling(row); }}>取消计划</Button> : "—"}</td></tr>)}</tbody>
+          <thead><tr><th>股票 / 方向</th><th>已记录 / 计划股数</th><th>预留现金 / 股数</th><th>状态</th><th>来源</th><th>操作</th></tr></thead>
+          <tbody>{rows.map((row) => <tr key={row.id}><td>{row.instrumentId} · {row.side === "BUY" ? "买入" : "卖出"}</td><td>{row.recordedShares} / {row.quantityShares}</td><td>{row.reservedCash} 元 / {row.reservedShares} 股</td><td>{labels[row.status]}</td><td>{row.source === "SYSTEM_DECISION" ? "联合决策" : "人工"}<div className="secondary">{row.decisionId ?? row.id}</div></td><td>{["CONFIRMED", "PARTIALLY_RECORDED"].includes(row.status) ? <Button onClick={() => { cancel.reset(); setCancelling(row); }}>取消计划</Button> : "—"}</td></tr>)}</tbody>
         </table></div>}
     {history.hasNextPage && <Button disabled={history.isFetchingNextPage} onClick={() => history.fetchNextPage()}>更多计划</Button>}
     {cancelling && <form className="inline-form" onSubmit={(event) => { event.preventDefault(); cancel.mutate(String(new FormData(event.currentTarget).get("reason")).trim()); }}>

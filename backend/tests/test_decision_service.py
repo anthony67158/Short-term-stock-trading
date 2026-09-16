@@ -1,5 +1,6 @@
 import secrets
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +19,7 @@ from platform_app.modules.decisions.models import (
 from platform_app.modules.decisions.position_contracts import (
     ActionValueEstimate,
     JointReleaseReference,
+    PositionDecision,
     PositionEvaluationInput,
     PositionValueReference,
 )
@@ -29,8 +31,15 @@ from platform_app.modules.market.models import Instrument
 from platform_app.modules.learning.models import ProspectiveSample
 from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.portfolio import openings
-from platform_app.modules.portfolio.models import Account, OpeningLot, PositionLot
+from platform_app.modules.portfolio.models import (
+    Account,
+    ExecutionPlan,
+    OpeningLot,
+    PlanEvent,
+    PositionLot,
+)
 from platform_app.modules.portfolio.opening_contracts import OpeningInput
+from platform_app.modules.portfolio.plan_contracts import DecisionPlanInput
 from platform_app.modules.portfolio.service import create_account
 from platform_app.modules.portfolio.contracts import AccountInput
 from platform_app.modules.research.models import Assessment, Evidence
@@ -88,6 +97,13 @@ def decision_scope(monkeypatch):
         db.execute(
             delete(CurrentDecision).where(CurrentDecision.account_id == account.id)
         )
+        plan_ids = select(ExecutionPlan.id).where(
+            ExecutionPlan.account_id == account.id
+        )
+        db.execute(delete(PlanEvent).where(PlanEvent.plan_id.in_(plan_ids)))
+        db.execute(
+            delete(ExecutionPlan).where(ExecutionPlan.account_id == account.id)
+        )
         db.execute(
             delete(ProspectiveSample).where(ProspectiveSample.owner_id == owner)
         )
@@ -114,6 +130,90 @@ def evaluation(instrument_id, version):
         expected_version=version,
         reason="合成持仓联合复核",
     )
+
+
+def persist_ready_reduce_decision(
+    owner: str,
+    account_id: str,
+    instrument_id: str,
+    account_version: int,
+) -> PositionDecision:
+    now = utcnow()
+    decision = PositionDecision(
+        decision_id=new_id(),
+        account_id=account_id,
+        instrument_id=instrument_id,
+        context_id=new_id(),
+        as_of=now,
+        valid_until=now + timedelta(minutes=10),
+        account_version=account_version,
+        release_id="joint-shadow-test",
+        assessment_ids=["assessment-synthetic"],
+        status="READY",
+        action="REDUCE",
+        reason_codes=["JOINT_ACTION_SELECTED"],
+        evidence_ids=[],
+        current_quantity_shares=1000,
+        target_quantity_shares=500,
+        delta_quantity_shares=-500,
+        expected_delta_return_vs_hold=0.02,
+        quant_trend="BEARISH",
+        agent_thesis_status="WEAKENED",
+        execution_path="SHADOW_MARKET_REFERENCE",
+        price_lower="9.80",
+        price_upper="10.20",
+        price_basis="SEALED_CLOSE:20260915",
+        trigger_conditions=["用户确认后执行"],
+        estimated_costs="5",
+        risk_policy_version="account-risk.v1",
+        quantity_rule_version="a-share-lot.v1",
+        fee_policy_version="actual-account-fees.v1",
+        model_prediction_ref="position-v1:" + "a" * 64,
+        agent_contribution_ref="assessment-synthetic",
+        decision_reason="量化动作价值与持仓论点共同支持减仓。",
+        review_after=now + timedelta(minutes=5),
+    )
+    with sessions().begin() as db:
+        db.add(
+            DecisionContextRecord(
+                id=decision.context_id,
+                owner_id=owner,
+                account_id=account_id,
+                instrument_id=instrument_id,
+                account_version=account_version,
+                release_id=decision.release_id,
+                context_hash="f" * 64,
+                snapshot={"synthetic": True},
+                assessment_ids=decision.assessment_ids,
+                as_of=now,
+            )
+        )
+        db.add(
+            DecisionRecord(
+                id=decision.decision_id,
+                owner_id=owner,
+                account_id=account_id,
+                instrument_id=instrument_id,
+                context_id=decision.context_id,
+                schema_version=decision.schema_version,
+                status=decision.status,
+                action=decision.action,
+                account_version=account_version,
+                release_id=decision.release_id,
+                payload=decision.model_dump(mode="json"),
+                as_of=now,
+                valid_until=decision.valid_until,
+            )
+        )
+        db.flush()
+        db.add(
+            CurrentDecision(
+                account_id=account_id,
+                instrument_id=instrument_id,
+                decision_id=decision.decision_id,
+            )
+        )
+    return decision
 
 
 def test_unreleased_joint_evaluation_is_persisted_as_unavailable(decision_scope):
@@ -196,6 +296,39 @@ def test_position_evaluation_api_does_not_accept_model_values(decision_scope):
             assert response.json()["data"]["status"] == "QUEUED"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_current_ready_decision_creates_one_linked_execution_plan(
+    decision_scope,
+):
+    owner, instrument_id, account_id, version = decision_scope
+    decision = persist_ready_reduce_decision(
+        owner,
+        account_id,
+        instrument_id,
+        version,
+    )
+    body = DecisionPlanInput(expected_version=version)
+    plan = service.create_execution_plan(
+        owner,
+        decision.decision_id,
+        body,
+        new_id(),
+    )
+    duplicate = service.create_execution_plan(
+        owner,
+        decision.decision_id,
+        body,
+        new_id(),
+    )
+    assert duplicate.id == plan.id
+    assert plan.source == "SYSTEM_DECISION"
+    assert plan.scope == "JOINT_DECISION_PLAN"
+    assert plan.decision_id == decision.decision_id
+    assert plan.side == "SELL"
+    assert plan.quantity_shares == 500
+    assert plan.limit_price == Decimal("9.80")
+    assert plan.reserved_shares == 500
 
 
 def test_valid_research_is_normalized_to_audited_position_assessment(

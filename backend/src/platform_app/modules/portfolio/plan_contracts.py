@@ -1,6 +1,6 @@
 from typing import Annotated, Literal
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, model_validator
 
 from platform_app.contracts.base import Contract, InstrumentId, Money, Price, Quantity
 
@@ -24,8 +24,13 @@ class PlanCancel(Contract):
     reason: str = Field(min_length=1, max_length=300, pattern=r"\S")
 
 
+class DecisionPlanInput(Contract):
+    expected_version: int = Field(strict=True, ge=1)
+
+
 class PlanView(Contract):
     id: str
+    decision_id: str | None = None
     instrument_id: InstrumentId
     side: Literal["BUY", "SELL"]
     quantity_shares: Quantity
@@ -39,9 +44,21 @@ class PlanView(Contract):
     reason: str
     expires_at: AwareDatetime
     created_at: AwareDatetime
-    source: Literal["USER"] = "USER"
-    scope: Literal["MANUAL_LEDGER_PLAN"] = "MANUAL_LEDGER_PLAN"
-    execution_eligibility: Literal["NOT_ASSESSED"] = "NOT_ASSESSED"
+    source: Literal["USER", "SYSTEM_DECISION"] = "USER"
+    scope: Literal["MANUAL_LEDGER_PLAN", "JOINT_DECISION_PLAN"] = (
+        "MANUAL_LEDGER_PLAN"
+    )
+    execution_eligibility: Literal[
+        "NOT_ASSESSED",
+        "USER_CONFIRMED",
+    ] = "NOT_ASSESSED"
+
+    @model_validator(mode="after")
+    def derive_scope(self):
+        if self.source == "SYSTEM_DECISION":
+            self.scope = "JOINT_DECISION_PLAN"
+            self.execution_eligibility = "USER_CONFIRMED"
+        return self
 
 
 class PlanPage(Contract):

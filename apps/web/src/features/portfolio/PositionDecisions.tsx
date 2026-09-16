@@ -37,6 +37,7 @@ export function PositionDecisions({
 }) {
   const cache = useQueryClient();
   const commands = useRef(new Map<string, string>());
+  const planCommands = useRef(new Map<string, string>());
   const [activeJob, setActiveJob] = useState<{
     id: string;
     instrumentId: string;
@@ -110,6 +111,29 @@ export function PositionDecisions({
       });
     },
   });
+  const createPlan = useMutation({
+    mutationFn: async (decision: Decision) => {
+      let key = planCommands.current.get(decision.decisionId);
+      if (!key) {
+        key = crypto.randomUUID();
+        planCommands.current.set(decision.decisionId, key);
+      }
+      const result = await api.POST("/api/v1/decisions/{decision_id}/plans", {
+        params: {
+          path: { decision_id: decision.decisionId },
+          header: { "Idempotency-Key": key },
+        },
+        body: { expectedVersion: accountVersion },
+      });
+      if (!result.data) throw new Error(errorMessage(result.error));
+      return result.data.data;
+    },
+    onSuccess: async () => {
+      for (const key of ["plans", "positions", "balance"]) {
+        await cache.invalidateQueries({ queryKey: [key, account.id] });
+      }
+    },
+  });
   const byInstrument = new Map(
     (decisions.data ?? []).map((decision) => [decision.instrumentId, decision]),
   );
@@ -137,6 +161,11 @@ export function PositionDecisions({
             const decision = byInstrument.get(position.instrumentId) as Decision | undefined;
             const isThisJob = activeJob?.instrumentId === position.instrumentId;
             const blockedReal = account.kind === "REAL" && release?.status === "SHADOW";
+            const canPlan = decision?.status === "READY"
+              && decision.action !== "HOLD"
+              && new Date(decision.validUntil).getTime() > Date.now();
+            const planning = createPlan.isPending
+              && createPlan.variables?.decisionId === decision?.decisionId;
             return <tr key={position.instrumentId}>
               <td>{position.name}<div className="secondary">{position.instrumentId}</div></td>
               <td><strong>{decision ? actionLabels[decision.action] : "尚未评估"}</strong>
@@ -150,16 +179,25 @@ export function PositionDecisions({
                 : blockedReal ? "影子版本不用于实盘账户" : "尚无当前决策"}
                 {isThisJob && job.data?.message && <div className="secondary">{job.data.message}</div>}
               </td>
-              <td><Button
-                disabled={blockedReal || evaluate.isPending || (isThisJob && running)}
-                onClick={() => evaluate.mutate(position)}
-                aria-label={`评估${position.name}`}
-              ><RefreshCw size={15} />{isThisJob && running ? "评估中" : "联合评估"}</Button></td>
+              <td><div className="control-group"><Button
+                  disabled={blockedReal || evaluate.isPending || (isThisJob && running)}
+                  onClick={() => evaluate.mutate(position)}
+                  aria-label={`评估${position.name}`}
+                ><RefreshCw size={15} />{isThisJob && running ? "评估中" : "联合评估"}</Button>
+                {canPlan && <Button
+                  variant="primary"
+                  disabled={planning}
+                  onClick={() => createPlan.mutate(decision)}
+                >{planning ? "生成中" : "生成执行计划"}</Button>}</div></td>
             </tr>;
           })}</tbody>
         </table>
       </div>}
+    {createPlan.isSuccess &&
+      <p className="save-notice" role="status">执行计划已确认并关联当前联合决策；持仓和现金尚未改变。</p>}
     {(evaluate.isError || job.isError) &&
       <p className="error" role="alert">{errorMessage(evaluate.error || job.error)}</p>}
+    {createPlan.isError &&
+      <p className="error" role="alert">{errorMessage(createPlan.error)}</p>}
   </section>;
 }

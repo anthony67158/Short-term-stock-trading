@@ -11,6 +11,10 @@ from platform_app.modules.decisions.position_contracts import (
     PositionEvaluationInput,
 )
 from platform_app.modules.identity.routes import CurrentUser
+from platform_app.modules.portfolio.plan_contracts import (
+    DecisionPlanInput,
+    PlanView,
+)
 from platform_app.modules.research.contracts import JobView
 
 router = APIRouter(prefix="/api/v1", tags=["decisions"])
@@ -67,3 +71,24 @@ def list_current_decisions(
 )
 def get_decision(decision_id: str, user: CurrentUser):
     return Envelope(data=service.decision_by_id(user.id, decision_id))
+
+
+@router.post(
+    "/decisions/{decision_id}/plans",
+    response_model=Envelope[PlanView],
+    status_code=201,
+)
+def create_decision_plan(
+    decision_id: str,
+    body: DecisionPlanInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(
+        data=service.create_execution_plan(
+            user.id,
+            decision_id,
+            body,
+            key,
+        )
+    )
