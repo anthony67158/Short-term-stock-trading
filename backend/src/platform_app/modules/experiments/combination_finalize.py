@@ -7,6 +7,8 @@ import os
 import time
 from pathlib import Path
 
+import httpx
+
 from platform_app.adapters.market_tushare import TushareClient
 from platform_app.modules.experiments.combination_episodes import union_policy
 from platform_app.modules.experiments.combination_fee_comparison import run as compare_fees
@@ -19,6 +21,22 @@ from platform_app.modules.experiments.ranking_model_trainer import _verified_ran
 
 def emit(value):
     print(json.dumps(value, ensure_ascii=False), flush=True)
+
+
+def fetch_with_transport_retry(fetcher, window, *, attempts=3, sleep=time.sleep):
+    for attempt in range(1, attempts + 1):
+        try:
+            return fetcher.fetch_window(window)
+        except httpx.TransportError:
+            if attempt == attempts:
+                raise
+            emit({
+                "stage": "MINUTE_TRANSPORT_RETRY",
+                "instrumentId": window["instrumentId"],
+                "attempt": attempt,
+            })
+            sleep(attempt)
+    raise AssertionError("unreachable")
 
 
 def finalize(args):
@@ -56,14 +74,14 @@ def finalize(args):
                 ).fetchall())
                 for window in windows:
                     retry = {**window, "sourceCode": canonical[window["instrumentId"]]}
-                    emit(fetcher.fetch_window(retry))
+                    emit(fetch_with_transport_retry(fetcher, retry))
             # A second bounded request isolates mismatched sessions from long-window responses.
             # This remains real source retrieval; never relax OHLC/volume/day matching.
             with MinuteRequirementFetcher(TushareClient(), dataset, max_sessions=1) as fetcher:
                 windows = fetcher.pending_windows("20160101", "20991231")
                 for window in windows:
                     retry = {**window, "sourceCode": canonical[window["instrumentId"]]}
-                    emit(fetcher.fetch_window(retry))
+                    emit(fetch_with_transport_retry(fetcher, retry))
             pending = dataset.db.execute(
                 "SELECT reason,count(*) FROM minute_requirements "
                 "WHERE status='PENDING' GROUP BY reason",
