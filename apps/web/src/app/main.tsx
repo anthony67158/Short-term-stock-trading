@@ -9,6 +9,7 @@ import { Login } from "./Login";
 import { Portfolio } from "../features/portfolio/Portfolio";
 import { Market, Research } from "../features/market/Market";
 import { Inbox } from "../features/inbox/Inbox";
+import { Review } from "../features/review/Review";
 import { Strategies } from "../features/strategies/Strategies";
 import "../styles/global.css";
 
@@ -73,7 +74,8 @@ function Workspace() {
       <Route path="/research/:instrumentId" element={<Research />} />
       <Route path="/inbox" element={<Inbox />} />
       <Route path="/strategies" element={<Strategies />} />
-      {navigation.filter(({ path }) => !["/portfolio", "/market", "/research", "/inbox", "/strategies"].includes(path)).map(({ path, label }) => <Route key={path} path={path} element={<>
+      <Route path="/review" element={<Review />} />
+      {navigation.filter(({ path }) => !["/portfolio", "/market", "/research", "/inbox", "/strategies", "/review"].includes(path)).map(({ path, label }) => <Route key={path} path={path} element={<>
         <header className="workspace-header"><h1>{label}</h1><span className="secondary">研究与账户工作区</span></header>
         <div className="workspace-content"><Empty title="此工作区正在建设"><CircleHelp size={20} />模块接入后将在这里展示真实数据与任务结果。</Empty></div>
       </>} />)}

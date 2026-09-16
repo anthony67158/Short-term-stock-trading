@@ -93,6 +93,9 @@ tbody tr:hover { background: var(--hover); }
 .status-label.active, .status-label.evaluated, .status-label.succeeded { color: var(--down); border-color: currentColor; }
 .status-label.failed, .status-label.rejected { color: var(--warning); border-color: currentColor; }
 .status-label.approved, .status-label.frozen { color: var(--accent); border-color: currentColor; }
+.status-label.strategy, .status-label.hypothesis, .status-label.draft { color: var(--warning); border-color: currentColor; }
+.status-label.execution, .status-label.observed, .status-label.compiled { color: var(--accent); border-color: currentColor; }
+.status-label.data { color: var(--secondary); }
 .wide-field { grid-column: 1 / -1; }
 .evidence-form textarea { min-height: 120px; padding: var(--space-3); resize: vertical; }
 .evidence-form > p { font-size: 12px; }
@@ -131,6 +134,19 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
 .release-blockers li { break-inside: avoid; padding: var(--space-1) 0; color: var(--secondary); }
 .release-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-5); }
 .release-form .form-actions, .release-form .error { grid-column: 1 / -1; }
+.review-toolbar { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-3); padding-bottom: var(--space-6); border-bottom: 1px solid var(--border); }
+.review-toolbar .field { width: min(100%, 220px); }
+.review-toolbar > .secondary { align-self: center; font-size: 12px; }
+.review-picker { margin: var(--space-6) 0 0 auto; }
+.review-summary { padding-top: var(--space-6); }
+.review-summary .experiment-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.review-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-8); padding-top: var(--space-8); }
+.review-section { min-width: 0; border-top: 1px solid var(--border); padding-top: var(--space-5); }
+.review-section > h2 { margin-bottom: var(--space-4); }
+.review-lead { margin-bottom: var(--space-5); font-size: 15px; }
+.review-finding, .review-proposal { padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
+.review-finding > p, .review-proposal > p { margin-top: var(--space-2); }
+.review-proposal h3 { margin: 0; font-size: 14px; line-height: 22px; }
 .empty { padding: 64px 24px; text-align: center; color: var(--secondary); }
 .empty h1, .empty h2 { color: var(--text); margin-bottom: 12px; }
 .empty p { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -155,7 +171,7 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
   .workspace-header > span { display: none; }
   .workspace-content { padding: 16px; }
   .inline-form { grid-template-columns: minmax(0, 1fr); }
-  .release-form, .detail-grid, .experiment-summary, .release-current { grid-template-columns: minmax(0, 1fr); }
+  .release-form, .detail-grid, .experiment-summary, .release-current, .review-summary .experiment-summary, .review-columns { grid-template-columns: minmax(0, 1fr); }
   .release-blockers ul { columns: 1; }
   .account-summary { gap: var(--space-6); }
   .account-summary > button { margin-left: 0; }
