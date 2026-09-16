@@ -197,12 +197,14 @@ def _run_locked(dataset_root, base_root, output, *, iterations, threads):
             model_train_end=fold.train_end,
             test_start=fold.test_start,
         )
+        scores = combination_scores(
+            held_out, weights, candidate_names=ALL_CANDIDATES,
+        )
+        scores["base_equal"] = held_out[:, : len(CANDIDATES)].mean(axis=1)
         records, union = evaluate_scores(
             data,
             test,
-            combination_scores(
-                held_out, weights, candidate_names=ALL_CANDIDATES,
-            ),
+            scores,
             fold.fold,
         )
         np.savez_compressed(
@@ -225,7 +227,7 @@ def _run_locked(dataset_root, base_root, output, *, iterations, threads):
         print(f"Completed fold={fold.fold} weights={weights.tolist()}", flush=True)
     names = sorted({row["model"] for row in all_records})
     baseline = np.array([
-        row["top10GrossReturn"] for row in all_records if row["model"] == "equal"
+        row["top10GrossReturn"] for row in all_records if row["model"] == "base_equal"
     ])
     summaries = {}
     for name in names:
