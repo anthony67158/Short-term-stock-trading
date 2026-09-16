@@ -46,6 +46,7 @@ def main():
             "upgrade-market-dataset",
             "build-market-dataset",
             "build-episode-dataset",
+            "build-label-dataset",
         ],
     )
     parser.add_argument("--username")
@@ -55,8 +56,10 @@ def main():
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--source-dataset-root", type=Path)
     parser.add_argument("--episode-root", type=Path)
+    parser.add_argument("--label-root", type=Path)
     parser.add_argument("--dataset-id")
     parser.add_argument("--episode-dataset-id")
+    parser.add_argument("--label-dataset-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     parser.add_argument(
@@ -72,6 +75,7 @@ def main():
             "archive-minutes",
             "fetch-minutes",
             "exhaust-minutes",
+            "labels",
             "seal",
         ],
     )
@@ -280,6 +284,48 @@ def main():
                                 ),
                                 flush=True,
                             )
+    elif args.command == "build-label-dataset":
+        from platform_app.modules.experiments.label_dataset import LabelDataset
+
+        if not all(
+            (
+                args.dataset_root,
+                args.episode_root,
+                args.label_root,
+                args.label_dataset_id,
+                args.stage,
+            )
+        ):
+            parser.error(
+                "dataset-root, episode-root, label-root, label-dataset-id and stage are required"
+            )
+        if args.stage not in {"labels", "seal"}:
+            parser.error("label dataset stage must be labels or seal")
+        if args.stage == "labels" and (
+            not args.start_date
+            or not args.end_date
+            or not re.fullmatch(r"\d{8}", args.start_date)
+            or not re.fullmatch(r"\d{8}", args.end_date)
+            or args.start_date > args.end_date
+        ):
+            parser.error("labels stage requires ordered YYYYMMDD date values")
+        try:
+            market_root = external_dataset_root(args.dataset_root)
+            episode_root = external_dataset_root(args.episode_root)
+            label_root = external_dataset_root(args.label_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        with LabelDataset(
+            label_root,
+            dataset_id=args.label_dataset_id,
+            episode_dataset_root=episode_root,
+            market_dataset_root=market_root,
+        ) as dataset:
+            if args.stage == "seal":
+                print(json.dumps(dataset.seal(), ensure_ascii=False))
+            else:
+                for result in dataset.build_range(args.start_date, args.end_date):
+                    print(json.dumps(result, ensure_ascii=False), flush=True)
     elif args.command == "build-episode-dataset":
         from platform_app.modules.experiments.candidate_episode_builder import (
             CandidateEpisodeBuilder,
