@@ -38,6 +38,7 @@ def main():
             "audit-market-dataset",
             "upgrade-market-dataset",
             "build-market-dataset",
+            "build-episode-dataset",
         ],
     )
     parser.add_argument("--username")
@@ -46,12 +47,22 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--source-dataset-root", type=Path)
+    parser.add_argument("--episode-root", type=Path)
     parser.add_argument("--dataset-id")
+    parser.add_argument("--episode-dataset-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     parser.add_argument(
         "--stage",
-        choices=["reference", "names", "daily", "block-trades", "minute", "seal"],
+        choices=[
+            "reference",
+            "names",
+            "daily",
+            "block-trades",
+            "minute",
+            "candidates",
+            "seal",
+        ],
     )
     parser.add_argument("--instrument-id", action="append")
     parser.add_argument("--sample", action="append", type=cross_source_sample)
@@ -254,6 +265,57 @@ def main():
                                 ),
                                 flush=True,
                             )
+    elif args.command == "build-episode-dataset":
+        from platform_app.modules.experiments.candidate_episode_builder import (
+            CandidateEpisodeBuilder,
+        )
+        from platform_app.modules.experiments.episode_dataset import EpisodeDataset
+        from platform_app.modules.experiments.short_horizon_policy import (
+            SHORT_HORIZON_POLICY,
+        )
+
+        if not all(
+            (
+                args.dataset_root,
+                args.episode_root,
+                args.episode_dataset_id,
+                args.stage,
+            )
+        ):
+            parser.error(
+                "dataset-root, episode-root, episode-dataset-id and stage are required"
+            )
+        if args.stage not in {"candidates", "seal"}:
+            parser.error("episode dataset stage must be candidates or seal")
+        if args.stage == "candidates" and (
+            not args.start_date
+            or not args.end_date
+            or not re.fullmatch(r"\d{8}", args.start_date)
+            or not re.fullmatch(r"\d{8}", args.end_date)
+            or args.start_date > args.end_date
+        ):
+            parser.error("candidates stage requires ordered YYYYMMDD date values")
+        try:
+            market_root = external_dataset_root(args.dataset_root)
+            episode_root = external_dataset_root(args.episode_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        with EpisodeDataset(
+            episode_root,
+            dataset_id=args.episode_dataset_id,
+            market_dataset_root=market_root,
+            policy=SHORT_HORIZON_POLICY,
+        ) as dataset:
+            if args.stage == "seal":
+                print(json.dumps(dataset.seal(), ensure_ascii=False))
+            else:
+                with CandidateEpisodeBuilder(
+                    dataset,
+                    SHORT_HORIZON_POLICY,
+                ) as builder:
+                    results = builder.build_range(args.start_date, args.end_date)
+                for result in results:
+                    print(json.dumps(result, ensure_ascii=False), flush=True)
     elif args.command == "create-user":
         from platform_app.modules.identity.service import create_user
 
