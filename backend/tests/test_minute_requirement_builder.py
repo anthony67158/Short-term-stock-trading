@@ -368,6 +368,14 @@ def test_archive_import_records_rejection_without_partial_minute_rows(tmp_path):
             "MINUTE_DAILY_OPEN_CLOSE_MISMATCH",
             1,
         )
+        rejection_details = json.loads(
+            dataset.db.execute(
+                "SELECT details_json FROM minute_ingestion_attempts"
+            ).fetchone()[0]
+        )
+        assert rejection_details["close"] == "12"
+        assert rejection_details["officialDailyClose"] == "10"
+        assert rejection_details["terminalCloseAuthority"] == "DAILY_BAR"
 
 
 def test_archive_import_accepts_stockdb_final_replay_manifest(tmp_path):

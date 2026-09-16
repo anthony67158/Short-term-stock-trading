@@ -22,7 +22,9 @@ SSE_CLOSING_AUCTION_EFFECTIVE_DATE = "20180820"
 
 
 class MinuteArchiveError(EpisodeDatasetError):
-    pass
+    def __init__(self, message: str, *, details: dict | None = None):
+        super().__init__(message)
+        self.details = details or {}
 
 
 def _now() -> str:
@@ -108,45 +110,53 @@ def _validate_daily(
     low = min(Decimal(row["low"]) for row in rows)
     daily_open = Decimal(daily["open"])
     daily_close = Decimal(daily["close"])
+    volume = sum((Decimal(row["volumeShares"]) for row in rows), Decimal(0))
+    amount = sum((Decimal(row["amountCny"]) for row in rows), Decimal(0))
+    daily_volume = Decimal(daily["volume_shares"])
+    daily_amount = Decimal(daily["amount_cny"])
+    volume_delta = volume - daily_volume
+    amount_delta = amount - daily_amount
+    amount_tolerance = max(
+        AMOUNT_TOLERANCE_CNY,
+        abs(daily_amount) * AMOUNT_TOLERANCE_RATE,
+    )
+    details = {
+        "open": format(opening, "f"),
+        "high": format(high, "f"),
+        "low": format(low, "f"),
+        "close": format(closing, "f"),
+        "officialDailyOpen": format(daily_open, "f"),
+        "officialDailyHigh": daily["high"],
+        "officialDailyLow": daily["low"],
+        "officialDailyClose": format(daily_close, "f"),
+        "terminalCloseAuthority": "DAILY_BAR",
+        "volumeShares": format(volume, "f"),
+        "officialDailyVolumeShares": format(daily_volume, "f"),
+        "amountCny": format(amount, "f"),
+        "officialDailyAmountCny": format(daily_amount, "f"),
+        "volumeDeltaShares": format(volume_delta, "f"),
+        "amountDeltaCny": format(amount_delta, "f"),
+        "amountToleranceCny": format(amount_tolerance, "f"),
+        "dailySourceRowSha256": daily["source_row_sha256"],
+    }
     if opening != daily_open:
-        raise MinuteArchiveError("MINUTE_DAILY_OPEN_CLOSE_MISMATCH")
+        raise MinuteArchiveError("MINUTE_DAILY_OPEN_CLOSE_MISMATCH", details=details)
     close_reconciliation = "EXACT"
     if closing != daily_close:
         if not (
             instrument_id.startswith("SH.")
             and trade_date < SSE_CLOSING_AUCTION_EFFECTIVE_DATE
         ):
-            raise MinuteArchiveError("MINUTE_DAILY_OPEN_CLOSE_MISMATCH")
+            raise MinuteArchiveError("MINUTE_DAILY_OPEN_CLOSE_MISMATCH", details=details)
         close_reconciliation = "SSE_PRE_20180820_OFFICIAL_CLOSE_VWAP"
+    details["closeReconciliation"] = close_reconciliation
     if high > Decimal(daily["high"]) or low < Decimal(daily["low"]):
-        raise MinuteArchiveError("MINUTE_OUTSIDE_DAILY_RANGE")
-    volume = sum((Decimal(row["volumeShares"]) for row in rows), Decimal(0))
-    amount = sum((Decimal(row["amountCny"]) for row in rows), Decimal(0))
-    volume_delta = volume - Decimal(daily["volume_shares"])
-    amount_delta = amount - Decimal(daily["amount_cny"])
+        raise MinuteArchiveError("MINUTE_OUTSIDE_DAILY_RANGE", details=details)
     if abs(volume_delta) >= VOLUME_TOLERANCE_SHARES:
-        raise MinuteArchiveError("MINUTE_DAILY_VOLUME_MISMATCH")
-    amount_tolerance = max(
-        AMOUNT_TOLERANCE_CNY,
-        abs(Decimal(daily["amount_cny"])) * AMOUNT_TOLERANCE_RATE,
-    )
+        raise MinuteArchiveError("MINUTE_DAILY_VOLUME_MISMATCH", details=details)
     if abs(amount_delta) > amount_tolerance:
-        raise MinuteArchiveError("MINUTE_DAILY_AMOUNT_MISMATCH")
-    return {
-        "open": format(opening, "f"),
-        "high": format(high, "f"),
-        "low": format(low, "f"),
-        "close": format(closing, "f"),
-        "officialDailyClose": format(daily_close, "f"),
-        "terminalCloseAuthority": "DAILY_BAR",
-        "closeReconciliation": close_reconciliation,
-        "volumeShares": format(volume, "f"),
-        "amountCny": format(amount, "f"),
-        "volumeDeltaShares": format(volume_delta, "f"),
-        "amountDeltaCny": format(amount_delta, "f"),
-        "amountToleranceCny": format(amount_tolerance, "f"),
-        "dailySourceRowSha256": daily["source_row_sha256"],
-    }
+        raise MinuteArchiveError("MINUTE_DAILY_AMOUNT_MISMATCH", details=details)
+    return details
 
 
 def ingest_minute_requirement(
@@ -217,6 +227,7 @@ def ingest_minute_requirement(
             source_asset_sha256=source_asset_sha256,
             reason=str(exc),
             attempted_at=attempted_at,
+            details=exc.details,
         )
     dataset.db.execute(
         "INSERT OR IGNORE INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -243,6 +254,7 @@ def reject_minute_requirement(
     source_asset_sha256: str,
     reason: str,
     attempted_at: str | None = None,
+    details: dict | None = None,
 ) -> dict:
     attempted_at = attempted_at or _now()
     dataset.db.execute(
@@ -263,7 +275,7 @@ def reject_minute_requirement(
             trade_date,
             "REJECTED",
             reason,
-            canonical_json({}),
+            canonical_json(details or {}),
             attempted_at,
         ),
     )
