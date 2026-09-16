@@ -11,6 +11,7 @@ import { ExecutionImport } from "./ExecutionImport";
 import { Plans } from "./Plans";
 import { OpeningLots } from "./OpeningLots";
 import { CustodyTransfers } from "./CustodyTransfers";
+import { CorporateShares } from "./CorporateShares";
 
 type Account = components["schemas"]["AccountView"];
 type CashInput = components["schemas"]["CashFlowInput"];
@@ -149,6 +150,7 @@ function AccountLedger({ accountId }: { accountId: string }) {
     <OpeningLots account={account} />
     <Executions account={account} />
     <CustodyTransfers account={account} />
+    <CorporateShares account={account} />
     <Plans account={account} />
     <ExecutionImport account={account} />
     <section className="ledger-section"><h2>资金流水</h2>

@@ -16,8 +16,19 @@ from platform_app.modules.portfolio import executions, service
 from platform_app.modules.portfolio.contracts import AccountInput, CashFlowInput
 from platform_app.modules.portfolio.execution_contracts import ExecutionInput
 from platform_app.modules.portfolio.models import (
-    Account, CashEntry, CustodyTransfer, Execution, ExecutionCommand, ExecutionCorrection, ExecutionImport,
-    ExecutionPlan, LotConsumption, OpeningLot, PlanEvent, PositionLot,
+    Account,
+    CashEntry,
+    CorporateShareEvent,
+    CustodyTransfer,
+    Execution,
+    ExecutionCommand,
+    ExecutionCorrection,
+    ExecutionImport,
+    ExecutionPlan,
+    LotConsumption,
+    OpeningLot,
+    PlanEvent,
+    PositionLot,
 )
 
 
@@ -40,6 +51,11 @@ def ledger():
         ids = select(Execution.id).where(Execution.account_id == account.id)
         db.execute(delete(LotConsumption).where(LotConsumption.sell_execution_id.in_(ids)))
         db.execute(delete(PositionLot).where(PositionLot.account_id == account.id))
+        db.execute(
+            delete(CorporateShareEvent).where(
+                CorporateShareEvent.account_id == account.id
+            )
+        )
         db.execute(delete(CustodyTransfer).where(CustodyTransfer.account_id == account.id))
         db.execute(delete(OpeningLot).where(OpeningLot.account_id == account.id))
         db.execute(delete(ExecutionCommand).where(ExecutionCommand.account_id == account.id))

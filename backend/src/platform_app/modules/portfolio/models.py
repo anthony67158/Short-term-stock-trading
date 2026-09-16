@@ -160,6 +160,61 @@ class CustodyTransfer(Base):
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class CorporateShareEvent(Base):
+    __tablename__ = "corporate_share_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "account_id",
+            "source_key",
+            name="uq_corporate_share_event_source",
+        ),
+        UniqueConstraint(
+            "account_id",
+            "command_key",
+            name="uq_corporate_share_event_command",
+        ),
+        UniqueConstraint(
+            "account_id",
+            "account_version",
+            name="uq_corporate_share_event_version",
+        ),
+        CheckConstraint(
+            "quantity_shares > 0 AND quantity_shares <= 1000000000",
+            name="quantity",
+        ),
+        CheckConstraint(
+            "kind IN ('STOCK_DIVIDEND','SPLIT')",
+            name="kind",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+        default=new_id,
+    )
+    account_id: Mapped[str] = mapped_column(
+        ForeignKey("investment_accounts.id"),
+        index=True,
+    )
+    instrument_id: Mapped[str] = mapped_column(
+        ForeignKey("instruments.id"),
+        index=True,
+    )
+    kind: Mapped[str] = mapped_column(String(24))
+    quantity_shares: Mapped[int] = mapped_column(Integer)
+    effective_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    source_key: Mapped[str] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(300))
+    command_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    account_version: Mapped[int] = mapped_column(Integer)
+    allocations: Mapped[list] = mapped_column(JSONB)
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+    )
+
+
 class PositionLot(Base):
     __tablename__ = "position_lots"
     __table_args__ = (

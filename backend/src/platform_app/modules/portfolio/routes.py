@@ -5,7 +5,20 @@ from fastapi import APIRouter, Header, Query
 from platform_app.contracts.base import Contract, Envelope
 from platform_app.modules.identity.routes import CurrentUser
 from platform_app.modules.portfolio import (
-    corrections, executions, imports, openings, plans, reconciliation, service, transfers,
+    corporate_actions,
+    corrections,
+    executions,
+    imports,
+    openings,
+    plans,
+    reconciliation,
+    service,
+    transfers,
+)
+from platform_app.modules.portfolio.corporate_action_contracts import (
+    CorporateShareInput,
+    CorporateSharePage,
+    CorporateShareView,
 )
 from platform_app.modules.portfolio.correction_contracts import (
     CorrectionCommit, CorrectionInput, CorrectionPage, CorrectionPreview, CorrectionView,
@@ -179,3 +192,44 @@ def transfer_history(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ):
     return Envelope(data=transfers.transfer_history(user.id, account_id, cursor, limit))
+
+
+@router.post(
+    "/{account_id}/corporate-share-events",
+    response_model=Envelope[CorporateShareView],
+    status_code=201,
+)
+def record_corporate_share_event(
+    account_id: str,
+    body: CorporateShareInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(
+        data=corporate_actions.record_share_event(
+            user.id,
+            account_id,
+            body,
+            key,
+        )
+    )
+
+
+@router.get(
+    "/{account_id}/corporate-share-events",
+    response_model=Envelope[CorporateSharePage],
+)
+def corporate_share_history(
+    account_id: str,
+    user: CurrentUser,
+    cursor: Annotated[int | None, Query(ge=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+):
+    return Envelope(
+        data=corporate_actions.share_event_history(
+            user.id,
+            account_id,
+            cursor,
+            limit,
+        )
+    )

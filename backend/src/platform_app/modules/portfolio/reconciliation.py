@@ -11,8 +11,16 @@ from platform_app.adapters.database import sessions
 from platform_app.contracts.base import Contract, Money, utcnow
 from platform_app.kernel.trading import trading_date
 from platform_app.modules.portfolio.models import (
-    CashEntry, CustodyTransfer, Execution, ExecutionCorrection, ExecutionPlan, LotConsumption, OpeningLot,
-    PlanEvent, PositionLot,
+    CashEntry,
+    CorporateShareEvent,
+    CustodyTransfer,
+    Execution,
+    ExecutionCorrection,
+    ExecutionPlan,
+    LotConsumption,
+    OpeningLot,
+    PlanEvent,
+    PositionLot,
 )
 from platform_app.modules.portfolio.plan_contracts import PlanView
 from platform_app.modules.portfolio.service import PortfolioError, owned_account
@@ -33,6 +41,7 @@ class ReconciliationView(Contract):
     correction_count: int = 0
     opening_lot_count: int = 0
     transfer_count: int = 0
+    corporate_share_event_count: int = 0
     open_lot_count: int
     discrepancy_count: int
     discrepancies: list[Discrepancy]
@@ -61,6 +70,20 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
             CustodyTransfer.account_id == account_id).limit(50_001)))
         if len(transfers) > 50_000:
             raise PortfolioError("REPLAY_LIMIT", "转托管记录超过即时核对上限", 422)
+        corporate_events = list(
+            db.scalars(
+                select(CorporateShareEvent)
+                .where(CorporateShareEvent.account_id == account_id)
+                .order_by(CorporateShareEvent.account_version)
+                .limit(50_001)
+            )
+        )
+        if len(corporate_events) > 50_000:
+            raise PortfolioError(
+                "REPLAY_LIMIT",
+                "送转股份记录超过即时核对上限",
+                422,
+            )
         consumptions = list(db.scalars(select(LotConsumption).join(
             Execution, Execution.id == LotConsumption.sell_execution_id,
         ).where(Execution.account_id == account_id)))
@@ -90,8 +113,15 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         def rounded(value):
             return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
-        timeline = sorted([*[row for row in cash_rows if row.kind != "REVERSAL"],
-                           *openings, *transfers], key=lambda row: row.account_version)
+        timeline = sorted(
+            [
+                *[row for row in cash_rows if row.kind != "REVERSAL"],
+                *openings,
+                *transfers,
+                *corporate_events,
+            ],
+            key=lambda row: row.account_version,
+        )
         for previous, current in zip(timeline, timeline[1:]):
             check(current.id, "factChronology", True, current.effective_at >= previous.effective_at)
 
@@ -113,7 +143,47 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         last_opening_version = max((row.account_version for row in openings), default=0)
         by_id = {trade.id: trade for trade in executions}
         # This replay deliberately does not call the write-side FIFO allocator.
-        for trade in sorted([*executions, *transfers], key=lambda row: row.account_version):
+        for trade in sorted(
+            [*executions, *transfers, *corporate_events],
+            key=lambda row: row.account_version,
+        ):
+            if isinstance(trade, CorporateShareEvent):
+                allocated = 0
+                seen = set()
+                for allocation in trade.allocations:
+                    lot_id = allocation.get("lotId")
+                    quantity = allocation.get("quantityShares")
+                    valid = (
+                        isinstance(lot_id, str)
+                        and lot_id not in seen
+                        and type(quantity) is int
+                        and quantity > 0
+                    )
+                    check(trade.id, "shareAllocationValid", True, valid)
+                    if not valid:
+                        continue
+                    seen.add(lot_id)
+                    allocated += quantity
+                    lot = expected_lots.get(lot_id)
+                    check(
+                        trade.id,
+                        f"shareAllocationLot:{lot_id}",
+                        True,
+                        lot is not None
+                        and lot["instrument"] == trade.instrument_id,
+                    )
+                    if (
+                        lot is not None
+                        and lot["instrument"] == trade.instrument_id
+                    ):
+                        lot["quantity"] += quantity
+                check(
+                    trade.id,
+                    "shareAllocationTotal",
+                    trade.quantity_shares,
+                    allocated,
+                )
+                continue
             if isinstance(trade, CustodyTransfer):
                 expected_lots[trade.id] = {
                     "instrument": trade.instrument_id, "date": trade.acquired_date,
@@ -260,7 +330,7 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         for missing_id in execution_deltas.keys() - linked:
             check(missing_id, "cashEntryExists", True, False)
         version_owners = {row.account_version: row.id for row in cash_rows}
-        for row in [*openings, *transfers]:
+        for row in [*openings, *transfers, *corporate_events]:
             check(row.id, "uniqueVersion", False, row.account_version in version_owners)
             version_owners[row.account_version] = row.id
         latest_events, revisions = {}, defaultdict(int)
@@ -312,7 +382,8 @@ def reconcile(user_id: str, account_id: str, *, db_session=None) -> Reconciliati
         return ReconciliationView(
             account_version=account.version, cash_balance=actual_cash, replay_cash_balance=replay_cash,
             execution_count=len(executions), correction_count=len(corrections),
-            opening_lot_count=len(openings), transfer_count=len(transfers), open_lot_count=sum(
+            opening_lot_count=len(openings), transfer_count=len(transfers),
+            corporate_share_event_count=len(corporate_events), open_lot_count=sum(
                 lot["quantity"] > 0 for lot in expected_lots.values()),
             discrepancy_count=count, discrepancies=issues, matches=count == 0,
         )

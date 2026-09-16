@@ -1456,6 +1456,138 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/corporate-share-events": {
+      "post": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Record Corporate Share Event",
+        "operationId": "record_corporate_share_event_api_v1_accounts__account_id__corporate_share_events_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CorporateShareInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CorporateShareView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "portfolio"
+        ],
+        "summary": "Corporate Share History",
+        "operationId": "corporate_share_history_api_v1_accounts__account_id__corporate_share_events_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_CorporateSharePage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market/calendar": {
       "get": {
         "tags": [
@@ -4664,6 +4796,166 @@
         ],
         "title": "Claim"
       },
+      "CorporateShareInput": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "STOCK_DIVIDEND",
+              "SPLIT"
+            ],
+            "title": "Kind"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectiveat"
+          },
+          "sourceKey": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Sourcekey"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Source"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "instrumentId",
+          "quantityShares",
+          "effectiveAt",
+          "sourceKey",
+          "source",
+          "expectedVersion"
+        ],
+        "title": "CorporateShareInput"
+      },
+      "CorporateSharePage": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CorporateShareView"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "events",
+          "nextCursor"
+        ],
+        "title": "CorporateSharePage"
+      },
+      "CorporateShareView": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "STOCK_DIVIDEND",
+              "SPLIT"
+            ],
+            "title": "Kind"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Quantityshares"
+          },
+          "effectiveAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Effectiveat"
+          },
+          "sourceKey": {
+            "type": "string",
+            "title": "Sourcekey"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "title": "Accountversion"
+          },
+          "allocations": {
+            "items": {
+              "$ref": "#/components/schemas/ShareAllocation"
+            },
+            "type": "array",
+            "title": "Allocations"
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Recordedat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "instrumentId",
+          "quantityShares",
+          "effectiveAt",
+          "sourceKey",
+          "source",
+          "accountVersion",
+          "allocations",
+          "recordedAt"
+        ],
+        "title": "CorporateShareView"
+      },
       "CorrectionCommit": {
         "properties": {
           "reason": {
@@ -5277,6 +5569,38 @@
           "data"
         ],
         "title": "Envelope[CashPage]"
+      },
+      "Envelope_CorporateSharePage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CorporateSharePage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CorporateSharePage]"
+      },
+      "Envelope_CorporateShareView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CorporateShareView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[CorporateShareView]"
       },
       "Envelope_CorrectionPage_": {
         "properties": {
@@ -8767,6 +9091,11 @@
             "title": "Transfercount",
             "default": 0
           },
+          "corporateShareEventCount": {
+            "type": "integer",
+            "title": "Corporateshareeventcount",
+            "default": 0
+          },
           "openLotCount": {
             "type": "integer",
             "title": "Openlotcount"
@@ -9647,6 +9976,28 @@
           "createdAt"
         ],
         "title": "SavedViewView"
+      },
+      "ShareAllocation": {
+        "properties": {
+          "lotId": {
+            "type": "string",
+            "title": "Lotid"
+          },
+          "quantityShares": {
+            "type": "integer",
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "exclusiveMinimum": 0.0,
+            "title": "Quantityshares"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "lotId",
+          "quantityShares"
+        ],
+        "title": "ShareAllocation"
       },
       "SplitContract": {
         "properties": {

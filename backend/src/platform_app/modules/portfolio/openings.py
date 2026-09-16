@@ -7,7 +7,13 @@ from platform_app.kernel.trading import trading_date
 from platform_app.modules.market.models import Instrument
 from platform_app.modules.operations.models import Outbox
 from platform_app.modules.portfolio.models import (
-    CashEntry, CustodyTransfer, Execution, ExecutionPlan, OpeningLot, PositionLot,
+    CashEntry,
+    CorporateShareEvent,
+    CustodyTransfer,
+    Execution,
+    ExecutionPlan,
+    OpeningLot,
+    PositionLot,
 )
 from platform_app.modules.portfolio.opening_contracts import OpeningInput, OpeningPage, OpeningView
 from platform_app.modules.portfolio.service import PortfolioError, fingerprint, owned_account
@@ -20,7 +26,19 @@ def last_fact_time(db, account_id):
         OpeningLot.account_id == account_id))
     transfer = db.scalar(select(func.max(CustodyTransfer.effective_at)).where(
         CustodyTransfer.account_id == account_id))
-    return max((value for value in (cash, opening, transfer) if value is not None), default=None)
+    corporate = db.scalar(
+        select(func.max(CorporateShareEvent.effective_at)).where(
+            CorporateShareEvent.account_id == account_id
+        )
+    )
+    return max(
+        (
+            value
+            for value in (cash, opening, transfer, corporate)
+            if value is not None
+        ),
+        default=None,
+    )
 
 
 def record_opening(user_id: str, account_id: str, body: OpeningInput, key: str):

@@ -317,6 +317,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/corporate-share-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Corporate Share History */
+        get: operations["corporate_share_history_api_v1_accounts__account_id__corporate_share_events_get"];
+        put?: never;
+        /** Record Corporate Share Event */
+        post: operations["record_corporate_share_event_api_v1_accounts__account_id__corporate_share_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market/calendar": {
         parameters: {
             query?: never;
@@ -1382,6 +1400,68 @@ export interface components {
             /** Evidenceids */
             evidenceIds: string[];
         };
+        /** CorporateShareInput */
+        CorporateShareInput: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "STOCK_DIVIDEND" | "SPLIT";
+            /** Instrumentid */
+            instrumentId: string;
+            /** Quantityshares */
+            quantityShares: number;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /** Source */
+            source: string;
+            /** Expectedversion */
+            expectedVersion: number;
+        };
+        /** CorporateSharePage */
+        CorporateSharePage: {
+            /** Events */
+            events: components["schemas"]["CorporateShareView"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** CorporateShareView */
+        CorporateShareView: {
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "STOCK_DIVIDEND" | "SPLIT";
+            /** Instrumentid */
+            instrumentId: string;
+            /** Quantityshares */
+            quantityShares: number;
+            /**
+             * Effectiveat
+             * Format: date-time
+             */
+            effectiveAt: string;
+            /** Sourcekey */
+            sourceKey: string;
+            /** Source */
+            source: string;
+            /** Accountversion */
+            accountVersion: number;
+            /** Allocations */
+            allocations: components["schemas"]["ShareAllocation"][];
+            /**
+             * Recordedat
+             * Format: date-time
+             */
+            recordedAt: string;
+        };
         /** CorrectionCommit */
         CorrectionCommit: {
             /** Reason */
@@ -1571,6 +1651,16 @@ export interface components {
         /** Envelope[CashPage] */
         Envelope_CashPage_: {
             data: components["schemas"]["CashPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CorporateSharePage] */
+        Envelope_CorporateSharePage_: {
+            data: components["schemas"]["CorporateSharePage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[CorporateShareView] */
+        Envelope_CorporateShareView_: {
+            data: components["schemas"]["CorporateShareView"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[CorrectionPage] */
@@ -2763,6 +2853,11 @@ export interface components {
              * @default 0
              */
             transferCount: number;
+            /**
+             * Corporateshareeventcount
+             * @default 0
+             */
+            corporateShareEventCount: number;
             /** Openlotcount */
             openLotCount: number;
             /** Discrepancycount */
@@ -3072,6 +3167,13 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** ShareAllocation */
+        ShareAllocation: {
+            /** Lotid */
+            lotId: string;
+            /** Quantityshares */
+            quantityShares: number;
         };
         /** SplitContract */
         SplitContract: {
@@ -4158,6 +4260,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_TransferView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    corporate_share_history_api_v1_accounts__account_id__corporate_share_events_get: {
+        parameters: {
+            query?: {
+                cursor?: number | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CorporateSharePage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_corporate_share_event_api_v1_accounts__account_id__corporate_share_events_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CorporateShareInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_CorporateShareView_"];
                 };
             };
             /** @description Validation Error */
