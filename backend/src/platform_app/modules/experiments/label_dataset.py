@@ -208,13 +208,20 @@ class LabelDataset:
             (decision_date,),
         ).fetchone()[0]
         rows = self.episodes.execute(
-            "SELECT e.episode_id, e.instrument_id, e.board, d0.close AS decision_close, "
-            "l.session_offset, l.trade_date, b.bar_end_shanghai, b.open, b.high, "
-            "b.low, b.close, b.volume_shares, d4.close AS terminal_close "
+            "WITH eligible AS ("
+            "SELECT e.episode_id, e.instrument_id, e.board, e.decision_date "
             "FROM candidate_episodes e "
             "JOIN episode_minute_requirements l ON l.episode_id = e.episode_id "
             "JOIN minute_requirements r "
             "ON r.instrument_id = l.instrument_id AND r.trade_date = l.trade_date "
+            "WHERE e.decision_date = ? GROUP BY e.episode_id "
+            "HAVING COUNT(*) = 5 AND SUM(r.status = 'COMPLETED') = 5"
+            ") "
+            "SELECT e.episode_id, e.instrument_id, e.board, d0.close AS decision_close, "
+            "l.session_offset, l.trade_date, b.bar_end_shanghai, b.open, b.high, "
+            "b.low, b.close, b.volume_shares, d4.close AS terminal_close "
+            "FROM eligible e "
+            "JOIN episode_minute_requirements l ON l.episode_id = e.episode_id "
             "JOIN episode_minute_bars b "
             "ON b.instrument_id = l.instrument_id AND b.trade_date = l.trade_date "
             "JOIN episode_minute_requirements terminal "
@@ -223,15 +230,7 @@ class LabelDataset:
             "ON d0.instrument_id = e.instrument_id AND d0.trade_date = e.decision_date "
             "JOIN market.daily_bars d4 "
             "ON d4.instrument_id = e.instrument_id AND d4.trade_date = terminal.trade_date "
-            "WHERE e.decision_date = ? "
-            "AND (SELECT COUNT(*) FROM episode_minute_requirements c "
-            "WHERE c.episode_id = e.episode_id) = 5 "
-            "AND NOT EXISTS ("
-            "SELECT 1 FROM episode_minute_requirements x "
-            "JOIN minute_requirements xr "
-            "ON xr.instrument_id = x.instrument_id AND xr.trade_date = x.trade_date "
-            "WHERE x.episode_id = e.episode_id AND xr.status != 'COMPLETED'"
-            ") ORDER BY e.episode_id, l.session_offset, b.bar_end_shanghai",
+            "ORDER BY e.episode_id, l.session_offset, b.bar_end_shanghai",
             (decision_date,),
         )
         labels = []
