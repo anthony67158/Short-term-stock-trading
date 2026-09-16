@@ -47,6 +47,7 @@ class MinuteRequirementFetcher:
         start_date: str,
         end_date: str,
         instrument_ids: list[str] | None = None,
+        reasons: list[str] | None = None,
     ) -> list[dict]:
         open_dates = [
             row["cal_date"]
@@ -63,10 +64,15 @@ class MinuteRequirementFetcher:
             placeholders = ",".join("?" for _ in instrument_ids)
             instrument_filter = f" AND instrument_id IN ({placeholders})"
             parameters.extend(instrument_ids)
+        reason_filter = ""
+        if reasons:
+            placeholders = ",".join("?" for _ in reasons)
+            reason_filter = f" AND reason IN ({placeholders})"
+            parameters.extend(reasons)
         pending = self.dataset.db.execute(
             "SELECT instrument_id, trade_date FROM minute_requirements "
             "WHERE status = 'PENDING' AND trade_date BETWEEN ? AND ?"
-            f"{instrument_filter} ORDER BY instrument_id, trade_date",
+            f"{instrument_filter}{reason_filter} ORDER BY instrument_id, trade_date",
             parameters,
         ).fetchall()
         by_instrument: dict[str, list[str]] = defaultdict(list)
@@ -100,9 +106,10 @@ class MinuteRequirementFetcher:
         end_date: str,
         *,
         instrument_ids: list[str] | None = None,
+        reasons: list[str] | None = None,
         max_windows: int | None = None,
     ):
-        windows = self.pending_windows(start_date, end_date, instrument_ids)
+        windows = self.pending_windows(start_date, end_date, instrument_ids, reasons)
         if max_windows is not None:
             windows = windows[:max_windows]
         for window in windows:

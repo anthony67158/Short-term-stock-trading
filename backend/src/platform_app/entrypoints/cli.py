@@ -75,6 +75,7 @@ def main():
         ],
     )
     parser.add_argument("--instrument-id", action="append")
+    parser.add_argument("--reason", action="append")
     parser.add_argument("--max-windows", type=positive_int)
     parser.add_argument("--max-sessions", type=positive_int, default=120)
     parser.add_argument("--sample", action="append", type=cross_source_sample)
@@ -385,6 +386,7 @@ def main():
                         args.start_date,
                         args.end_date,
                         instrument_ids=args.instrument_id,
+                        reasons=args.reason,
                         max_windows=args.max_windows,
                     ):
                         print(json.dumps(result, ensure_ascii=False), flush=True)

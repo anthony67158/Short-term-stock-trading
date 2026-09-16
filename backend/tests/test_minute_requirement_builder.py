@@ -573,6 +573,48 @@ def test_fetcher_batches_by_instrument_window_and_accepts_only_required_dates(tm
         assert dataset.db.execute("SELECT COUNT(*) FROM episode_minute_bars").fetchone()[0] == 96
 
 
+def test_fetcher_can_retry_only_selected_rejection_reasons(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    client = _MinuteClient(_tushare_minute_rows([dates[1], dates[2]]))
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        dataset.db.execute(
+            "UPDATE minute_requirements SET reason = 'RETRY_THIS' WHERE trade_date = ?",
+            (dates[1],),
+        )
+        dataset.db.execute(
+            "UPDATE minute_requirements SET reason = 'KEEP_PENDING' WHERE trade_date = ?",
+            (dates[2],),
+        )
+        with MinuteRequirementFetcher(client, dataset) as fetcher:
+            results = list(
+                fetcher.fetch_pending(
+                    dates[1],
+                    dates[2],
+                    reasons=["RETRY_THIS"],
+                )
+            )
+
+        assert results[0]["requiredDates"] == [dates[1]]
+        assert results[0]["accepted"] == 1
+        states = dataset.db.execute(
+            "SELECT trade_date, status, reason FROM minute_requirements "
+            "WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date",
+            (dates[1], dates[2]),
+        ).fetchall()
+        assert [tuple(row) for row in states] == [
+            (dates[1], "COMPLETED", None),
+            (dates[2], "PENDING", "KEEP_PENDING"),
+        ]
+
+
 def test_fetcher_records_upstream_failure_and_can_resume(tmp_path):
     market_root, dates = _sealed_market(tmp_path)
     client = _MinuteClient([], failure="MARKET_DATA_RATE_LIMITED")
