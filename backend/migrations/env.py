@@ -7,6 +7,7 @@ from platform_app.modules.portfolio import models as portfolio_models  # noqa: F
 from platform_app.modules.market import models as market_models  # noqa: F401
 from platform_app.modules.research import models as research_models  # noqa: F401
 from platform_app.modules.learning import models as learning_models  # noqa: F401
+from platform_app.modules.decisions import models as decision_models  # noqa: F401
 
 with engine().connect() as connection:
     context.configure(connection=connection, target_metadata=Base.metadata)

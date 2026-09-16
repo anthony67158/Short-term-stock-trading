@@ -302,6 +302,12 @@ class PositionDecisionRequest(Contract):
         return self
 
 
+class PositionEvaluationInput(Contract):
+    instrument_id: InstrumentId
+    expected_version: int = Field(strict=True, ge=1)
+    reason: str = Field(min_length=1, max_length=300, pattern=r"\S")
+
+
 class PositionDecision(Contract):
     schema_version: Literal["position-decision.v1"] = POSITION_DECISION_SCHEMA_VERSION
     decision_id: str
@@ -389,3 +395,8 @@ class PositionDecision(Contract):
         ):
             raise ValueError("READY交易动作必须包含完整执行合同")
         return self
+
+
+class PositionDecisionPage(Contract):
+    decisions: list[PositionDecision]
+    next_cursor: str | None

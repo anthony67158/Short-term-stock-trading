@@ -556,6 +556,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/accounts/{account_id}/evaluations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Evaluate Position */
+        post: operations["evaluate_position_api_v1_accounts__account_id__evaluations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/accounts/{account_id}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Current Decisions */
+        get: operations["list_current_decisions_api_v1_accounts__account_id__decisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/decisions/{decision_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Decision */
+        get: operations["get_decision_api_v1_decisions__decision_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1033,6 +1084,16 @@ export interface components {
         /** Envelope[PlanView] */
         Envelope_PlanView_: {
             data: components["schemas"]["PlanView"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[PositionDecisionPage] */
+        Envelope_PositionDecisionPage_: {
+            data: components["schemas"]["PositionDecisionPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[PositionDecision] */
+        Envelope_PositionDecision_: {
+            data: components["schemas"]["PositionDecision"];
             meta?: components["schemas"]["Meta"];
         };
         /** Envelope[PositionPage] */
@@ -1573,6 +1634,121 @@ export interface components {
              * @constant
              */
             executionEligibility: "NOT_ASSESSED";
+        };
+        /** PositionDecision */
+        PositionDecision: {
+            /**
+             * Schemaversion
+             * @default position-decision.v1
+             * @constant
+             */
+            schemaVersion: "position-decision.v1";
+            /** Decisionid */
+            decisionId: string;
+            /** Accountid */
+            accountId: string;
+            /** Instrumentid */
+            instrumentId: string;
+            /** Contextid */
+            contextId: string;
+            /**
+             * Asof
+             * Format: date-time
+             */
+            asOf: string;
+            /**
+             * Validuntil
+             * Format: date-time
+             */
+            validUntil: string;
+            /** Accountversion */
+            accountVersion: number;
+            /** Releaseid */
+            releaseId: string;
+            /** Assessmentids */
+            assessmentIds: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "READY" | "UNAVAILABLE";
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "HOLD" | "ADD" | "REDUCE" | "EXIT" | "NONE";
+            /** Reasoncodes */
+            reasonCodes: string[];
+            /** Evidenceids */
+            evidenceIds: string[];
+            /** Currentquantityshares */
+            currentQuantityShares?: number | null;
+            /** Targetquantityshares */
+            targetQuantityShares?: number | null;
+            /** Deltaquantityshares */
+            deltaQuantityShares?: number | null;
+            /** Expecteddeltareturnvshold */
+            expectedDeltaReturnVsHold?: number | null;
+            /** Q10Deltareturnvshold */
+            q10DeltaReturnVsHold?: number | null;
+            /** Q50Deltareturnvshold */
+            q50DeltaReturnVsHold?: number | null;
+            /** Q90Deltareturnvshold */
+            q90DeltaReturnVsHold?: number | null;
+            /** Stophazard */
+            stopHazard?: number | null;
+            /** Support */
+            support?: number | null;
+            /** Quanttrend */
+            quantTrend?: ("BULLISH" | "NEUTRAL" | "BEARISH" | "UNCERTAIN") | null;
+            /** Agentthesisstatus */
+            agentThesisStatus?: ("SUPPORTED" | "WEAKENED" | "INVALIDATED" | "UNCERTAIN") | null;
+            /** Agentuncertainties */
+            agentUncertainties?: string[];
+            /** Counterevidenceids */
+            counterEvidenceIds?: string[];
+            /** Executionpath */
+            executionPath?: string | null;
+            /** Pricelower */
+            priceLower?: string | null;
+            /** Priceupper */
+            priceUpper?: string | null;
+            /** Pricebasis */
+            priceBasis?: string | null;
+            /** Triggerconditions */
+            triggerConditions?: string[];
+            /** Estimatedcosts */
+            estimatedCosts?: string | null;
+            /** Riskpolicyversion */
+            riskPolicyVersion: string;
+            /** Quantityruleversion */
+            quantityRuleVersion: string;
+            /** Feepolicyversion */
+            feePolicyVersion: string;
+            /** Modelpredictionref */
+            modelPredictionRef?: string | null;
+            /** Agentcontributionref */
+            agentContributionRef?: string | null;
+            /** Decisionreason */
+            decisionReason: string;
+            /** Reviewafter */
+            reviewAfter?: string | null;
+        };
+        /** PositionDecisionPage */
+        PositionDecisionPage: {
+            /** Decisions */
+            decisions: components["schemas"]["PositionDecision"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /** PositionEvaluationInput */
+        PositionEvaluationInput: {
+            /** Instrumentid */
+            instrumentId: string;
+            /** Expectedversion */
+            expectedVersion: number;
+            /** Reason */
+            reason: string;
         };
         /** PositionPage */
         PositionPage: {
@@ -3164,6 +3340,108 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_JobView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    evaluate_position_api_v1_accounts__account_id__evaluations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PositionEvaluationInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_JobView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_current_decisions_api_v1_accounts__account_id__decisions_get: {
+        parameters: {
+            query?: {
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_PositionDecisionPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_decision_api_v1_decisions__decision_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                decision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_PositionDecision_"];
                 };
             };
             /** @description Validation Error */

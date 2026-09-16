@@ -2216,6 +2216,181 @@
         }
       }
     },
+    "/api/v1/accounts/{account_id}/evaluations": {
+      "post": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Evaluate Position",
+        "operationId": "evaluate_position_api_v1_accounts__account_id__evaluations_post",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PositionEvaluationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JobView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/accounts/{account_id}/decisions": {
+      "get": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "List Current Decisions",
+        "operationId": "list_current_decisions_api_v1_accounts__account_id__decisions_get",
+        "parameters": [
+          {
+            "name": "account_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Account Id"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PositionDecisionPage_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decisions/{decision_id}": {
+      "get": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Get Decision",
+        "operationId": "get_decision_api_v1_decisions__decision_id__get",
+        "parameters": [
+          {
+            "name": "decision_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Decision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_PositionDecision_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -3620,6 +3795,38 @@
           "data"
         ],
         "title": "Envelope[PlanView]"
+      },
+      "Envelope_PositionDecisionPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PositionDecisionPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PositionDecisionPage]"
+      },
+      "Envelope_PositionDecision_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PositionDecision"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[PositionDecision]"
       },
       "Envelope_PositionPage_": {
         "properties": {
@@ -5037,6 +5244,463 @@
           "createdAt"
         ],
         "title": "PlanView"
+      },
+      "PositionDecision": {
+        "properties": {
+          "schemaVersion": {
+            "type": "string",
+            "const": "position-decision.v1",
+            "title": "Schemaversion",
+            "default": "position-decision.v1"
+          },
+          "decisionId": {
+            "type": "string",
+            "title": "Decisionid"
+          },
+          "accountId": {
+            "type": "string",
+            "title": "Accountid"
+          },
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "contextId": {
+            "type": "string",
+            "title": "Contextid"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Asof"
+          },
+          "validUntil": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Validuntil"
+          },
+          "accountVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Accountversion"
+          },
+          "releaseId": {
+            "type": "string",
+            "title": "Releaseid"
+          },
+          "assessmentIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Assessmentids"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "UNAVAILABLE"
+            ],
+            "title": "Status"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "HOLD",
+              "ADD",
+              "REDUCE",
+              "EXIT",
+              "NONE"
+            ],
+            "title": "Action"
+          },
+          "reasonCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Reasoncodes"
+          },
+          "evidenceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Evidenceids"
+          },
+          "currentQuantityShares": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currentquantityshares"
+          },
+          "targetQuantityShares": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targetquantityshares"
+          },
+          "deltaQuantityShares": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 1000000000.0,
+                "minimum": -1000000000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deltaquantityshares"
+          },
+          "expectedDeltaReturnVsHold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": -10.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expecteddeltareturnvshold"
+          },
+          "q10DeltaReturnVsHold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": -10.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q10Deltareturnvshold"
+          },
+          "q50DeltaReturnVsHold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": -10.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q50Deltareturnvshold"
+          },
+          "q90DeltaReturnVsHold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": -10.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Q90Deltareturnvshold"
+          },
+          "stopHazard": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stophazard"
+          },
+          "support": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support"
+          },
+          "quantTrend": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "BULLISH",
+                  "NEUTRAL",
+                  "BEARISH",
+                  "UNCERTAIN"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quanttrend"
+          },
+          "agentThesisStatus": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SUPPORTED",
+                  "WEAKENED",
+                  "INVALIDATED",
+                  "UNCERTAIN"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agentthesisstatus"
+          },
+          "agentUncertainties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Agentuncertainties"
+          },
+          "counterEvidenceIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Counterevidenceids"
+          },
+          "executionPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executionpath"
+          },
+          "priceLower": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 4,
+                "gt": 0,
+                "max_digits": 18
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricelower"
+          },
+          "priceUpper": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 4,
+                "gt": 0,
+                "max_digits": 18
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priceupper"
+          },
+          "priceBasis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pricebasis"
+          },
+          "triggerConditions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 16,
+            "title": "Triggerconditions"
+          },
+          "estimatedCosts": {
+            "anyOf": [
+              {
+                "type": "string",
+                "decimal_places": 2,
+                "max_digits": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimatedcosts"
+          },
+          "riskPolicyVersion": {
+            "type": "string",
+            "title": "Riskpolicyversion"
+          },
+          "quantityRuleVersion": {
+            "type": "string",
+            "title": "Quantityruleversion"
+          },
+          "feePolicyVersion": {
+            "type": "string",
+            "title": "Feepolicyversion"
+          },
+          "modelPredictionRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelpredictionref"
+          },
+          "agentContributionRef": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agentcontributionref"
+          },
+          "decisionReason": {
+            "type": "string",
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Decisionreason"
+          },
+          "reviewAfter": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewafter"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decisionId",
+          "accountId",
+          "instrumentId",
+          "contextId",
+          "asOf",
+          "validUntil",
+          "accountVersion",
+          "releaseId",
+          "assessmentIds",
+          "status",
+          "action",
+          "reasonCodes",
+          "evidenceIds",
+          "riskPolicyVersion",
+          "quantityRuleVersion",
+          "feePolicyVersion",
+          "decisionReason"
+        ],
+        "title": "PositionDecision"
+      },
+      "PositionDecisionPage": {
+        "properties": {
+          "decisions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionDecision"
+            },
+            "type": "array",
+            "title": "Decisions"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "decisions",
+          "nextCursor"
+        ],
+        "title": "PositionDecisionPage"
+      },
+      "PositionEvaluationInput": {
+        "properties": {
+          "instrumentId": {
+            "type": "string",
+            "pattern": "^(SH|SZ|BJ)\\.\\d{6}$",
+            "title": "Instrumentid"
+          },
+          "expectedVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expectedversion"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "instrumentId",
+          "expectedVersion",
+          "reason"
+        ],
+        "title": "PositionEvaluationInput"
       },
       "PositionPage": {
         "properties": {
