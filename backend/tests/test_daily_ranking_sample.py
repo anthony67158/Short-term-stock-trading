@@ -29,11 +29,11 @@ def test_daily_ranking_sample_uses_only_history_for_features_and_future_for_outc
     sample = build_daily_ranking_sample(
         history=history,
         future=future,
-        listing_age_sessions=200,
+        listing_age_days=200,
     )
 
     assert sample["featureSchemaVersion"] == "daily-ranking-features.v1"
-    assert sample["features"]["listingAgeSessions"] == "200"
+    assert sample["features"]["listingAgeDays"] == "200"
     assert Decimal(sample["features"]["adjustedReturn60"]) == Decimal("0.06")
     assert Decimal(sample["features"]["medianAmount20Cny"]) == Decimal("1000000")
     assert Decimal(sample["outcomes"]["forwardReturnDecisionClose5"]) > 0
@@ -51,7 +51,7 @@ def test_adjustment_factors_preserve_corporate_action_return_continuity():
     sample = build_daily_ranking_sample(
         history=history,
         future=future,
-        listing_age_sessions=200,
+        listing_age_days=200,
     )
 
     assert Decimal(sample["outcomes"]["forwardReturnDecisionClose5"]) > 0
@@ -68,5 +68,5 @@ def test_daily_ranking_sample_rejects_missing_or_non_positive_inputs():
         build_daily_ranking_sample(
             history=history,
             future=future,
-            listing_age_sessions=200,
+            listing_age_days=200,
         )

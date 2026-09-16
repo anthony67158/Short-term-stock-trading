@@ -44,12 +44,12 @@ def build_daily_ranking_sample(
     *,
     history: list[dict],
     future: list[dict],
-    listing_age_sessions: int,
+    listing_age_days: int,
 ) -> dict:
     if (
         len(history) != HISTORY_SESSIONS
         or len(future) != HORIZON_SESSIONS
-        or listing_age_sessions < HISTORY_SESSIONS
+        or listing_age_days <= 0
     ):
         raise ValueError("RANKING_PATH_LENGTH_INVALID")
     if any(row.get("factor") is None for row in [*history, *future]):
@@ -114,7 +114,7 @@ def build_daily_ranking_sample(
             "meanRange20": _text(sum(ranges20, Decimal(0)) / Decimal(20)),
             "gap1": _text(_decimal(decision["open"]) / previous_close - 1),
             "closeLocation1": _text(close_location),
-            "listingAgeSessions": str(listing_age_sessions),
+            "listingAgeDays": str(listing_age_days),
         }
 
         entry = _decimal(future[0]["open"]) * _decimal(future[0]["factor"])
