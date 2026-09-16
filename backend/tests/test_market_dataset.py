@@ -4,9 +4,11 @@ import sqlite3
 import pytest
 
 from platform_app.modules.experiments.market_dataset import (
+    DAILY_TURNOVER_SCOPE,
     MarketDataset,
     MarketDatasetError,
     canonical_sha256,
+    upgrade_market_dataset,
 )
 
 
@@ -145,6 +147,38 @@ def test_resume_rejects_a_different_dataset_identity(tmp_path):
         pass
     with pytest.raises(MarketDatasetError, match="DATASET_IDENTITY_MISMATCH"):
         MarketDataset(root, dataset_id="two", source="TUSHARE_COMPATIBLE")
+
+
+def test_upgrade_v3_copies_dataset_and_records_immutable_lineage(tmp_path):
+    source = tmp_path / "source-v3"
+    with MarketDataset(source, dataset_id="source", source="TUSHARE_COMPATIBLE") as dataset:
+        dataset.write_instruments([instrument()])
+        dataset.write_daily_bars(
+            [daily()],
+            source="TUSHARE_COMPATIBLE",
+            available_at="2026-09-15T16:00:00+08:00",
+        )
+    with sqlite3.connect(source / "market.sqlite3") as database:
+        database.execute("DROP TABLE block_trade_summaries")
+        database.execute("DROP TABLE dataset_lineage")
+        database.execute("ALTER TABLE daily_bars DROP COLUMN turnover_scope")
+        database.execute("UPDATE dataset_metadata SET schema_version = 'market-dataset.v3'")
+        database.commit()
+    source_hash = hashlib.sha256((source / "market.sqlite3").read_bytes()).hexdigest()
+    target = tmp_path / "target-v4"
+
+    result = upgrade_market_dataset(source, target, dataset_id="target")
+
+    assert result["parentDatabaseSha256"] == source_hash
+    assert hashlib.sha256((source / "market.sqlite3").read_bytes()).hexdigest() == source_hash
+    with MarketDataset(target, dataset_id="target", source="TUSHARE_COMPATIBLE") as dataset:
+        metadata = dataset.db.execute("SELECT schema_version FROM dataset_metadata").fetchone()
+        lineage = dataset.db.execute("SELECT * FROM dataset_lineage").fetchone()
+        stored_scope = dataset.db.execute("SELECT turnover_scope FROM daily_bars").fetchone()[0]
+        assert metadata["schema_version"] == "market-dataset.v4"
+        assert lineage["parent_dataset_id"] == "source"
+        assert lineage["parent_database_sha256"] == source_hash
+        assert stored_scope == DAILY_TURNOVER_SCOPE
 
 
 def test_point_in_time_universe_and_suspension_explanations(tmp_path):

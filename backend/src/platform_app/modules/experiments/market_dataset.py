@@ -12,7 +12,9 @@ class MarketDatasetError(ValueError):
     pass
 
 
-SCHEMA_VERSION = "market-dataset.v3"
+SCHEMA_VERSION = "market-dataset.v4"
+PREVIOUS_SCHEMA_VERSION = "market-dataset.v3"
+DAILY_TURNOVER_SCOPE = "ORDER_BOOK_EXCLUDES_BLOCK_TRADES"
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -22,6 +24,13 @@ CREATE TABLE IF NOT EXISTS dataset_metadata (
     schema_version TEXT NOT NULL,
     source TEXT NOT NULL,
     created_at TEXT NOT NULL
+) STRICT;
+CREATE TABLE IF NOT EXISTS dataset_lineage (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    parent_dataset_id TEXT NOT NULL,
+    parent_schema_version TEXT NOT NULL,
+    parent_database_sha256 TEXT NOT NULL,
+    migrated_at TEXT NOT NULL
 ) STRICT;
 CREATE TABLE IF NOT EXISTS instruments (
     instrument_id TEXT PRIMARY KEY,
@@ -59,6 +68,9 @@ CREATE TABLE IF NOT EXISTS daily_bars (
     previous_close TEXT NOT NULL,
     volume_shares TEXT NOT NULL,
     amount_cny TEXT NOT NULL,
+    turnover_scope TEXT NOT NULL CHECK (
+        turnover_scope = 'ORDER_BOOK_EXCLUDES_BLOCK_TRADES'
+    ),
     adjustment TEXT NOT NULL CHECK (adjustment = 'RAW'),
     source TEXT NOT NULL,
     available_at TEXT NOT NULL,
@@ -138,6 +150,20 @@ CREATE TABLE IF NOT EXISTS minute_bars (
     source_row_sha256 TEXT NOT NULL,
     PRIMARY KEY (instrument_id, bar_end_shanghai, frequency)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS block_trade_summaries (
+    instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),
+    source_code TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    transaction_count INTEGER NOT NULL CHECK (transaction_count > 0),
+    low_price TEXT NOT NULL,
+    high_price TEXT NOT NULL,
+    volume_shares TEXT NOT NULL,
+    amount_cny TEXT NOT NULL,
+    source TEXT NOT NULL,
+    available_at TEXT NOT NULL,
+    source_rows_sha256 TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, trade_date)
+) STRICT;
 CREATE TABLE IF NOT EXISTS sync_checkpoints (
     stream TEXT NOT NULL,
     partition_key TEXT NOT NULL,
@@ -161,6 +187,104 @@ def canonical_sha256(value: dict | list) -> str:
 
 def _utc_now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _database_sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def upgrade_market_dataset(source_root: Path, target_root: Path, *, dataset_id: str) -> dict:
+    source_database = source_root.resolve() / "market.sqlite3"
+    target = target_root.resolve()
+    target_database = target / "market.sqlite3"
+    if not source_database.is_file():
+        raise MarketDatasetError("UPGRADE_SOURCE_DATASET_MISSING")
+    if target.exists():
+        raise MarketDatasetError("UPGRADE_TARGET_ALREADY_EXISTS")
+
+    source_hash = _database_sha256(source_database)
+    source = sqlite3.connect(source_database.as_uri() + "?mode=ro", uri=True, timeout=30)
+    source.row_factory = sqlite3.Row
+    try:
+        if [row[0] for row in source.execute("PRAGMA integrity_check")] != ["ok"]:
+            raise MarketDatasetError("UPGRADE_SOURCE_INTEGRITY_FAILED")
+        metadata = source.execute(
+            "SELECT dataset_id, schema_version, source FROM dataset_metadata"
+        ).fetchone()
+        if metadata is None or metadata["schema_version"] != PREVIOUS_SCHEMA_VERSION:
+            raise MarketDatasetError("UPGRADE_SOURCE_SCHEMA_UNSUPPORTED")
+
+        target.mkdir(parents=True)
+        destination = sqlite3.connect(target_database, autocommit=False)
+        try:
+            source.backup(destination)
+            destination.execute("PRAGMA foreign_keys = ON")
+            destination.execute(
+                "ALTER TABLE daily_bars ADD COLUMN turnover_scope TEXT NOT NULL "
+                f"DEFAULT '{DAILY_TURNOVER_SCOPE}' CHECK "
+                f"(turnover_scope = '{DAILY_TURNOVER_SCOPE}')"
+            )
+            destination.execute(
+                "CREATE TABLE dataset_lineage ("
+                "singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"
+                "parent_dataset_id TEXT NOT NULL,"
+                "parent_schema_version TEXT NOT NULL,"
+                "parent_database_sha256 TEXT NOT NULL,"
+                "migrated_at TEXT NOT NULL"
+                ") STRICT"
+            )
+            destination.execute(
+                "CREATE TABLE block_trade_summaries ("
+                "instrument_id TEXT NOT NULL REFERENCES instruments(instrument_id),"
+                "source_code TEXT NOT NULL,"
+                "trade_date TEXT NOT NULL,"
+                "transaction_count INTEGER NOT NULL CHECK (transaction_count > 0),"
+                "low_price TEXT NOT NULL,"
+                "high_price TEXT NOT NULL,"
+                "volume_shares TEXT NOT NULL,"
+                "amount_cny TEXT NOT NULL,"
+                "source TEXT NOT NULL,"
+                "available_at TEXT NOT NULL,"
+                "source_rows_sha256 TEXT NOT NULL,"
+                "PRIMARY KEY (instrument_id, trade_date)"
+                ") STRICT"
+            )
+            migrated_at = _utc_now()
+            destination.execute(
+                "UPDATE dataset_metadata SET dataset_id = ?, schema_version = ?",
+                (dataset_id, SCHEMA_VERSION),
+            )
+            destination.execute(
+                "INSERT INTO dataset_lineage VALUES (1, ?, ?, ?, ?)",
+                (
+                    metadata["dataset_id"],
+                    metadata["schema_version"],
+                    source_hash,
+                    migrated_at,
+                ),
+            )
+            destination.commit()
+            if [row[0] for row in destination.execute("PRAGMA integrity_check")] != ["ok"]:
+                raise MarketDatasetError("UPGRADE_TARGET_INTEGRITY_FAILED")
+        except Exception:
+            destination.rollback()
+            destination.close()
+            if target_database.exists():
+                target_database.unlink()
+            target.rmdir()
+            raise
+        else:
+            destination.close()
+    finally:
+        source.close()
+    return {
+        "datasetId": dataset_id,
+        "schemaVersion": SCHEMA_VERSION,
+        "parentDatasetId": metadata["dataset_id"],
+        "parentDatabaseSha256": source_hash,
+        "database": str(target_database),
+    }
 
 
 class MarketDataset:
@@ -305,6 +429,7 @@ class MarketDataset:
                         "previous_close": row["previousClose"],
                         "volume_shares": row["volumeShares"],
                         "amount_cny": row["amountCny"],
+                        "turnover_scope": row.get("turnoverScope", DAILY_TURNOVER_SCOPE),
                         "adjustment": row["adjustment"],
                         "source": source,
                         "available_at": available_at,
@@ -332,6 +457,7 @@ class MarketDataset:
             "listing_status_periods",
             "name_changes",
             "minute_bars",
+            "block_trade_summaries",
         }
         if table not in allowed:
             raise MarketDatasetError("DATASET_TABLE_REJECTED")
@@ -492,6 +618,7 @@ class MarketDataset:
             "listing_status_periods",
             "name_changes",
             "minute_bars",
+            "block_trade_summaries",
             "sync_checkpoints",
         ):
             tables[table] = self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]

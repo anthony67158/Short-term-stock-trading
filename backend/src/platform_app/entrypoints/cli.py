@@ -35,6 +35,7 @@ def main():
             "audit-market-archive",
             "audit-market-cross-source",
             "audit-market-dataset",
+            "upgrade-market-dataset",
             "build-market-dataset",
         ],
     )
@@ -43,6 +44,7 @@ def main():
     parser.add_argument("--securities-file", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--dataset-root", type=Path)
+    parser.add_argument("--source-dataset-root", type=Path)
     parser.add_argument("--dataset-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
@@ -131,6 +133,28 @@ def main():
                     "openDates": report["range"]["openDates"],
                     "reportSha256": report["reportSha256"],
                 }
+            )
+        )
+    elif args.command == "upgrade-market-dataset":
+        from platform_app.modules.experiments.market_dataset import (
+            upgrade_market_dataset,
+        )
+
+        if not args.source_dataset_root or not args.dataset_root or not args.dataset_id:
+            parser.error("source-dataset-root, dataset-root and dataset-id are required")
+        try:
+            source_root = external_dataset_root(args.source_dataset_root)
+            dataset_root = external_dataset_root(args.dataset_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                upgrade_market_dataset(
+                    source_root,
+                    dataset_root,
+                    dataset_id=args.dataset_id,
+                ),
+                ensure_ascii=False,
             )
         )
     elif args.command == "build-market-dataset":
