@@ -265,6 +265,38 @@ def test_builder_rejects_block_trade_outside_instrument_lifecycle(tmp_path):
             builder.sync_block_trade_partition("20260915")
 
 
+def test_builder_syncs_block_trades_by_month_with_daily_checkpoints(tmp_path):
+    data = responses()
+    data[("block_trade", "")] = [
+        {
+            "ts_code": "000001.SZ",
+            "trade_date": "20260915",
+            "price": "10",
+            "vol": "1",
+            "amount": "10",
+            "buyer": "",
+            "seller": "",
+        }
+    ]
+    with MarketDataset(
+        tmp_path / "dataset",
+        dataset_id="block-trade-month",
+        source="TUSHARE_COMPATIBLE",
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+        builder.sync_daily_partition("20260915")
+
+        result = builder.sync_block_trade_range("20260901", "20260930")
+
+        assert result["partitions"] == 1
+        assert result["transactions"] == 1
+        assert builder.sync_block_trade_range("20260901", "20260930")["status"] == "SKIPPED"
+
+        with pytest.raises(MarketDatasetError, match="RANGE_MUST_BE_ONE_MONTH"):
+            builder.sync_block_trade_range("20260801", "20260930")
+
+
 def test_builder_syncs_paginated_name_changes_with_historical_availability(tmp_path):
     data = responses()
     current = {

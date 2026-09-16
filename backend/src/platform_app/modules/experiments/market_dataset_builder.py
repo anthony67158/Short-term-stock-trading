@@ -793,7 +793,6 @@ class MarketDatasetBuilder:
         if not self.dataset.has_checkpoint("daily", trade_date):
             raise MarketDatasetError("BLOCK_TRADES_REQUIRE_VALIDATED_DAILY_PARTITION")
 
-        observed_at = self.observed_at()
         raw_rows = _validate_partition_rows(
             self.client.rows(
                 "block_trade",
@@ -804,6 +803,69 @@ class MarketDatasetBuilder:
         )
         if len(raw_rows) >= 1000:
             raise MarketDatasetError("BLOCK_TRADES_MAY_BE_TRUNCATED")
+        return self._store_block_trade_partition(trade_date, raw_rows)
+
+    def sync_block_trade_range(self, start_date: str, end_date: str) -> dict:
+        if start_date[:6] != end_date[:6]:
+            raise MarketDatasetError("BLOCK_TRADE_RANGE_MUST_BE_ONE_MONTH")
+        open_dates = [
+            row["cal_date"]
+            for row in self.dataset.db.execute(
+                "SELECT cal_date FROM trade_calendar "
+                "WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date",
+                (start_date, end_date),
+            )
+        ]
+        pending_dates = [
+            trade_date
+            for trade_date in open_dates
+            if not self.dataset.has_checkpoint("block_trades", trade_date)
+        ]
+        if not pending_dates:
+            return {
+                "status": "SKIPPED",
+                "from": start_date,
+                "to": end_date,
+                "partitions": 0,
+            }
+        missing_daily = [
+            trade_date
+            for trade_date in pending_dates
+            if not self.dataset.has_checkpoint("daily", trade_date)
+        ]
+        if missing_daily:
+            raise MarketDatasetError("BLOCK_TRADES_REQUIRE_VALIDATED_DAILY_PARTITION")
+
+        raw_rows = self.client.rows(
+            "block_trade",
+            {"start_date": start_date, "end_date": end_date},
+            BLOCK_TRADE_FIELDS,
+        )
+        if len(raw_rows) >= 6000:
+            raise MarketDatasetError("BLOCK_TRADE_RANGE_MAY_BE_TRUNCATED")
+        grouped: dict[str, list[dict]] = {trade_date: [] for trade_date in pending_dates}
+        for row in raw_rows:
+            trade_date = str(row.get("trade_date") or "")
+            if trade_date < start_date or trade_date > end_date or trade_date not in open_dates:
+                raise MarketDatasetError("UPSTREAM_PARTITION_DATE_MISMATCH")
+            if trade_date in grouped:
+                grouped[trade_date].append(row)
+
+        results = [
+            self._store_block_trade_partition(trade_date, grouped[trade_date])
+            for trade_date in pending_dates
+        ]
+        return {
+            "status": "COMPLETED",
+            "from": start_date,
+            "to": end_date,
+            "partitions": len(results),
+            "transactions": sum(result["transactions"] for result in results),
+            "summaryRows": sum(result["summaryRows"] for result in results),
+        }
+
+    def _store_block_trade_partition(self, trade_date: str, raw_rows: list[dict]) -> dict:
+        observed_at = self.observed_at()
         raw_rows, non_a_share_rows = _filter_non_a_share_rows(raw_rows)
 
         aliases = self.aliases()

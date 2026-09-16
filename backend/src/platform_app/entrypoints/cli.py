@@ -3,6 +3,7 @@ import getpass
 import json
 import os
 import re
+from itertools import groupby
 from pathlib import Path
 
 
@@ -203,7 +204,7 @@ def main():
                 elif args.stage == "names":
                     result = builder.sync_name_changes(args.start_date, args.end_date)
                     print(json.dumps(result, ensure_ascii=False))
-                elif args.stage in {"daily", "block-trades"}:
+                elif args.stage == "daily":
                     dates = dataset.db.execute(
                         "SELECT cal_date FROM trade_calendar "
                         "WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date",
@@ -212,10 +213,27 @@ def main():
                     for (trade_date,) in dates.fetchall():
                         print(
                             json.dumps(
-                                (
-                                    builder.sync_daily_partition(trade_date)
-                                    if args.stage == "daily"
-                                    else builder.sync_block_trade_partition(trade_date)
+                                builder.sync_daily_partition(trade_date),
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
+                elif args.stage == "block-trades":
+                    dates = [
+                        row[0]
+                        for row in dataset.db.execute(
+                            "SELECT cal_date FROM trade_calendar "
+                            "WHERE is_open = 1 AND cal_date BETWEEN ? AND ? ORDER BY cal_date",
+                            (args.start_date, args.end_date),
+                        )
+                    ]
+                    for _month, month_dates in groupby(dates, key=lambda value: value[:6]):
+                        partition = list(month_dates)
+                        print(
+                            json.dumps(
+                                builder.sync_block_trade_range(
+                                    partition[0],
+                                    partition[-1],
                                 ),
                                 ensure_ascii=False,
                             ),
