@@ -758,7 +758,7 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端托管PG、容器部署与
   `72fc6c42a4236931a9e9ade76d2ddd9a1467cbe57a3094701d2a128b59c029ba`，
   恢复revision为`0020_prospective_immutability`，关键事实表行数成功回读。
 - 本机同源部署运行于`http://127.0.0.1:8080`，健康接口回读代码revision
-  `fc27c186a6f6-dirty`（共享工作区仍有用户并行模型改动）、数据库连接和活动SHADOW包；API、Research、Decision、
+  `025f370834e3-dirty`（共享工作区仍有用户并行模型改动）、数据库连接和活动SHADOW包；API、Research、Decision、
   Review、Portfolio Worker均启动且无运行错误。
 - 全量后端`242 passed`，Ruff、Alembic drift、OpenAPI生成、TypeScript、Vite
   生产构建和pnpm高危依赖审计通过。部署端真实Chromium三条E2E通过，覆盖今日、
