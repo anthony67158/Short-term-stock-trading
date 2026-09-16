@@ -43,6 +43,41 @@ SCENARIO_FEATURE_NAMES = (
     "logTargetShares",
     "logTargetToMedianAmount",
 )
+ENRICHED_BASE_FEATURE_NAMES = (
+    "adjustedReturn1",
+    "adjustedReturn5",
+    "adjustedReturn10",
+    "adjustedReturn20",
+    "adjustedReturn60",
+    "realizedVolatility5",
+    "realizedVolatility20",
+    "realizedVolatility60",
+    "drawdownFromHigh20",
+    "distanceFromLow20",
+    "logMedianAmount5Cny",
+    "logMedianAmount20Cny",
+    "logMedianAmount60Cny",
+    "amountToMedian20",
+    "meanRange20",
+    "gap1",
+    "closeLocation1",
+    "logListingAgeDays",
+    "rankWithinBoard",
+    "boardMain",
+    "boardChinext",
+    "boardStar",
+    "boardBeijing",
+    "marketMeanReturn1",
+    "marketMeanReturn20",
+    "marketBreadth20",
+    "marketMeanVolatility20",
+)
+ENRICHED_SCENARIO_FEATURE_NAMES = (
+    *ENRICHED_BASE_FEATURE_NAMES,
+    "logTargetNotionalCny",
+    "logTargetShares",
+    "logTargetToMedianAmount",
+)
 
 
 class QuantModelError(ValueError):
@@ -90,6 +125,8 @@ class QuantTrainingData:
     p_win: np.ndarray
     net_return: np.ndarray
     conditional_available: np.ndarray
+    base_feature_names: tuple[str, ...] = BASE_FEATURE_NAMES
+    scenario_feature_names: tuple[str, ...] = SCENARIO_FEATURE_NAMES
 
 
 def temporal_split(
@@ -249,6 +286,188 @@ def load_training_data(
     return data, {
         "episodeManifest": episode_manifest,
         "labelManifest": label_manifest,
+    }
+
+
+def _enriched_base_features(row: sqlite3.Row, regime: tuple[float, ...]) -> list[float]:
+    board = row["board"]
+    return [
+        float(row["adjusted_return_1"]),
+        float(row["adjusted_return_5"]),
+        float(row["adjusted_return_10"]),
+        float(row["adjusted_return_20"]),
+        float(row["adjusted_return_60"]),
+        float(row["realized_volatility_5"]),
+        float(row["realized_volatility_20"]),
+        float(row["realized_volatility_60"]),
+        float(row["drawdown_from_high_20"]),
+        float(row["distance_from_low_20"]),
+        math.log1p(float(row["median_amount_5_cny"])),
+        math.log1p(float(row["median_amount_20_cny"])),
+        math.log1p(float(row["median_amount_60_cny"])),
+        float(row["amount_to_median_20"]),
+        float(row["mean_range_20"]),
+        float(row["gap_1"]),
+        float(row["close_location_1"]),
+        math.log1p(float(row["listing_age_days"])),
+        float(row["rank_within_board"]),
+        float(board == "MAIN"),
+        float(board == "CHINEXT"),
+        float(board == "STAR"),
+        float(board == "BEIJING"),
+        *regime,
+    ]
+
+
+def load_enriched_training_data(
+    *,
+    episode_dataset_root: Path,
+    label_dataset_root: Path,
+    ranking_dataset_root: Path,
+) -> tuple[QuantTrainingData, dict]:
+    episode_manifest, episode_path = _verified_database(
+        episode_dataset_root, "episode-dataset.v4"
+    )
+    label_manifest, label_path = _verified_database(
+        label_dataset_root, "label-dataset.v2"
+    )
+    ranking_manifest, ranking_path = _verified_database(
+        ranking_dataset_root, "ranking-dataset.v1"
+    )
+    if (
+        label_manifest["episodeDatabaseSha256"] != episode_manifest["databaseSha256"]
+        or ranking_manifest["marketDatabaseSha256"]
+        != episode_manifest["marketDatabaseSha256"]
+    ):
+        raise QuantModelError("MODEL_ENRICHED_LINEAGE_MISMATCH")
+
+    label_uri = f"{label_path.resolve().as_uri()}?mode=ro&immutable=1"
+    database = sqlite3.connect(label_uri, uri=True)
+    database.row_factory = sqlite3.Row
+    database.execute(
+        "ATTACH DATABASE ? AS episodes",
+        (f"{episode_path.resolve().as_uri()}?mode=ro&immutable=1",),
+    )
+    database.execute(
+        "ATTACH DATABASE ? AS ranking",
+        (f"{ranking_path.resolve().as_uri()}?mode=ro&immutable=1",),
+    )
+    regimes = {
+        int(row["decision_date"]): (
+            row["mean_return_1"],
+            row["mean_return_20"],
+            row["breadth_20"],
+            row["mean_volatility_20"],
+        )
+        for row in database.execute(
+            "SELECT decision_date, "
+            "AVG(CAST(adjusted_return_1 AS REAL)) AS mean_return_1, "
+            "AVG(CAST(adjusted_return_20 AS REAL)) AS mean_return_20, "
+            "AVG(CASE WHEN CAST(adjusted_return_20 AS REAL) > 0 THEN 1.0 ELSE 0.0 END) "
+            "AS breadth_20, "
+            "AVG(CAST(realized_volatility_20 AS REAL)) AS mean_volatility_20 "
+            "FROM ranking.ranking_samples GROUP BY decision_date"
+        )
+    }
+    base_x = []
+    base_dates = []
+    base_boards = []
+    p_fill = []
+    stop_hazard = []
+    stop_available = []
+    scenario_x = []
+    scenario_dates = []
+    scenario_boards = []
+    p_full_fill = []
+    p_win = []
+    net_return = []
+    conditional_available = []
+    board_codes = {"MAIN": 0, "CHINEXT": 1, "STAR": 2, "BEIJING": 3}
+    raw_columns = (
+        "adjusted_return_1",
+        "adjusted_return_5",
+        "adjusted_return_10",
+        "adjusted_return_20",
+        "adjusted_return_60",
+        "realized_volatility_5",
+        "realized_volatility_20",
+        "realized_volatility_60",
+        "drawdown_from_high_20",
+        "distance_from_low_20",
+        "median_amount_5_cny",
+        "median_amount_20_cny",
+        "median_amount_60_cny",
+        "amount_to_median_20",
+        "mean_range_20",
+        "gap_1",
+        "close_location_1",
+        "listing_age_days",
+    )
+    rows = database.execute(
+        "SELECT l.*, e.rank_within_board, "
+        + ", ".join(f"r.{column}" for column in raw_columns)
+        + " FROM episode_labels l JOIN episodes.candidate_episodes e "
+        "ON e.episode_id = l.episode_id "
+        "JOIN ranking.ranking_samples r "
+        "ON r.instrument_id = l.instrument_id AND r.decision_date = l.decision_date "
+        "ORDER BY l.decision_date, l.episode_id, l.target_shares"
+    )
+    current_episode = None
+    for row in rows:
+        decision_date = int(row["decision_date"])
+        base = _enriched_base_features(row, regimes[decision_date])
+        board_code = board_codes[row["board"]]
+        if row["episode_id"] != current_episode:
+            current_episode = row["episode_id"]
+            base_x.append(base)
+            base_dates.append(decision_date)
+            base_boards.append(board_code)
+            p_fill.append(row["p_fill_label"])
+            available = row["stop_hazard_label"] is not None
+            stop_available.append(available)
+            stop_hazard.append(row["stop_hazard_label"] if available else 0)
+        target_to_median = max(float(row["target_to_median_amount"]), 1e-12)
+        scenario_x.append(
+            [
+                *base,
+                math.log1p(float(row["target_notional_cny"])),
+                math.log1p(row["target_shares"]),
+                math.log(target_to_median),
+            ]
+        )
+        scenario_dates.append(decision_date)
+        scenario_boards.append(board_code)
+        p_full_fill.append(row["p_full_fill_label"])
+        available = row["net_return_given_fill"] is not None
+        conditional_available.append(available)
+        p_win.append(row["p_win_given_fill_label"] if available else 0)
+        net_return.append(
+            float(row["net_return_given_fill"]) if available else 0.0
+        )
+    database.close()
+    data = QuantTrainingData(
+        base_x=np.asarray(base_x, dtype=np.float32),
+        base_dates=np.asarray(base_dates, dtype=np.int32),
+        base_boards=np.asarray(base_boards, dtype=np.int8),
+        p_fill=np.asarray(p_fill, dtype=np.int8),
+        stop_hazard=np.asarray(stop_hazard, dtype=np.int8),
+        stop_available=np.asarray(stop_available, dtype=bool),
+        scenario_x=np.asarray(scenario_x, dtype=np.float32),
+        scenario_dates=np.asarray(scenario_dates, dtype=np.int32),
+        scenario_boards=np.asarray(scenario_boards, dtype=np.int8),
+        p_full_fill=np.asarray(p_full_fill, dtype=np.int8),
+        p_win=np.asarray(p_win, dtype=np.int8),
+        net_return=np.asarray(net_return, dtype=np.float32),
+        conditional_available=np.asarray(conditional_available, dtype=bool),
+        base_feature_names=ENRICHED_BASE_FEATURE_NAMES,
+        scenario_feature_names=ENRICHED_SCENARIO_FEATURE_NAMES,
+    )
+    if len(data.base_x) != label_manifest["labels"]["episodes"]:
+        raise QuantModelError("MODEL_ENRICHED_SAMPLE_COVERAGE_INCOMPLETE")
+    return data, {
+        "episodeManifest": episode_manifest,
+        "labelManifest": label_manifest,
+        "rankingManifest": ranking_manifest,
     }
 
 
@@ -469,8 +688,8 @@ def write_quant_bundle(
     joblib.dump(
         {
             "schemaVersion": MODEL_SCHEMA_VERSION,
-            "baseFeatureNames": BASE_FEATURE_NAMES,
-            "scenarioFeatureNames": SCENARIO_FEATURE_NAMES,
+            "baseFeatureNames": data.base_feature_names,
+            "scenarioFeatureNames": data.scenario_feature_names,
             "models": models,
         },
         artifact_path,
@@ -487,8 +706,8 @@ def write_quant_bundle(
         "episodeDatabaseSha256": lineage["episodeManifest"]["databaseSha256"],
         "labelDatasetId": lineage["labelManifest"]["datasetId"],
         "labelDatabaseSha256": lineage["labelManifest"]["databaseSha256"],
-        "baseFeatureNames": BASE_FEATURE_NAMES,
-        "scenarioFeatureNames": SCENARIO_FEATURE_NAMES,
+        "baseFeatureNames": data.base_feature_names,
+        "scenarioFeatureNames": data.scenario_feature_names,
         "libraryVersions": {
             "numpy": np.__version__,
             "scikitLearn": sklearn.__version__,
@@ -502,6 +721,11 @@ def write_quant_bundle(
             "JOINT_ABLATION_PENDING",
         ],
     }
+    if "rankingManifest" in lineage:
+        manifest["rankingDatasetId"] = lineage["rankingManifest"]["datasetId"]
+        manifest["rankingDatabaseSha256"] = lineage["rankingManifest"][
+            "databaseSha256"
+        ]
     temporary = manifest_path.with_suffix(".json.tmp")
     temporary.write_text(
         json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"

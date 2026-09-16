@@ -327,6 +327,7 @@ def main():
         )
     elif args.command == "train-quant-model":
         from platform_app.modules.experiments.quant_model_trainer import (
+            load_enriched_training_data,
             load_training_data,
             write_quant_bundle,
         )
@@ -348,10 +349,17 @@ def main():
             model_root = external_dataset_root(args.model_root)
         except ValueError as exc:
             parser.error(str(exc))
-        data, lineage = load_training_data(
-            episode_dataset_root=episode_root,
-            label_dataset_root=label_root,
-        )
+        if args.ranking_root:
+            data, lineage = load_enriched_training_data(
+                episode_dataset_root=episode_root,
+                label_dataset_root=label_root,
+                ranking_dataset_root=external_dataset_root(args.ranking_root),
+            )
+        else:
+            data, lineage = load_training_data(
+                episode_dataset_root=episode_root,
+                label_dataset_root=label_root,
+            )
         print(
             json.dumps(
                 write_quant_bundle(
