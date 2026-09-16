@@ -4,7 +4,7 @@ import json
 import os
 import sqlite3
 from collections import Counter
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -92,7 +92,10 @@ def write_daily_joint_cycle(
     ):
         raise DailyCycleError("DAILY_ACCOUNT_BACKTEST_LINEAGE_MISMATCH")
     sample_counts = _sample_counts()
-    local_date = now.astimezone(ZoneInfo("Asia/Shanghai")).strftime("%Y%m%d")
+    local_now = now.astimezone(ZoneInfo("Asia/Shanghai"))
+    observable_date = local_now.date()
+    if local_now.hour < 17:
+        observable_date -= timedelta(days=1)
     with sqlite3.connect(
         f"{market_database.as_uri()}?mode=ro&immutable=1",
         uri=True,
@@ -101,8 +104,24 @@ def write_daily_joint_cycle(
             market.execute("SELECT MAX(trade_date) FROM daily_bars").fetchone()[0]
             or ""
         )
+        has_calendar = market.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='trade_calendar'"
+        ).fetchone()
+        expected_market_date = (
+            str(
+                market.execute(
+                    "SELECT MAX(cal_date) FROM trade_calendar "
+                    "WHERE exchange='SSE' AND is_open=1 AND cal_date<=?",
+                    (observable_date.strftime("%Y%m%d"),),
+                ).fetchone()[0]
+                or ""
+            )
+            if has_calendar
+            else observable_date.strftime("%Y%m%d")
+        )
     blockers = list(release.get("releaseBlockers", []))
-    if dataset_end < local_date:
+    if not expected_market_date or dataset_end < expected_market_date:
         blockers.append("MARKET_DATASET_END_BEFORE_EVALUATION_DATE")
     if sample_counts["MATURED"] < minimum_matured_samples:
         blockers.append("PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT")
@@ -120,6 +139,7 @@ def write_daily_joint_cycle(
             "datasetId": market_manifest["datasetId"],
             "databaseSha256": market_manifest["databaseSha256"],
             "endDate": dataset_end,
+            "expectedEndDate": expected_market_date,
         },
         "accountBacktest": {
             "sha256": _file_sha256(account_path),

@@ -412,8 +412,8 @@ def main():
             )
         )
     elif args.command == "run-daily-joint-cycle":
-        from platform_app.modules.experiments.daily_joint_cycle import (
-            write_daily_joint_cycle,
+        from platform_app.modules.experiments.daily_learning_cycle import (
+            run_daily_learning_cycle,
         )
 
         if not all(
@@ -434,7 +434,7 @@ def main():
             parser.error(str(exc))
         print(
             json.dumps(
-                write_daily_joint_cycle(
+                run_daily_learning_cycle(
                     output_root=output_root,
                     active_release_pointer=registry_root / "active-shadow.json",
                     market_dataset_root=dataset_root,

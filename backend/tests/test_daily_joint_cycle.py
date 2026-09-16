@@ -2,8 +2,12 @@ import hashlib
 import json
 import sqlite3
 from datetime import UTC, datetime
+from types import SimpleNamespace
+
+import pytest
 
 from platform_app.modules.experiments import daily_joint_cycle
+from platform_app.modules.experiments import daily_learning_cycle
 from platform_app.modules.experiments.daily_joint_cycle import (
     write_daily_joint_cycle,
 )
@@ -123,3 +127,150 @@ def test_daily_cycle_keeps_shadow_when_data_or_samples_are_incomplete(
     assert "MARKET_DATASET_END_BEFORE_EVALUATION_DATE" in report["releaseBlockers"]
     assert "PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT" in report["releaseBlockers"]
     assert write_daily_joint_cycle(**arguments) == report
+
+
+def test_daily_learning_comparison_requires_confident_joint_improvement():
+    improved = SimpleNamespace(
+        status="SUCCEEDED",
+        result={
+            "evaluationStatus": "VALID",
+            "variants": {
+                "JOINT": {
+                    "meanNetReturn": "0.04",
+                    "meanDeltaVsFormula": "0.03",
+                    "confidence95Lower": "0.01",
+                },
+                "NO_AGENT": {"meanNetReturn": "0.02"},
+            },
+        },
+    )
+    accepted, blockers = daily_learning_cycle._improvement_decision(
+        improved,
+        None,
+    )
+    assert accepted is True
+    assert blockers == []
+    weaker = SimpleNamespace(
+        status="SUCCEEDED",
+        result={
+            **improved.result,
+            "variants": {
+                **improved.result["variants"],
+                "NO_AGENT": {"meanNetReturn": "0.05"},
+            },
+        },
+    )
+    accepted, blockers = daily_learning_cycle._improvement_decision(
+        weaker,
+        None,
+    )
+    assert accepted is False
+    assert blockers == ["JOINT_NOT_BETTER_THAN_NO_AGENT"]
+
+
+def test_daily_learning_blocks_before_settlement_when_quality_fails(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "audit_market_dataset",
+        lambda *_args, **_kwargs: {
+            "passed": False,
+            "reportSha256": "a" * 64,
+            "violations": {"missingDailyCheckpoint": ["20260915"]},
+        },
+    )
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "settle_prospective_outcomes",
+        lambda **_kwargs: pytest.fail(
+            "settlement must not run against a failed dataset"
+        ),
+    )
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "write_daily_joint_cycle",
+        lambda **_kwargs: {
+            "activeRelease": {"releaseId": "shadow-v1"},
+            "marketDataset": {"endDate": "20260915"},
+        },
+    )
+
+    report = daily_learning_cycle.run_daily_learning_cycle(
+        output_root=tmp_path / "daily",
+        active_release_pointer=tmp_path / "pointer.json",
+        market_dataset_root=tmp_path / "market",
+        account_backtest_path=tmp_path / "account.json",
+        as_of=datetime(2026, 9, 16, 10, tzinfo=UTC),
+    )
+
+    assert report["settlement"]["status"] == "SKIPPED"
+    assert report["learning"] == {
+        "stage": "DATA_QUALITY",
+        "decision": "BLOCKED",
+        "errorCode": "MARKET_DATASET_QUALITY_FAILED",
+    }
+
+
+def test_daily_learning_advances_one_resumable_stage(
+    tmp_path,
+    monkeypatch,
+):
+    calls = []
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "audit_market_dataset",
+        lambda *_args, **_kwargs: {
+            "passed": True,
+            "reportSha256": "a" * 64,
+            "violations": {},
+        },
+    )
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "settle_prospective_outcomes",
+        lambda **_kwargs: calls.append("settlement")
+        or {
+            "schemaVersion": "outcome-settlement-run.v1",
+            "matured": 4,
+            "excluded": 0,
+        },
+    )
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "write_daily_joint_cycle",
+        lambda **_kwargs: {
+            "activeRelease": {"releaseId": "shadow-v1"},
+            "marketDataset": {"endDate": "20260915"},
+        },
+    )
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "_active_release_record",
+        lambda: SimpleNamespace(
+            owner_id="owner-1",
+            bundle_id="shadow-v1",
+        ),
+    )
+    monkeypatch.setattr(
+        daily_learning_cycle,
+        "_advance_learning",
+        lambda **kwargs: calls.append(kwargs)
+        or {
+            "stage": "REVIEW",
+            "decision": "SUBMITTED",
+        },
+    )
+
+    report = daily_learning_cycle.run_daily_learning_cycle(
+        output_root=tmp_path / "daily",
+        active_release_pointer=tmp_path / "pointer.json",
+        market_dataset_root=tmp_path / "market",
+        account_backtest_path=tmp_path / "account.json",
+        as_of=datetime(2026, 9, 16, 10, tzinfo=UTC),
+    )
+
+    assert calls[0] == "settlement"
+    assert calls[1]["review_date"].isoformat() == "2026-09-15"
+    assert report["learning"]["decision"] == "SUBMITTED"

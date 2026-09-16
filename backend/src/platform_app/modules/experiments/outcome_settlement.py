@@ -23,7 +23,7 @@ from platform_app.modules.learning.models import (
 from platform_app.modules.portfolio.effective_executions import effective_trades
 from platform_app.modules.portfolio.models import ExecutionPlan
 
-OUTCOME_SIMULATION_POLICY_VERSION = "position-outcome.v1"
+OUTCOME_SIMULATION_POLICY_VERSION = "prospective-position-outcome.v1"
 OUTCOME_SCHEMA_VERSION = "prospective-position-outcome.v1"
 ACTUAL_OUTCOME_SCHEMA_VERSION = "actual-execution-outcome.v1"
 ATTRIBUTION_SCHEMA_VERSION = "outcome-attribution.v1"
@@ -154,15 +154,15 @@ def _market_inputs(
     decision_date = _snapshot_identity(sample, dataset_id)
     terminal_date = sample.horizon_end_date.strftime("%Y%m%d")
     identity = market.execute(
-        "SELECT exchange,board FROM instruments WHERE instrument_id=?",
+        "SELECT board FROM instruments WHERE instrument_id=?",
         (sample.instrument_id,),
     ).fetchone()
     if identity is None:
         raise OutcomeExclusion("INSTRUMENT_FACT_MISSING")
     action_date_row = market.execute(
         "SELECT MIN(cal_date) FROM trade_calendar "
-        "WHERE exchange=? AND is_open=1 AND cal_date>?",
-        (identity["exchange"], decision_date),
+        "WHERE exchange='SSE' AND is_open=1 AND cal_date>?",
+        (decision_date,),
     ).fetchone()
     action_date = str(action_date_row[0] or "")
     if not action_date or action_date > terminal_date:

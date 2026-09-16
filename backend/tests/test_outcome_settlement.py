@@ -76,7 +76,7 @@ def _market_dataset(tmp_path, *, include_minutes=True):
             "INSERT INTO instruments VALUES ('SZ.999990','SZ','MAIN')"
         )
         connection.executemany(
-            "INSERT INTO trade_calendar VALUES ('SZ',?,1)",
+            "INSERT INTO trade_calendar VALUES ('SSE',?,1)",
             [("20260908",), ("20260909",), ("20260915",)],
         )
         connection.executemany(
