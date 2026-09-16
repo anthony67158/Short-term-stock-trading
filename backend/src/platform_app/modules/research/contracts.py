@@ -4,6 +4,8 @@ from pydantic import AwareDatetime, Field, HttpUrl, field_validator
 
 from platform_app.contracts.base import Contract, InstrumentId
 
+ASSESSMENT_PROTOCOL_VERSION = "research-assessment.v1"
+
 
 class EvidenceInput(Contract):
     instrument_id: InstrumentId

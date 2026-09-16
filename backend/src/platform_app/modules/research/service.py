@@ -12,12 +12,13 @@ from platform_app.modules.identity.models import User
 from platform_app.modules.market.service import instrument
 from platform_app.modules.operations.models import Job
 from platform_app.modules.research.contracts import (
+    ASSESSMENT_PROTOCOL_VERSION,
     AssessmentPage, AssessmentView, EvidenceInput, EvidencePage, EvidenceView,
     ResearchCapability, ResearchInput,
 )
 from platform_app.modules.research.models import Assessment, Evidence
 
-PROTOCOL = "research-assessment.v1"
+PROTOCOL = ASSESSMENT_PROTOCOL_VERSION
 
 
 def fingerprint(body) -> str:

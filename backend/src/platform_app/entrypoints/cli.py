@@ -54,6 +54,7 @@ def main():
             "build-selected-backtest-dataset",
             "evaluate-quant-backtest",
             "evaluate-account-backtest",
+            "build-joint-candidate",
         ],
     )
     parser.add_argument("--username")
@@ -67,12 +68,15 @@ def main():
     parser.add_argument("--episode-root", type=Path)
     parser.add_argument("--label-root", type=Path)
     parser.add_argument("--ranking-root", type=Path)
+    parser.add_argument("--ranking-model-root", type=Path)
     parser.add_argument("--model-root", type=Path)
+    parser.add_argument("--account-backtest", type=Path)
     parser.add_argument("--dataset-id")
     parser.add_argument("--episode-dataset-id")
     parser.add_argument("--label-dataset-id")
     parser.add_argument("--ranking-dataset-id")
     parser.add_argument("--model-bundle-id")
+    parser.add_argument("--joint-bundle-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     parser.add_argument(
@@ -300,6 +304,48 @@ def main():
                                 ),
                                 flush=True,
                             )
+    elif args.command == "build-joint-candidate":
+        from platform_app.config import settings
+        from platform_app.modules.experiments.joint_bundle import (
+            write_joint_candidate,
+        )
+
+        if not all(
+            (
+                args.output,
+                args.joint_bundle_id,
+                args.ranking_model_root,
+                args.model_root,
+                args.account_backtest,
+            )
+        ):
+            parser.error(
+                "output, joint-bundle-id, ranking-model-root, model-root and "
+                "account-backtest are required"
+            )
+        try:
+            output_root = external_dataset_root(args.output)
+            ranking_model_root = external_dataset_root(args.ranking_model_root)
+            quant_model_root = external_dataset_root(args.model_root)
+            account_parent = external_dataset_root(
+                args.account_backtest.resolve().parent
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                write_joint_candidate(
+                    output_root=output_root,
+                    bundle_id=args.joint_bundle_id,
+                    ranking_model_root=ranking_model_root,
+                    quant_model_root=quant_model_root,
+                    account_backtest_path=account_parent
+                    / args.account_backtest.name,
+                    agent_model=settings().agent_model,
+                ),
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "evaluate-account-backtest":
         from platform_app.modules.experiments.account_backtest import (
             write_account_backtest,
