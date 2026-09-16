@@ -62,17 +62,20 @@ class MinuteRequirementFetcher:
         instrument_filter = ""
         if instrument_ids:
             placeholders = ",".join("?" for _ in instrument_ids)
-            instrument_filter = f" AND instrument_id IN ({placeholders})"
+            instrument_filter = f" AND r.instrument_id IN ({placeholders})"
             parameters.extend(instrument_ids)
         reason_filter = ""
         if reasons:
             placeholders = ",".join("?" for _ in reasons)
-            reason_filter = f" AND reason IN ({placeholders})"
+            reason_filter = f" AND r.reason IN ({placeholders})"
             parameters.extend(reasons)
         pending = self.dataset.db.execute(
-            "SELECT instrument_id, trade_date FROM minute_requirements "
-            "WHERE status = 'PENDING' AND trade_date BETWEEN ? AND ?"
-            f"{instrument_filter}{reason_filter} ORDER BY instrument_id, trade_date",
+            "SELECT r.instrument_id, r.trade_date FROM minute_requirements r "
+            "LEFT JOIN minute_requirement_resolutions x "
+            "ON x.instrument_id = r.instrument_id AND x.trade_date = r.trade_date "
+            "WHERE r.status = 'PENDING' AND x.instrument_id IS NULL "
+            "AND r.trade_date BETWEEN ? AND ?"
+            f"{instrument_filter}{reason_filter} ORDER BY r.instrument_id, r.trade_date",
             parameters,
         ).fetchall()
         canonical_codes = {

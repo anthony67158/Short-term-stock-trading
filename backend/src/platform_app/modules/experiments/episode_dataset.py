@@ -13,8 +13,12 @@ class EpisodeDatasetError(ValueError):
     pass
 
 
-SCHEMA_VERSION = "episode-dataset.v3"
-MIGRATABLE_SCHEMA_VERSIONS = {"episode-dataset.v1", "episode-dataset.v2"}
+SCHEMA_VERSION = "episode-dataset.v4"
+MIGRATABLE_SCHEMA_VERSIONS = {
+    "episode-dataset.v1",
+    "episode-dataset.v2",
+    "episode-dataset.v3",
+}
 REQUIRED_POLICY_KEYS = {
     "candidatePolicy",
     "executionPolicy",
@@ -132,6 +136,35 @@ CREATE TABLE IF NOT EXISTS minute_ingestion_attempts (
     FOREIGN KEY (instrument_id, trade_date)
         REFERENCES minute_requirements(instrument_id, trade_date)
 ) STRICT;
+CREATE TABLE IF NOT EXISTS minute_requirement_resolutions (
+    instrument_id TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    resolution TEXT NOT NULL CHECK (resolution = 'SOURCE_EXHAUSTED'),
+    reason TEXT NOT NULL,
+    evidence_json TEXT NOT NULL,
+    resolved_at TEXT NOT NULL,
+    PRIMARY KEY (instrument_id, trade_date),
+    FOREIGN KEY (instrument_id, trade_date)
+        REFERENCES minute_requirements(instrument_id, trade_date)
+) STRICT;
+CREATE TRIGGER IF NOT EXISTS protect_resolved_minute_requirement_update
+BEFORE UPDATE ON minute_requirements
+WHEN EXISTS (
+    SELECT 1 FROM minute_requirement_resolutions
+    WHERE instrument_id = OLD.instrument_id AND trade_date = OLD.trade_date
+)
+BEGIN
+    SELECT RAISE(ABORT, 'RESOLVED_MINUTE_REQUIREMENT_IMMUTABLE');
+END;
+CREATE TRIGGER IF NOT EXISTS protect_resolved_minute_requirement_delete
+BEFORE DELETE ON minute_requirements
+WHEN EXISTS (
+    SELECT 1 FROM minute_requirement_resolutions
+    WHERE instrument_id = OLD.instrument_id AND trade_date = OLD.trade_date
+)
+BEGIN
+    SELECT RAISE(ABORT, 'RESOLVED_MINUTE_REQUIREMENT_IMMUTABLE');
+END;
 CREATE TABLE IF NOT EXISTS minute_archive_files (
     source_kind TEXT NOT NULL,
     trade_date TEXT NOT NULL,
@@ -518,14 +551,115 @@ class EpisodeDataset:
     def dataset_id(self) -> str:
         return self.db.execute("SELECT dataset_id FROM episode_dataset_metadata").fetchone()[0]
 
+    def resolve_exhausted_minutes(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        reasons: list[str],
+        note: str,
+    ) -> dict:
+        if (
+            not re.fullmatch(r"\d{8}", start_date)
+            or not re.fullmatch(r"\d{8}", end_date)
+            or start_date > end_date
+            or not reasons
+            or any(not reason for reason in reasons)
+            or not note.strip()
+        ):
+            raise EpisodeDatasetError("MINUTE_EXHAUSTION_RESOLUTION_INVALID")
+        placeholders = ",".join("?" for _ in reasons)
+        rows = self.db.execute(
+            "SELECT r.instrument_id, r.trade_date, r.reason, r.attempt_count "
+            "FROM minute_requirements r "
+            "LEFT JOIN minute_requirement_resolutions x "
+            "ON x.instrument_id = r.instrument_id AND x.trade_date = r.trade_date "
+            "WHERE r.status = 'PENDING' AND x.instrument_id IS NULL "
+            "AND r.trade_date BETWEEN ? AND ? "
+            f"AND r.reason IN ({placeholders}) "
+            "ORDER BY r.instrument_id, r.trade_date",
+            [start_date, end_date, *reasons],
+        ).fetchall()
+        resolved_at = _utc_now()
+        try:
+            for row in rows:
+                attempts = [
+                    dict(attempt)
+                    for attempt in self.db.execute(
+                        "SELECT source_kind, source_asset_sha256, outcome, reason, "
+                        "attempted_at FROM minute_ingestion_attempts "
+                        "WHERE instrument_id = ? AND trade_date = ? "
+                        "ORDER BY source_kind, source_asset_sha256",
+                        (row["instrument_id"], row["trade_date"]),
+                    )
+                ]
+                if row["attempt_count"] <= 0 or not attempts:
+                    raise EpisodeDatasetError("MINUTE_SOURCE_EXHAUSTION_WITHOUT_ATTEMPT")
+                evidence = {
+                    "attempts": attempts,
+                    "operatorNote": note.strip(),
+                    "terminalReason": row["reason"],
+                }
+                self.db.execute(
+                    "INSERT INTO minute_requirement_resolutions VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        row["instrument_id"],
+                        row["trade_date"],
+                        "SOURCE_EXHAUSTED",
+                        row["reason"],
+                        canonical_json(evidence),
+                        resolved_at,
+                    ),
+                )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return {
+            "resolution": "SOURCE_EXHAUSTED",
+            "resolvedRequirements": len(rows),
+            "startDate": start_date,
+            "endDate": end_date,
+            "reasons": sorted(reasons),
+        }
+
     def seal(self) -> dict:
         if self.manifest_path.exists():
             raise EpisodeDatasetError("EPISODE_DATASET_ALREADY_SEALED")
-        pending_minutes = self.db.execute(
-            "SELECT COUNT(*) FROM minute_requirements WHERE status = 'PENDING'"
+        unresolved_minutes = self.db.execute(
+            "SELECT COUNT(*) FROM minute_requirements r "
+            "LEFT JOIN minute_requirement_resolutions x "
+            "ON x.instrument_id = r.instrument_id AND x.trade_date = r.trade_date "
+            "WHERE r.status = 'PENDING' AND x.instrument_id IS NULL"
         ).fetchone()[0]
-        if pending_minutes:
+        if unresolved_minutes:
             raise EpisodeDatasetError("EPISODE_MINUTE_REQUIREMENTS_INCOMPLETE")
+        requirement_coverage = {
+            "completed": self.db.execute(
+                "SELECT COUNT(*) FROM minute_requirements WHERE status = 'COMPLETED'"
+            ).fetchone()[0],
+            "notApplicable": self.db.execute(
+                "SELECT COUNT(*) FROM minute_requirements WHERE status = 'NOT_APPLICABLE'"
+            ).fetchone()[0],
+            "sourceExhausted": self.db.execute(
+                "SELECT COUNT(*) FROM minute_requirement_resolutions "
+                "WHERE resolution = 'SOURCE_EXHAUSTED'"
+            ).fetchone()[0],
+            "unresolved": unresolved_minutes,
+        }
+        eligible_episodes = self.db.execute(
+            "SELECT COUNT(*) FROM ("
+            "SELECT e.episode_id FROM candidate_episodes e "
+            "JOIN episode_minute_requirements l ON l.episode_id = e.episode_id "
+            "JOIN minute_requirements r "
+            "ON r.instrument_id = l.instrument_id AND r.trade_date = l.trade_date "
+            "GROUP BY e.episode_id "
+            "HAVING COUNT(*) = 5 AND SUM(r.status = 'COMPLETED') = 5"
+            ")"
+        ).fetchone()[0]
+        total_episodes = self.db.execute(
+            "SELECT COUNT(*) FROM candidate_episodes"
+        ).fetchone()[0]
         metadata = dict(self.db.execute("SELECT * FROM episode_dataset_metadata").fetchone())
         tables = {
             table: self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
@@ -538,6 +672,7 @@ class EpisodeDataset:
                 "minute_requirement_partitions",
                 "episode_minute_bars",
                 "minute_ingestion_attempts",
+                "minute_requirement_resolutions",
                 "minute_archive_files",
             )
         }
@@ -555,6 +690,14 @@ class EpisodeDataset:
             "marketSchemaVersion": metadata["market_schema_version"],
             "marketDatabaseSha256": metadata["market_database_sha256"],
             "policySha256": metadata["policy_sha256"],
+            "coverage": {
+                "requirements": requirement_coverage,
+                "episodes": {
+                    "total": total_episodes,
+                    "eligible": eligible_episodes,
+                    "unavailable": total_episodes - eligible_episodes,
+                },
+            },
             "tables": tables,
         }
         temporary = self.manifest_path.with_suffix(".json.tmp")

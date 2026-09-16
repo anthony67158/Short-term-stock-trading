@@ -414,8 +414,11 @@ class MinuteArchiveImporter:
         requirements = {
             row["instrument_id"].split(".", maxsplit=1)[1]: dict(row)
             for row in self.dataset.db.execute(
-                "SELECT instrument_id, trade_date FROM minute_requirements "
-                "WHERE trade_date = ? AND status = 'PENDING'",
+                "SELECT r.instrument_id, r.trade_date FROM minute_requirements r "
+                "LEFT JOIN minute_requirement_resolutions x "
+                "ON x.instrument_id = r.instrument_id AND x.trade_date = r.trade_date "
+                "WHERE r.trade_date = ? AND r.status = 'PENDING' "
+                "AND x.instrument_id IS NULL",
                 (trade_date,),
             )
         }

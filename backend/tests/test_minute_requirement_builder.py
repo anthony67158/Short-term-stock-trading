@@ -6,7 +6,10 @@ from datetime import datetime, timedelta
 import pytest
 
 from platform_app.adapters.market_tushare import HistoricalMarketError
-from platform_app.modules.experiments.episode_dataset import EpisodeDataset
+from platform_app.modules.experiments.episode_dataset import (
+    EpisodeDataset,
+    EpisodeDatasetError,
+)
 from platform_app.modules.experiments.market_dataset import (
     MarketDataset,
     canonical_sha256,
@@ -449,6 +452,92 @@ def test_archive_import_records_rejection_without_partial_minute_rows(tmp_path):
         assert rejection_details["close"] == "12"
         assert rejection_details["officialDailyClose"] == "10"
         assert rejection_details["terminalCloseAuthority"] == "DAILY_BAR"
+
+
+def test_source_exhaustion_is_audited_excluded_from_retry_and_sealable(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    root = tmp_path / "episodes"
+    with EpisodeDataset(
+        root,
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        with dataset.db:
+            reject_minute_requirement(
+                dataset,
+                instrument_id="SZ.000001",
+                trade_date=dates[1],
+                source_kind="TEST_SOURCE",
+                source_asset_sha256="source-response",
+                reason="MINUTE_SESSION_INCOMPLETE",
+            )
+
+        result = dataset.resolve_exhausted_minutes(
+            start_date=dates[1],
+            end_date=dates[1],
+            reasons=["MINUTE_SESSION_INCOMPLETE"],
+            note="Allowed historical source returned no complete session.",
+        )
+        with MinuteRequirementFetcher(_MinuteClient([]), dataset) as fetcher:
+            assert fetcher.pending_windows(dates[1], dates[1]) == []
+        dataset.db.execute(
+            "UPDATE minute_requirements SET status = 'NOT_APPLICABLE', "
+            "reason = 'TEST_TERMINAL', completed_at = '2026-01-08T00:00:00+00:00' "
+            "WHERE status = 'PENDING' AND NOT EXISTS ("
+            "SELECT 1 FROM minute_requirement_resolutions x "
+            "WHERE x.instrument_id = minute_requirements.instrument_id "
+            "AND x.trade_date = minute_requirements.trade_date)"
+        )
+        dataset.db.commit()
+        manifest = dataset.seal()
+
+    assert result["resolvedRequirements"] == 1
+    assert manifest["schemaVersion"] == "episode-dataset.v4"
+    assert manifest["coverage"]["requirements"] == {
+        "completed": 0,
+        "notApplicable": 4,
+        "sourceExhausted": 1,
+        "unresolved": 0,
+    }
+    assert manifest["coverage"]["episodes"] == {
+        "total": 1,
+        "eligible": 0,
+        "unavailable": 1,
+    }
+
+
+def test_source_exhaustion_requires_recorded_attempt(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        dataset.db.execute(
+            "UPDATE minute_requirements SET reason = 'MINUTE_SESSION_INCOMPLETE' "
+            "WHERE trade_date = ?",
+            (dates[1],),
+        )
+        dataset.db.commit()
+
+        with pytest.raises(
+            EpisodeDatasetError,
+            match="MINUTE_SOURCE_EXHAUSTION_WITHOUT_ATTEMPT",
+        ):
+            dataset.resolve_exhausted_minutes(
+                start_date=dates[1],
+                end_date=dates[1],
+                reasons=["MINUTE_SESSION_INCOMPLETE"],
+                note="No source should be exhausted without evidence.",
+            )
 
 
 def test_archive_import_accepts_stockdb_final_replay_manifest(tmp_path):

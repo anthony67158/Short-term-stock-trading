@@ -71,11 +71,13 @@ def main():
             "minute-requirements",
             "archive-minutes",
             "fetch-minutes",
+            "exhaust-minutes",
             "seal",
         ],
     )
     parser.add_argument("--instrument-id", action="append")
     parser.add_argument("--reason", action="append")
+    parser.add_argument("--resolution-note")
     parser.add_argument("--max-windows", type=positive_int)
     parser.add_argument("--max-sessions", type=positive_int, default=120)
     parser.add_argument("--sample", action="append", type=cross_source_sample)
@@ -310,17 +312,19 @@ def main():
             "minute-requirements",
             "archive-minutes",
             "fetch-minutes",
+            "exhaust-minutes",
             "seal",
         }:
             parser.error(
                 "episode dataset stage must be candidates, minute-requirements, "
-                "archive-minutes, fetch-minutes or seal"
+                "archive-minutes, fetch-minutes, exhaust-minutes or seal"
             )
         if args.stage in {
             "candidates",
             "minute-requirements",
             "archive-minutes",
             "fetch-minutes",
+            "exhaust-minutes",
         } and (
             not args.start_date
             or not args.end_date
@@ -331,6 +335,10 @@ def main():
             parser.error("candidates stage requires ordered YYYYMMDD date values")
         if args.stage == "archive-minutes" and not args.archive_root:
             parser.error("archive-minutes stage requires archive-root")
+        if args.stage == "exhaust-minutes" and (
+            not args.reason or not args.resolution_note
+        ):
+            parser.error("exhaust-minutes stage requires reason and resolution-note")
         if args.stage == "fetch-minutes" and (
             args.max_sessions > 150
             or (
@@ -360,6 +368,18 @@ def main():
         ) as dataset:
             if args.stage == "seal":
                 print(json.dumps(dataset.seal(), ensure_ascii=False))
+            elif args.stage == "exhaust-minutes":
+                print(
+                    json.dumps(
+                        dataset.resolve_exhausted_minutes(
+                            start_date=args.start_date,
+                            end_date=args.end_date,
+                            reasons=args.reason,
+                            note=args.resolution_note,
+                        ),
+                        ensure_ascii=False,
+                    )
+                )
             elif args.stage == "archive-minutes":
                 for archive_root in args.archive_root:
                     with MinuteArchiveImporter(
