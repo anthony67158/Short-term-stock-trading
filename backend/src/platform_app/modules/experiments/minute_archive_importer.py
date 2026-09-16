@@ -230,7 +230,10 @@ def ingest_minute_requirement(
             details=exc.details,
         )
     dataset.db.execute(
-        "INSERT OR IGNORE INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (source_kind, source_asset_sha256, instrument_id, trade_date) "
+        "DO UPDATE SET outcome = excluded.outcome, reason = excluded.reason, "
+        "details_json = excluded.details_json, attempted_at = excluded.attempted_at",
         (
             source_kind,
             source_asset_sha256,
@@ -267,7 +270,10 @@ def reject_minute_requirement(
         (reason, attempted_at, instrument_id, trade_date),
     )
     dataset.db.execute(
-        "INSERT OR IGNORE INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT (source_kind, source_asset_sha256, instrument_id, trade_date) "
+        "DO UPDATE SET outcome = excluded.outcome, reason = excluded.reason, "
+        "details_json = excluded.details_json, attempted_at = excluded.attempted_at",
         (
             source_kind,
             source_asset_sha256,

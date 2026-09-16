@@ -15,6 +15,7 @@ from platform_app.modules.experiments.minute_archive_importer import (
     MinuteArchiveError,
     MinuteArchiveImporter,
     _validate_daily,
+    reject_minute_requirement,
 )
 from platform_app.modules.experiments.minute_requirement_builder import (
     MinuteRequirementBuilder,
@@ -254,6 +255,36 @@ def test_close_mismatch_outside_sse_historical_rule_is_rejected(
             instrument_id=instrument_id,
             trade_date=trade_date,
         )
+
+
+def test_repeated_rejection_updates_audit_details_idempotently(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        kwargs = {
+            "instrument_id": "SZ.000001",
+            "trade_date": dates[1],
+            "source_kind": "TEST_SOURCE",
+            "source_asset_sha256": "same-source",
+            "reason": "MINUTE_DAILY_VOLUME_MISMATCH",
+        }
+        with dataset.db:
+            reject_minute_requirement(dataset, details={"volumeDeltaShares": "-100"}, **kwargs)
+            reject_minute_requirement(dataset, details={"volumeDeltaShares": "-200"}, **kwargs)
+
+        attempts = dataset.db.execute(
+            "SELECT details_json FROM minute_ingestion_attempts "
+            "WHERE source_kind = 'TEST_SOURCE'"
+        ).fetchall()
+        assert len(attempts) == 1
+        assert json.loads(attempts[0][0])["volumeDeltaShares"] == "-200"
 
 
 def test_builder_creates_five_session_requirements_and_marks_missing_daily(tmp_path):
