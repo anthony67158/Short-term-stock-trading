@@ -50,6 +50,7 @@ def main():
             "build-ranking-dataset",
             "train-quant-model",
             "train-ranking-model",
+            "audit-execution-coverage",
         ],
     )
     parser.add_argument("--username")
@@ -93,6 +94,7 @@ def main():
     parser.add_argument("--max-windows", type=positive_int)
     parser.add_argument("--max-sessions", type=positive_int, default=120)
     parser.add_argument("--max-iterations", type=positive_int, default=120)
+    parser.add_argument("--top-n", type=positive_int, default=10)
     parser.add_argument("--sample", action="append", type=cross_source_sample)
     args = parser.parse_args()
     if args.command == "export-contracts":
@@ -293,6 +295,51 @@ def main():
                                 ),
                                 flush=True,
                             )
+    elif args.command == "audit-execution-coverage":
+        from platform_app.modules.experiments.execution_backtest import (
+            write_execution_coverage_audit,
+        )
+
+        if not all(
+            (
+                args.ranking_root,
+                args.model_root,
+                args.episode_root,
+                args.label_root,
+                args.output,
+            )
+        ):
+            parser.error(
+                "ranking-root, model-root, episode-root, label-root and output "
+                "are required"
+            )
+        try:
+            ranking_root = external_dataset_root(args.ranking_root)
+            model_root = external_dataset_root(args.model_root)
+            episode_root = external_dataset_root(args.episode_root)
+            label_root = external_dataset_root(args.label_root)
+            output_parent = external_dataset_root(args.output.resolve().parent)
+        except ValueError as exc:
+            parser.error(str(exc))
+        report = write_execution_coverage_audit(
+            ranking_dataset_root=ranking_root,
+            ranking_model_root=model_root,
+            episode_dataset_root=episode_root,
+            label_dataset_root=label_root,
+            output_path=output_parent / args.output.name,
+            top_n=args.top_n,
+        )
+        print(
+            json.dumps(
+                {
+                    "output": str((output_parent / args.output.name).resolve()),
+                    "complete": report["complete"],
+                    "releaseBlockers": report["releaseBlockers"],
+                    "coverage": report["coverage"],
+                },
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "train-ranking-model":
         from platform_app.modules.experiments.ranking_model_trainer import (
             load_ranking_training_data,
