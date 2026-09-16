@@ -156,6 +156,115 @@ def test_builder_syncs_reference_and_complete_daily_partition(tmp_path):
         assert bse_dates == ("20211115", "20200727")
 
 
+def test_builder_syncs_block_trade_summaries_with_audited_discards(tmp_path):
+    data = responses()
+    data[("block_trade", "20260915")] = [
+        {
+            "ts_code": "000001.SZ",
+            "trade_date": "20260915",
+            "price": "10",
+            "vol": "1",
+            "amount": "10",
+            "buyer": "buyer one",
+            "seller": "seller one",
+        },
+        {
+            "ts_code": "000001.SZ",
+            "trade_date": "20260915",
+            "price": "10.5",
+            "vol": "2",
+            "amount": "21",
+            "buyer": "buyer two",
+            "seller": "seller two",
+        },
+        {
+            "ts_code": "200001.SZ",
+            "trade_date": "20260915",
+            "price": "5",
+            "vol": "1",
+            "amount": "5",
+            "buyer": "",
+            "seller": "",
+        },
+        {
+            "ts_code": "600999.SH",
+            "trade_date": "20260915",
+            "price": "5",
+            "vol": "1",
+            "amount": "5",
+            "buyer": "",
+            "seller": "",
+        },
+    ]
+    root = tmp_path / "dataset"
+    with MarketDataset(root, dataset_id="block-trades", source="TUSHARE_COMPATIBLE") as ds:
+        builder = MarketDatasetBuilder(
+            FakeClient(data),
+            ds,
+            observed_at=lambda: "2026-09-16T01:00:00+00:00",
+        )
+        builder.sync_reference("20160101", "20260915")
+        builder.sync_daily_partition("20260915")
+
+        result = builder.sync_block_trade_partition("20260915")
+        assert result == {
+            "status": "COMPLETED",
+            "tradeDate": "20260915",
+            "transactions": 2,
+            "summaryRows": 1,
+            "discardedNonAShareRows": 1,
+            "discardedUnknownInstruments": 1,
+        }
+        assert builder.sync_block_trade_partition("20260915")["status"] == "SKIPPED"
+
+        summary = ds.db.execute("SELECT * FROM block_trade_summaries").fetchone()
+        assert summary["instrument_id"] == "SZ.000001"
+        assert summary["transaction_count"] == 2
+        assert summary["low_price"] == "10"
+        assert summary["high_price"] == "10.5"
+        assert summary["volume_shares"] == "30000"
+        assert summary["amount_cny"] == "310000"
+        assert summary["available_at"] == "2026-09-15T21:00:00+08:00"
+        details = json.loads(
+            ds.db.execute(
+                "SELECT details_json FROM sync_checkpoints "
+                "WHERE stream = 'block_trades' AND partition_key = '20260915'"
+            ).fetchone()[0]
+        )
+        assert details["discardedNonAShareRows"]["count"] == 1
+        assert details["discardedUnknownInstruments"]["count"] == 1
+
+
+def test_builder_rejects_block_trade_outside_instrument_lifecycle(tmp_path):
+    data = responses()
+    delisted = stock("600999.SH", "Delisted", "主板", "SSE")
+    delisted.update({"list_status": "D", "delist_date": "20260915"})
+    data[("stock_basic", "D")] = [delisted]
+    data[("block_trade", "20260915")] = [
+        {
+            "ts_code": "600999.SH",
+            "trade_date": "20260915",
+            "price": "5",
+            "vol": "1",
+            "amount": "5",
+            "buyer": "",
+            "seller": "",
+        }
+    ]
+
+    with MarketDataset(
+        tmp_path / "dataset",
+        dataset_id="block-trade-lifecycle",
+        source="TUSHARE_COMPATIBLE",
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+        builder.sync_daily_partition("20260915")
+
+        with pytest.raises(MarketDatasetError, match="BLOCK_TRADE_OUTSIDE_LIFECYCLE"):
+            builder.sync_block_trade_partition("20260915")
+
+
 def test_builder_syncs_paginated_name_changes_with_historical_availability(tmp_path):
     data = responses()
     current = {

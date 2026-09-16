@@ -6,6 +6,7 @@ from decimal import Decimal
 
 from platform_app.adapters.market_tushare import (
     BSE_MAPPING_FIELDS,
+    BLOCK_TRADE_FIELDS,
     DAILY_FIELDS,
     MINUTE_FIELDS,
     STOCK_BASIC_FIELDS,
@@ -13,6 +14,7 @@ from platform_app.adapters.market_tushare import (
     TushareClient,
     instrument_parts,
     normalize_adjustment_factor,
+    normalize_block_trade,
     normalize_bse_mapping,
     normalize_daily,
     normalize_instrument,
@@ -51,7 +53,7 @@ def _observed_at() -> str:
 def _historical_available_at(trade_date: str, kind: str) -> str:
     if kind == "adj_factor":
         time = "09:20:00"
-    elif kind == "minute":
+    elif kind in {"block_trade", "minute"}:
         time = "21:00:00"
     else:
         time = "16:30:00"
@@ -783,6 +785,122 @@ class MarketDatasetBuilder:
             "discardedAliasDuplicates": sum(
                 map(len, (duplicate_daily, duplicate_factors, duplicate_suspensions))
             ),
+        }
+
+    def sync_block_trade_partition(self, trade_date: str) -> dict:
+        if self.dataset.has_checkpoint("block_trades", trade_date):
+            return {"status": "SKIPPED", "tradeDate": trade_date}
+        if not self.dataset.has_checkpoint("daily", trade_date):
+            raise MarketDatasetError("BLOCK_TRADES_REQUIRE_VALIDATED_DAILY_PARTITION")
+
+        observed_at = self.observed_at()
+        raw_rows = _validate_partition_rows(
+            self.client.rows(
+                "block_trade",
+                {"trade_date": trade_date},
+                BLOCK_TRADE_FIELDS,
+            ),
+            trade_date,
+        )
+        if len(raw_rows) >= 1000:
+            raise MarketDatasetError("BLOCK_TRADES_MAY_BE_TRUNCATED")
+        raw_rows, non_a_share_rows = _filter_non_a_share_rows(raw_rows)
+
+        aliases = self.aliases()
+        known_source_codes = {
+            row["source_code"]
+            for row in self.dataset.db.execute("SELECT source_code FROM instruments")
+        } | set(aliases)
+        known_rows = []
+        unknown_rows = []
+        for row in raw_rows:
+            source_code = str(row.get("ts_code") or "").upper()
+            (known_rows if source_code in known_source_codes else unknown_rows).append(row)
+
+        transactions = [normalize_block_trade(row, aliases) for row in known_rows]
+        expected = set(self.dataset.eligible_instruments(trade_date))
+        outside_lifecycle = sorted(
+            {row["instrumentId"] for row in transactions} - expected
+        )
+        if outside_lifecycle:
+            raise MarketDatasetError(
+                "BLOCK_TRADE_OUTSIDE_LIFECYCLE:"
+                + ",".join(outside_lifecycle)
+            )
+        for row in transactions:
+            expected_source_code = self.dataset.source_code_for_date(
+                row["instrumentId"], trade_date
+            )
+            if row["sourceCode"] != expected_source_code:
+                raise MarketDatasetError("BLOCK_TRADE_SOURCE_CODE_MISMATCH")
+
+        transactions.sort(
+            key=lambda row: (
+                row["instrumentId"],
+                row["sourceCode"],
+                row["price"],
+                row["volumeShares"],
+                row["amountCny"],
+                row["sourceRowSha256"],
+            )
+        )
+        grouped: dict[str, list[dict]] = {}
+        for row in transactions:
+            grouped.setdefault(row["instrumentId"], []).append(row)
+
+        available_at = _historical_available_at(trade_date, "block_trade")
+        summaries = []
+        for instrument_id, rows in grouped.items():
+            prices = [Decimal(row["price"]) for row in rows]
+            summaries.append(
+                {
+                    "instrument_id": instrument_id,
+                    "source_code": rows[0]["sourceCode"],
+                    "trade_date": trade_date,
+                    "transaction_count": len(rows),
+                    "low_price": format(min(prices), "f"),
+                    "high_price": format(max(prices), "f"),
+                    "volume_shares": format(
+                        sum(Decimal(row["volumeShares"]) for row in rows),
+                        "f",
+                    ),
+                    "amount_cny": format(
+                        sum(Decimal(row["amountCny"]) for row in rows),
+                        "f",
+                    ),
+                    "source": SOURCE,
+                    "available_at": available_at,
+                    "source_rows_sha256": canonical_sha256(
+                        [row["sourceRowSha256"] for row in rows]
+                    ),
+                }
+            )
+        self.dataset.write_facts(
+            "block_trade_summaries",
+            summaries,
+            key_fields=("instrument_id", "trade_date"),
+        )
+        self.dataset.checkpoint(
+            "block_trades",
+            trade_date,
+            transactions,
+            source=SOURCE,
+            first_seen_at=observed_at,
+            available_at=available_at,
+            availability_method="RECONSTRUCTED_FROM_VENDOR_SCHEDULE",
+            details={
+                "discardedNonAShareRows": _discard_audit(non_a_share_rows),
+                "discardedUnknownInstruments": _discard_audit(unknown_rows),
+                "summaryRows": len(summaries),
+            },
+        )
+        return {
+            "status": "COMPLETED",
+            "tradeDate": trade_date,
+            "transactions": len(transactions),
+            "summaryRows": len(summaries),
+            "discardedNonAShareRows": len(non_a_share_rows),
+            "discardedUnknownInstruments": len(unknown_rows),
         }
 
     def sync_minute_partition(self, instrument_id: str, trade_date: str) -> dict:
