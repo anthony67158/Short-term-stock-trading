@@ -56,6 +56,7 @@ def main():
             "evaluate-account-backtest",
             "build-joint-candidate",
             "publish-joint-shadow",
+            "run-daily-joint-cycle",
             "build-position-action-dataset",
             "train-position-action-model",
         ],
@@ -112,6 +113,7 @@ def main():
     parser.add_argument("--max-windows", type=positive_int)
     parser.add_argument("--max-sessions", type=positive_int, default=120)
     parser.add_argument("--max-iterations", type=positive_int, default=120)
+    parser.add_argument("--minimum-matured-samples", type=positive_int, default=2000)
     parser.add_argument("--top-n", type=positive_int, default=10)
     parser.add_argument("--sample", action="append", type=cross_source_sample)
     args = parser.parse_args()
@@ -400,6 +402,46 @@ def main():
                     position_model_root=position_model_root,
                     account_backtest_path=account_parent
                     / args.account_backtest.name,
+                ),
+                ensure_ascii=False,
+            )
+        )
+    elif args.command == "run-daily-joint-cycle":
+        from platform_app.modules.experiments.daily_joint_cycle import (
+            write_daily_joint_cycle,
+        )
+
+        if not all(
+            (
+                args.registry_root,
+                args.dataset_root,
+                args.account_backtest,
+                args.output,
+            )
+        ):
+            parser.error(
+                "registry-root, dataset-root, account-backtest and output "
+                "are required"
+            )
+        try:
+            registry_root = external_dataset_root(args.registry_root)
+            dataset_root = external_dataset_root(args.dataset_root)
+            output_root = external_dataset_root(args.output)
+            account_parent = external_dataset_root(
+                args.account_backtest.resolve().parent
+            )
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                write_daily_joint_cycle(
+                    output_root=output_root,
+                    active_release_pointer=registry_root
+                    / "active-shadow.json",
+                    market_dataset_root=dataset_root,
+                    account_backtest_path=account_parent
+                    / args.account_backtest.name,
+                    minimum_matured_samples=args.minimum_matured_samples,
                 ),
                 ensure_ascii=False,
             )
