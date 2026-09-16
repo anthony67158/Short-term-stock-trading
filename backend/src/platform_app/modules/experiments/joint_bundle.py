@@ -257,6 +257,14 @@ class JointBundle:
             release_id=self.manifest["bundleId"],
             status=self.manifest["releaseStatus"],
             allows_new_risk=self.manifest.get("allowsNewRisk", False),
+            ranking_model_bundle_id=components.get("rankingModelBundleId"),
+            ranking_model_artifact_sha256=components.get(
+                "rankingModelArtifactSha256"
+            ),
+            quant_model_bundle_id=components.get("quantModelBundleId"),
+            quant_model_artifact_sha256=components.get(
+                "quantModelArtifactSha256"
+            ),
             position_model_bundle_id=components.get("positionModelBundleId"),
             position_model_artifact_sha256=components.get(
                 "positionModelArtifactSha256"
