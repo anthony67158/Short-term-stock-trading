@@ -215,6 +215,11 @@ def test_candidate_registration_keeps_release_history(
         agent_model="gpt-synthetic",
     )
     monkeypatch.setattr(release_service, "settings", lambda: config)
+    monkeypatch.setattr(
+        release_service,
+        "_publisher_id",
+        lambda _db: owner,
+    )
 
     def write_candidate(**kwargs):
         root = kwargs["output_root"]
@@ -255,4 +260,19 @@ def test_candidate_registration_keeps_release_history(
     assert candidate.allows_new_risk is False
     history = release_service.releases(owner, 10)
     assert history.active_release_id is None
+    assert history.can_manage is True
     assert [row.status for row in history.releases] == ["APPROVED"]
+
+
+def test_release_mutation_requires_platform_publisher(monkeypatch):
+    monkeypatch.setattr(
+        release_service,
+        "_publisher_id",
+        lambda _db: "publisher",
+    )
+    with pytest.raises(
+        release_service.ReleaseError,
+        match="没有联合包发布权限",
+    ) as error:
+        release_service._authorize_publisher(object(), "other-user")
+    assert error.value.status == 403

@@ -90,6 +90,9 @@ tbody tr:hover { background: var(--hover); }
 .status-label { display: inline-flex; align-items: center; min-height: 24px; padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: 4px; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .status-label.shadow { color: var(--warning); border-color: currentColor; }
 .status-label.ready { color: var(--down); border-color: currentColor; }
+.status-label.active, .status-label.evaluated, .status-label.succeeded { color: var(--down); border-color: currentColor; }
+.status-label.failed, .status-label.rejected { color: var(--warning); border-color: currentColor; }
+.status-label.approved, .status-label.frozen { color: var(--accent); border-color: currentColor; }
 .wide-field { grid-column: 1 / -1; }
 .evidence-form textarea { min-height: 120px; padding: var(--space-3); resize: vertical; }
 .evidence-form > p { font-size: 12px; }
@@ -105,6 +108,29 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
 .task-status { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-3); background: var(--raised); }
 .assessment { padding: var(--space-6) 0; border-bottom: 1px solid var(--border); max-width: 960px; }
 .assessment p { margin-bottom: var(--space-3); }
+.workspace-tabs { min-height: 44px; padding: 0 24px; border-bottom: 1px solid var(--border); display: flex; align-items: end; gap: var(--space-6); overflow-x: auto; }
+.workspace-tabs button { height: 44px; padding: 0; border: 0; border-bottom: 2px solid transparent; color: var(--secondary); background: transparent; white-space: nowrap; }
+.workspace-tabs button[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.compact-select { width: min(100%, 360px); }
+.strategy-detail { padding: var(--space-8) 0; border-top: 1px solid var(--border); max-width: 1080px; }
+.strategy-detail > p { margin: var(--space-4) 0; max-width: 840px; }
+.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4) var(--space-8); margin: var(--space-6) 0; }
+.detail-grid div { min-width: 0; }
+.detail-grid dt { color: var(--secondary); font-size: 12px; }
+.detail-grid dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; }
+.strategy-detail details, .release-blockers { border-top: 1px solid var(--border); padding-top: var(--space-4); }
+.strategy-detail summary, .release-blockers summary { cursor: pointer; font-weight: 500; }
+.policy-code { max-height: 360px; margin: var(--space-4) 0 0; padding: var(--space-4); overflow: auto; border: 1px solid var(--border); border-radius: var(--control-radius); color: var(--secondary); background: var(--raised); font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.experiment-summary, .release-current { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6); padding: var(--space-5) 0 var(--space-6); border-bottom: 1px solid var(--border); }
+.experiment-summary > div, .release-current > div { display: grid; align-content: start; gap: var(--space-1); min-width: 0; }
+.experiment-summary span, .release-current span { font-size: 12px; }
+.experiment-summary strong, .release-current strong { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.release-current { grid-template-columns: minmax(0, 2fr) minmax(0, 1.5fr) minmax(0, 1fr); padding-top: 0; }
+.release-blockers { margin-top: var(--space-5); }
+.release-blockers ul { columns: 2; margin: var(--space-3) 0 0; padding-left: var(--space-5); }
+.release-blockers li { break-inside: avoid; padding: var(--space-1) 0; color: var(--secondary); }
+.release-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); margin-top: var(--space-5); }
+.release-form .form-actions, .release-form .error { grid-column: 1 / -1; }
 .empty { padding: 64px 24px; text-align: center; color: var(--secondary); }
 .empty h1, .empty h2 { color: var(--text); margin-bottom: 12px; }
 .empty p { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -125,9 +151,12 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
   .sidebar nav a { white-space: nowrap; min-height: 44px; }
   .sidebar-bottom { padding: 0; margin: 0; flex-direction: row; align-items: center; justify-content: space-between; }
   .workspace-header { padding: 16px; }
+  .workspace-tabs { padding: 0 16px; }
   .workspace-header > span { display: none; }
   .workspace-content { padding: 16px; }
   .inline-form { grid-template-columns: minmax(0, 1fr); }
+  .release-form, .detail-grid, .experiment-summary, .release-current { grid-template-columns: minmax(0, 1fr); }
+  .release-blockers ul { columns: 1; }
   .account-summary { gap: var(--space-6); }
   .account-summary > button { margin-left: 0; }
   .table-scroll { font-size: 12px; }

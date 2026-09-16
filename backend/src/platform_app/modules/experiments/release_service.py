@@ -30,6 +30,7 @@ from platform_app.modules.experiments.models import (
     StrategyVersion,
 )
 from platform_app.modules.experiments.service import _fingerprint
+from platform_app.modules.identity.models import User
 from platform_app.modules.operations.models import Outbox
 
 
@@ -40,6 +41,24 @@ class ReleaseError(ValueError):
 
 def _view(row: ReleaseRecord) -> ReleaseView:
     return ReleaseView.model_validate(row)
+
+
+def _publisher_id(db) -> str | None:
+    active_owner = db.scalar(
+        select(ReleaseRecord.owner_id).where(ReleaseRecord.status == "ACTIVE").limit(1)
+    )
+    if active_owner:
+        return active_owner
+    return db.scalar(select(User.id).order_by(User.created_at, User.id).limit(1))
+
+
+def _authorize_publisher(db, owner_id: str) -> None:
+    if _publisher_id(db) != owner_id:
+        raise ReleaseError(
+            "RELEASE_PERMISSION_DENIED",
+            "当前用户没有联合包发布权限",
+            403,
+        )
 
 
 def _owned_experiment(db, owner_id: str, strategy_id: str, experiment_id: str):
@@ -83,6 +102,7 @@ def register_release_candidate(
     config = settings()
     candidate_root = config.joint_candidate_registry_root.expanduser().resolve() / body.candidate_id
     with sessions().begin() as db:
+        _authorize_publisher(db, owner_id)
         existing = db.scalar(
             select(ReleaseRecord).where(
                 ReleaseRecord.owner_id == owner_id,
@@ -207,6 +227,7 @@ def activate_release(
     request_hash = _fingerprint(body)
     config = settings()
     with sessions().begin() as db:
+        _authorize_publisher(db, owner_id)
         existing = db.scalar(
             select(ReleaseRecord).where(
                 ReleaseRecord.owner_id == owner_id,
@@ -317,6 +338,7 @@ def rollback_release(
     )
     config = settings()
     with sessions().begin() as db:
+        _authorize_publisher(db, owner_id)
         existing = db.scalar(
             select(ReleaseRecord).where(
                 ReleaseRecord.owner_id == owner_id,
@@ -418,10 +440,11 @@ def releases(owner_id: str, limit: int) -> ReleasePage:
     except JointBundleError:
         active_release_id = None
     with sessions()() as db:
+        publisher_id = _publisher_id(db)
         rows = list(
             db.scalars(
                 select(ReleaseRecord)
-                .where(ReleaseRecord.owner_id == owner_id)
+                .where(ReleaseRecord.owner_id == publisher_id)
                 .order_by(
                     ReleaseRecord.created_at.desc(),
                     ReleaseRecord.id.desc(),
@@ -431,5 +454,6 @@ def releases(owner_id: str, limit: int) -> ReleasePage:
         )
         return ReleasePage(
             active_release_id=active_release_id,
+            can_manage=publisher_id == owner_id,
             releases=[_view(row) for row in rows],
         )

@@ -175,4 +175,5 @@ class ReleaseView(Contract):
 
 class ReleasePage(Contract):
     active_release_id: str | None
+    can_manage: bool
     releases: list[ReleaseView]

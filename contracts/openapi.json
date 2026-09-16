@@ -8138,6 +8138,10 @@
             ],
             "title": "Activereleaseid"
           },
+          "canManage": {
+            "type": "boolean",
+            "title": "Canmanage"
+          },
           "releases": {
             "items": {
               "$ref": "#/components/schemas/ReleaseView"
@@ -8150,6 +8154,7 @@
         "type": "object",
         "required": [
           "activeReleaseId",
+          "canManage",
           "releases"
         ],
         "title": "ReleasePage"

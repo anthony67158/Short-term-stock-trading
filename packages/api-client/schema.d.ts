@@ -2545,6 +2545,8 @@ export interface components {
         ReleasePage: {
             /** Activereleaseid */
             activeReleaseId: string | null;
+            /** Canmanage */
+            canManage: boolean;
             /** Releases */
             releases: components["schemas"]["ReleaseView"][];
         };
