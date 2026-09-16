@@ -156,6 +156,21 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
 .review-finding, .review-proposal { padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
 .review-finding > p, .review-proposal > p { margin-top: var(--space-2); }
 .review-proposal h3 { margin: 0; font-size: 14px; line-height: 22px; }
+.today-status { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-6); padding-bottom: var(--space-6); border-bottom: 1px solid var(--border); }
+.today-status > div { display: grid; gap: var(--space-1); min-width: 0; }
+.today-status span, .today-status small { font-size: 12px; }
+.today-status strong { font-size: 18px; font-weight: 500; overflow-wrap: anywhere; }
+.today-status small { color: var(--secondary); }
+.today-columns { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, 1fr); gap: var(--space-8); padding-top: var(--space-8); }
+.today-section { min-width: 0; }
+.today-section > h2 { margin-bottom: var(--space-4); }
+.today-list article { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: var(--space-3) 0; border-bottom: 1px solid var(--border); }
+.today-list article p { color: var(--secondary); margin-top: var(--space-1); }
+.today-links { display: grid; }
+.today-links a { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 56px; padding: var(--space-2); border-bottom: 1px solid var(--border); color: var(--text); }
+.today-links a:hover { background: var(--hover); }
+.today-links span { display: grid; }
+.today-links small { color: var(--secondary); }
 .empty { padding: 64px 24px; text-align: center; color: var(--secondary); }
 .empty h1, .empty h2 { color: var(--text); margin-bottom: 12px; }
 .empty p { display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -180,7 +195,7 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
   .workspace-header > span { display: none; }
   .workspace-content { padding: 16px; }
   .inline-form { grid-template-columns: minmax(0, 1fr); }
-  .release-form, .detail-grid, .experiment-summary, .release-current, .review-summary .experiment-summary, .review-columns { grid-template-columns: minmax(0, 1fr); }
+  .release-form, .detail-grid, .experiment-summary, .release-current, .review-summary .experiment-summary, .review-columns, .today-status, .today-columns { grid-template-columns: minmax(0, 1fr); }
   .release-blockers ul { columns: 1; }
   .account-summary { gap: var(--space-6); }
   .account-summary > button { margin-left: 0; }

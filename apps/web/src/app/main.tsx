@@ -2,15 +2,16 @@ import { Component, StrictMode, type ErrorInfo, type ReactNode, useEffect, useSt
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router";
-import { ChartNoAxesCombined, CircleHelp, Compass, FlaskConical, Inbox as InboxIcon, LayoutDashboard, LogOut, Moon, NotebookPen, Sun, Wallet } from "lucide-react";
+import { ChartNoAxesCombined, Compass, FlaskConical, Inbox as InboxIcon, LayoutDashboard, LogOut, Moon, NotebookPen, Sun, Wallet } from "lucide-react";
 import { api } from "../lib/api";
-import { Button, Empty } from "../components/Controls";
+import { Button } from "../components/Controls";
 import { Login } from "./Login";
 import { Portfolio } from "../features/portfolio/Portfolio";
 import { Market, Research } from "../features/market/Market";
 import { Inbox } from "../features/inbox/Inbox";
 import { Review } from "../features/review/Review";
 import { Strategies } from "../features/strategies/Strategies";
+import { Today } from "../features/today/Today";
 import "../styles/global.css";
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 15_000 } } });
@@ -68,6 +69,7 @@ function Workspace() {
       </div>
     </aside>
     <main id="main" className="workspace"><Routes>
+      <Route path="/" element={<Today />} />
       <Route path="/portfolio" element={<Portfolio />} />
       <Route path="/market" element={<Market />} />
       <Route path="/research" element={<Research />} />
@@ -75,10 +77,6 @@ function Workspace() {
       <Route path="/inbox" element={<Inbox />} />
       <Route path="/strategies" element={<Strategies />} />
       <Route path="/review" element={<Review />} />
-      {navigation.filter(({ path }) => !["/portfolio", "/market", "/research", "/inbox", "/strategies", "/review"].includes(path)).map(({ path, label }) => <Route key={path} path={path} element={<>
-        <header className="workspace-header"><h1>{label}</h1><span className="secondary">研究与账户工作区</span></header>
-        <div className="workspace-content"><Empty title="此工作区正在建设"><CircleHelp size={20} />模块接入后将在这里展示真实数据与任务结果。</Empty></div>
-      </>} />)}
     </Routes></main>
   </div>;
 }
