@@ -62,9 +62,7 @@ def test_episode_dataset_binds_verified_market_hash_and_replays_exact_partition(
         "universe_count": 5000,
         "universe_sha256": hashlib.sha256(b"universe").hexdigest(),
         "candidates": [candidate()],
-        "rejections": [
-            {"board": "MAIN", "reason": "INSUFFICIENT_HISTORY", "instrumentCount": 2}
-        ],
+        "rejections": [{"board": "MAIN", "reason": "INSUFFICIENT_HISTORY", "instrumentCount": 2}],
     }
 
     with EpisodeDataset(
@@ -77,8 +75,7 @@ def test_episode_dataset_binds_verified_market_hash_and_replays_exact_partition(
         assert not dataset.write_candidate_partition(**kwargs)
         assert dataset.has_candidate_partition("20260915")
         metadata = dataset.db.execute(
-            "SELECT market_database_sha256, policy_sha256 "
-            "FROM episode_dataset_metadata"
+            "SELECT market_database_sha256, policy_sha256 FROM episode_dataset_metadata"
         ).fetchone()
         assert metadata["market_database_sha256"] == market_manifest["databaseSha256"]
         assert len(metadata["policy_sha256"]) == 64
@@ -120,9 +117,7 @@ def test_candidate_partition_conflict_is_rejected_without_partial_rows(tmp_path)
                 candidates=[candidate(selectionScore="9")],
                 rejections=[],
             )
-        assert dataset.db.execute(
-            "SELECT COUNT(*) FROM candidate_episodes"
-        ).fetchone()[0] == 1
+        assert dataset.db.execute("SELECT COUNT(*) FROM candidate_episodes").fetchone()[0] == 1
 
 
 def test_episode_dataset_rejects_market_tampering_and_policy_drift(tmp_path):
@@ -167,9 +162,10 @@ def test_sealed_episode_dataset_has_verifiable_hash_and_is_immutable(tmp_path):
         manifest = dataset.seal()
 
     assert manifest["marketDatabaseSha256"] == market_manifest["databaseSha256"]
-    assert manifest["databaseSha256"] == hashlib.sha256(
-        (root / "episodes.sqlite3").read_bytes()
-    ).hexdigest()
+    assert (
+        manifest["databaseSha256"]
+        == hashlib.sha256((root / "episodes.sqlite3").read_bytes()).hexdigest()
+    )
     with pytest.raises(EpisodeDatasetError, match="EPISODE_DATASET_ALREADY_SEALED"):
         EpisodeDataset(
             root,
@@ -177,3 +173,38 @@ def test_sealed_episode_dataset_has_verifiable_hash_and_is_immutable(tmp_path):
             market_dataset_root=market_root,
             policy=policy(),
         )
+
+
+def test_unsealed_v1_dataset_migrates_without_rebuilding_candidates(tmp_path):
+    market_root, _ = sealed_market_dataset(tmp_path)
+    root = tmp_path / "episodes"
+    with EpisodeDataset(
+        root,
+        dataset_id="short-horizon-training-v1",
+        market_dataset_root=market_root,
+        policy=policy(),
+    ) as dataset:
+        dataset.write_candidate_partition(
+            decision_date="20260915",
+            execution_date="20260916",
+            universe_count=1,
+            universe_sha256=hashlib.sha256(b"universe").hexdigest(),
+            candidates=[candidate()],
+            rejections=[],
+        )
+        dataset.db.execute(
+            "UPDATE episode_dataset_metadata SET schema_version = 'episode-dataset.v1'"
+        )
+        dataset.db.commit()
+
+    with EpisodeDataset(
+        root,
+        dataset_id="short-horizon-training-v1",
+        market_dataset_root=market_root,
+        policy=policy(),
+    ) as migrated:
+        assert (
+            migrated.db.execute("SELECT schema_version FROM episode_dataset_metadata").fetchone()[0]
+            == "episode-dataset.v2"
+        )
+        assert migrated.db.execute("SELECT COUNT(*) FROM candidate_episodes").fetchone()[0] == 1

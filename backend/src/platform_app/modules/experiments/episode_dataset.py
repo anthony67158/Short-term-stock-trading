@@ -13,7 +13,8 @@ class EpisodeDatasetError(ValueError):
     pass
 
 
-SCHEMA_VERSION = "episode-dataset.v1"
+SCHEMA_VERSION = "episode-dataset.v2"
+MIGRATABLE_SCHEMA_VERSIONS = {"episode-dataset.v1"}
 REQUIRED_POLICY_KEYS = {
     "candidatePolicy",
     "executionPolicy",
@@ -68,6 +69,38 @@ CREATE TABLE IF NOT EXISTS candidate_episodes (
     selection_score TEXT NOT NULL,
     source_row_sha256 TEXT NOT NULL,
     UNIQUE (decision_date, instrument_id)
+) STRICT;
+CREATE TABLE IF NOT EXISTS minute_requirements (
+    instrument_id TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    board TEXT NOT NULL CHECK (board IN ('MAIN', 'CHINEXT', 'STAR', 'BEIJING')),
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'COMPLETED', 'NOT_APPLICABLE')),
+    reason TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
+    last_attempt_at TEXT,
+    completed_at TEXT,
+    PRIMARY KEY (instrument_id, trade_date),
+    CHECK (
+        (status = 'PENDING' AND completed_at IS NULL)
+        OR (status IN ('COMPLETED', 'NOT_APPLICABLE') AND completed_at IS NOT NULL)
+    )
+) STRICT;
+CREATE TABLE IF NOT EXISTS episode_minute_requirements (
+    episode_id TEXT NOT NULL REFERENCES candidate_episodes(episode_id),
+    instrument_id TEXT NOT NULL,
+    trade_date TEXT NOT NULL,
+    session_offset INTEGER NOT NULL CHECK (session_offset BETWEEN 0 AND 4),
+    PRIMARY KEY (episode_id, session_offset),
+    FOREIGN KEY (instrument_id, trade_date)
+        REFERENCES minute_requirements(instrument_id, trade_date)
+) STRICT;
+CREATE TABLE IF NOT EXISTS minute_requirement_partitions (
+    decision_date TEXT PRIMARY KEY REFERENCES candidate_partitions(decision_date),
+    episode_count INTEGER NOT NULL CHECK (episode_count >= 0),
+    requirement_link_count INTEGER NOT NULL CHECK (requirement_link_count >= 0),
+    deferred_episode_count INTEGER NOT NULL CHECK (deferred_episode_count >= 0),
+    payload_sha256 TEXT NOT NULL,
+    completed_at TEXT NOT NULL
 ) STRICT;
 """
 
@@ -127,9 +160,7 @@ class EpisodeDataset:
     ):
         missing = REQUIRED_POLICY_KEYS - policy.keys()
         if missing:
-            raise EpisodeDatasetError(
-                f"POLICY_MISSING_KEYS:{','.join(sorted(missing))}"
-            )
+            raise EpisodeDatasetError(f"POLICY_MISSING_KEYS:{','.join(sorted(missing))}")
         self.root = root.resolve()
         self.db_path = self.root / "episodes.sqlite3"
         self.manifest_path = self.root / "manifest.json"
@@ -151,18 +182,35 @@ class EpisodeDataset:
             "market_schema_version, market_database_sha256, policy_sha256, policy_json "
             "FROM episode_dataset_metadata"
         ).fetchone()
-        expected = (
+        expected_identity = (
             dataset_id,
-            SCHEMA_VERSION,
             market["datasetId"],
             market["schemaVersion"],
             market["databaseSha256"],
             policy_hash,
             policy_json,
         )
-        if existing and tuple(existing) != expected:
-            self.db.close()
-            raise EpisodeDatasetError("EPISODE_DATASET_IDENTITY_MISMATCH")
+        if existing:
+            actual_identity = (
+                existing["dataset_id"],
+                existing["market_dataset_id"],
+                existing["market_schema_version"],
+                existing["market_database_sha256"],
+                existing["policy_sha256"],
+                existing["policy_json"],
+            )
+            if actual_identity != expected_identity:
+                self.db.close()
+                raise EpisodeDatasetError("EPISODE_DATASET_IDENTITY_MISMATCH")
+            if existing["schema_version"] in MIGRATABLE_SCHEMA_VERSIONS:
+                self.db.execute(
+                    "UPDATE episode_dataset_metadata SET schema_version = ? WHERE singleton = 1",
+                    (SCHEMA_VERSION,),
+                )
+                self.db.commit()
+            elif existing["schema_version"] != SCHEMA_VERSION:
+                self.db.close()
+                raise EpisodeDatasetError("EPISODE_DATASET_SCHEMA_UNSUPPORTED")
         if not existing:
             self.db.execute(
                 "INSERT INTO episode_dataset_metadata VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -197,6 +245,102 @@ class EpisodeDataset:
             is not None
         )
 
+    def has_minute_requirement_partition(self, decision_date: str) -> bool:
+        return (
+            self.db.execute(
+                "SELECT 1 FROM minute_requirement_partitions WHERE decision_date = ?",
+                (decision_date,),
+            ).fetchone()
+            is not None
+        )
+
+    def write_minute_requirement_partition(
+        self,
+        *,
+        decision_date: str,
+        episode_schedules: list[dict],
+        deferred_episode_ids: list[str],
+    ) -> bool:
+        schedules = sorted(episode_schedules, key=lambda row: row["episodeId"])
+        deferred = sorted(deferred_episode_ids)
+        links = [
+            {
+                "episodeId": schedule["episodeId"],
+                "instrumentId": schedule["instrumentId"],
+                "board": schedule["board"],
+                "tradeDate": trade_date,
+                "sessionOffset": offset,
+                "hasDailyBar": schedule["dailyAvailability"][offset],
+            }
+            for schedule in schedules
+            for offset, trade_date in enumerate(schedule["tradeDates"])
+        ]
+        if any(
+            len(schedule["tradeDates"]) != 5
+            or len(schedule["dailyAvailability"]) != 5
+            or schedule["board"] not in BOARDS
+            for schedule in schedules
+        ):
+            raise EpisodeDatasetError("MINUTE_REQUIREMENT_PARTITION_INVALID")
+        payload_hash = canonical_sha256(
+            {
+                "decisionDate": decision_date,
+                "links": links,
+                "deferredEpisodeIds": deferred,
+            }
+        )
+        existing = self.db.execute(
+            "SELECT payload_sha256 FROM minute_requirement_partitions WHERE decision_date = ?",
+            (decision_date,),
+        ).fetchone()
+        if existing:
+            if existing["payload_sha256"] != payload_hash:
+                raise EpisodeDatasetError("MINUTE_REQUIREMENT_PARTITION_CONFLICT")
+            return False
+
+        try:
+            for link in links:
+                completed_at = None if link["hasDailyBar"] else _utc_now()
+                self.db.execute(
+                    "INSERT INTO minute_requirements "
+                    "(instrument_id, trade_date, board, status, reason, completed_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(instrument_id, trade_date) DO NOTHING",
+                    (
+                        link["instrumentId"],
+                        link["tradeDate"],
+                        link["board"],
+                        "PENDING" if link["hasDailyBar"] else "NOT_APPLICABLE",
+                        None if link["hasDailyBar"] else "DAILY_BAR_ABSENT",
+                        completed_at,
+                    ),
+                )
+                self.db.execute(
+                    "INSERT INTO episode_minute_requirements VALUES (?, ?, ?, ?)",
+                    (
+                        link["episodeId"],
+                        link["instrumentId"],
+                        link["tradeDate"],
+                        link["sessionOffset"],
+                    ),
+                )
+            self.db.execute(
+                "INSERT INTO minute_requirement_partitions VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    decision_date,
+                    len(schedules) + len(deferred),
+                    len(links),
+                    len(deferred),
+                    payload_hash,
+                    _utc_now(),
+                ),
+            )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
+        return True
+
     def write_candidate_partition(
         self,
         *,
@@ -228,9 +372,9 @@ class EpisodeDataset:
                 or row["rankWithinBoard"] <= 0
                 or row["featureSchemaVersion"]
                 != json.loads(
-                    self.db.execute(
-                        "SELECT policy_json FROM episode_dataset_metadata"
-                    ).fetchone()[0]
+                    self.db.execute("SELECT policy_json FROM episode_dataset_metadata").fetchone()[
+                        0
+                    ]
                 )["featureSchemaVersion"]
             ):
                 raise EpisodeDatasetError("CANDIDATE_ROW_INVALID")
@@ -331,22 +475,21 @@ class EpisodeDataset:
 
     @property
     def dataset_id(self) -> str:
-        return self.db.execute(
-            "SELECT dataset_id FROM episode_dataset_metadata"
-        ).fetchone()[0]
+        return self.db.execute("SELECT dataset_id FROM episode_dataset_metadata").fetchone()[0]
 
     def seal(self) -> dict:
         if self.manifest_path.exists():
             raise EpisodeDatasetError("EPISODE_DATASET_ALREADY_SEALED")
-        metadata = dict(
-            self.db.execute("SELECT * FROM episode_dataset_metadata").fetchone()
-        )
+        metadata = dict(self.db.execute("SELECT * FROM episode_dataset_metadata").fetchone())
         tables = {
             table: self.db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
             for table in (
                 "candidate_partitions",
                 "candidate_partition_rejections",
                 "candidate_episodes",
+                "minute_requirements",
+                "episode_minute_requirements",
+                "minute_requirement_partitions",
             )
         }
         self.db.commit()

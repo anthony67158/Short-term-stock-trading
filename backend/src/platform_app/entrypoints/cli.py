@@ -61,6 +61,7 @@ def main():
             "block-trades",
             "minute",
             "candidates",
+            "minute-requirements",
             "seal",
         ],
     )
@@ -270,6 +271,9 @@ def main():
             CandidateEpisodeBuilder,
         )
         from platform_app.modules.experiments.episode_dataset import EpisodeDataset
+        from platform_app.modules.experiments.minute_requirement_builder import (
+            MinuteRequirementBuilder,
+        )
         from platform_app.modules.experiments.short_horizon_policy import (
             SHORT_HORIZON_POLICY,
         )
@@ -282,12 +286,10 @@ def main():
                 args.stage,
             )
         ):
-            parser.error(
-                "dataset-root, episode-root, episode-dataset-id and stage are required"
-            )
-        if args.stage not in {"candidates", "seal"}:
-            parser.error("episode dataset stage must be candidates or seal")
-        if args.stage == "candidates" and (
+            parser.error("dataset-root, episode-root, episode-dataset-id and stage are required")
+        if args.stage not in {"candidates", "minute-requirements", "seal"}:
+            parser.error("episode dataset stage must be candidates, minute-requirements or seal")
+        if args.stage in {"candidates", "minute-requirements"} and (
             not args.start_date
             or not args.end_date
             or not re.fullmatch(r"\d{8}", args.start_date)
@@ -308,6 +310,11 @@ def main():
         ) as dataset:
             if args.stage == "seal":
                 print(json.dumps(dataset.seal(), ensure_ascii=False))
+            elif args.stage == "minute-requirements":
+                with MinuteRequirementBuilder(dataset) as builder:
+                    results = builder.build_range(args.start_date, args.end_date)
+                for result in results:
+                    print(json.dumps(result, ensure_ascii=False), flush=True)
             else:
                 with CandidateEpisodeBuilder(
                     dataset,
