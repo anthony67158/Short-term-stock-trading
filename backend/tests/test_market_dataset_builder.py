@@ -988,7 +988,7 @@ def test_historical_huaze_listing_suspension_explains_missing_daily(tmp_path):
         }
 
 
-def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
+def test_builder_discards_post_delisting_adjustment_factor_and_suspension(tmp_path):
     data = responses()
     data[("stock_basic", "D")] = [
         {
@@ -1004,7 +1004,14 @@ def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
         *({"ts_code": code, "trade_date": trade_date, "adj_factor": "1"} for code in codes),
         {"ts_code": "600401.SH", "trade_date": trade_date, "adj_factor": "2"},
     ]
-    data[("suspend_d", trade_date)] = []
+    data[("suspend_d", trade_date)] = [
+        {
+            "ts_code": "600401.SH",
+            "trade_date": trade_date,
+            "suspend_type": "S",
+            "suspend_timing": None,
+        }
+    ]
 
     with MarketDataset(
         tmp_path / "dataset", dataset_id="post-delist-factor", source="TUSHARE_COMPATIBLE"
@@ -1013,9 +1020,16 @@ def test_builder_discards_post_delisting_adjustment_factor(tmp_path):
         builder.sync_reference("20160101", "20260915")
         result = builder.sync_daily_partition(trade_date)
         assert result["discardedPostDelistingAdjustmentFactors"] == 1
+        assert result["discardedPostDelistingSuspensions"] == 1
         assert (
             ds.db.execute(
                 "SELECT COUNT(*) FROM adjustment_factors WHERE instrument_id = 'SH.600401'"
+            ).fetchone()[0]
+            == 0
+        )
+        assert (
+            ds.db.execute(
+                "SELECT COUNT(*) FROM suspensions WHERE instrument_id = 'SH.600401'"
             ).fetchone()[0]
             == 0
         )

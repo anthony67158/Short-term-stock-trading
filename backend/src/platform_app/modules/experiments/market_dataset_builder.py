@@ -181,7 +181,7 @@ def _filter_pre_listing_bse_rows(
     return kept, discarded
 
 
-def _filter_post_delisting_adjustments(
+def _filter_post_delisting_facts(
     raw_rows: list[dict],
     normalized_rows: list[dict],
     *,
@@ -615,7 +615,7 @@ class MarketDatasetBuilder:
             )
             for row in raw_factors
         ]
-        factors, post_delisting_factors = _filter_post_delisting_adjustments(
+        factors, post_delisting_factors = _filter_post_delisting_facts(
             raw_factors,
             factors,
             trade_date=trade_date,
@@ -647,6 +647,13 @@ class MarketDatasetBuilder:
             normalize_suspension(row, aliases, _historical_available_at(trade_date, "suspension"))
             for row in raw_suspensions
         ]
+        suspensions, post_delisting_suspensions = _filter_post_delisting_facts(
+            raw_suspensions,
+            suspensions,
+            trade_date=trade_date,
+            eligible_ids=expected,
+            lifecycles=lifecycles,
+        )
         suspensions, duplicate_suspensions = _deduplicate_alias_rows(
             suspensions,
             key=lambda row: (
@@ -720,6 +727,9 @@ class MarketDatasetBuilder:
                     "suspensions": _discard_audit(pre_listing_suspensions),
                 },
                 "discardedPostDelistingAdjustmentFactors": _discard_audit(post_delisting_factors),
+                "discardedPostDelistingSuspensions": _discard_audit(
+                    post_delisting_suspensions
+                ),
                 "discardedAliasDuplicates": {
                     "daily": _discard_audit(duplicate_daily),
                     "adjustmentFactors": _discard_audit(duplicate_factors),
@@ -758,6 +768,7 @@ class MarketDatasetBuilder:
                 )
             ),
             "discardedPostDelistingAdjustmentFactors": len(post_delisting_factors),
+            "discardedPostDelistingSuspensions": len(post_delisting_suspensions),
             "discardedAliasDuplicates": sum(
                 map(len, (duplicate_daily, duplicate_factors, duplicate_suspensions))
             ),
