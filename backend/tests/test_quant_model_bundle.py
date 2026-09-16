@@ -92,6 +92,26 @@ def test_research_bundle_predicts_and_orders_calibrated_quantiles(tmp_path):
     }
 
 
+def test_research_bundle_predicts_batches_with_the_same_contract(tmp_path):
+    bundle = QuantModelBundle(_bundle(tmp_path), require_ready=False)
+
+    result = bundle.predict_matrix(
+        base_values=[[1], [2]],
+        scenario_values=[[1, 2], [2, 3]],
+    )
+
+    assert result["pFill"].tolist() == [0.8, 0.8]
+    assert result["q10"].tolist() == [0.012, 0.012]
+    with pytest.raises(
+        QuantBundleError,
+        match="QUANT_FEATURE_ROW_COUNT_MISMATCH",
+    ):
+        bundle.predict_matrix(
+            base_values=[[1]],
+            scenario_values=[[1, 2], [2, 3]],
+        )
+
+
 def test_bundle_rejects_feature_contract_drift(tmp_path):
     bundle = QuantModelBundle(_bundle(tmp_path), require_ready=False)
 

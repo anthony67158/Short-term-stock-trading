@@ -2,7 +2,6 @@
 
 import hashlib
 import json
-import math
 from pathlib import Path
 
 import joblib
@@ -69,44 +68,66 @@ class QuantModelBundle:
     def _vector(names: tuple[str, ...], values: dict) -> np.ndarray:
         if set(values) != set(names):
             raise QuantBundleError("QUANT_FEATURE_CONTRACT_MISMATCH")
-        vector = np.asarray([[values[name] for name in names]], dtype=np.float32)
-        if not np.all(np.isfinite(vector)):
-            raise QuantBundleError("QUANT_FEATURE_NON_FINITE")
-        return vector
+        return QuantModelBundle._matrix(
+            names,
+            [[values[name] for name in names]],
+        )
 
-    def predict(self, *, base_features: dict, scenario_features: dict) -> dict:
-        base = self._vector(self.base_feature_names, base_features)
-        scenario = self._vector(self.scenario_feature_names, scenario_features)
+    @staticmethod
+    def _matrix(names: tuple[str, ...], values) -> np.ndarray:
+        matrix = np.asarray(values, dtype=np.float32)
+        if (
+            matrix.ndim != 2
+            or matrix.shape[1] != len(names)
+            or not np.all(np.isfinite(matrix))
+        ):
+            raise QuantBundleError("QUANT_FEATURE_NON_FINITE")
+        return matrix
+
+    def predict_matrix(self, *, base_values, scenario_values) -> dict[str, np.ndarray]:
+        base = self._matrix(self.base_feature_names, base_values)
+        scenario = self._matrix(self.scenario_feature_names, scenario_values)
+        if len(base) != len(scenario):
+            raise QuantBundleError("QUANT_FEATURE_ROW_COUNT_MISMATCH")
         post = self.models["postProcessors"]
         quantiles = np.sort(
-            np.asarray(
+            np.column_stack(
                 [
-                    float(self.models[name].predict(scenario)[0])
+                    self.models[name].predict(scenario)
                     + float(post["quantileOffsets"][name])
                     for name in ("q10", "q50", "q90")
                 ]
-            )
+            ),
+            axis=1,
         )
-        expected = float(
-            self.models["expectedNetReturnGivenFill"].predict(scenario)[0]
+        expected = self.models["expectedNetReturnGivenFill"].predict(
+            scenario
         ) + float(post["expectedNetReturnOffset"])
         result = {
-            "modelBundleId": self.manifest["bundleId"],
-            "pFill": float(self.models["pFill"].predict_proba(base)[0, 1]),
-            "pFullFill": float(
-                self.models["pFullFill"].predict_proba(scenario)[0, 1]
-            ),
-            "pWinGivenFill": float(
-                self.models["pWinGivenFill"].predict_proba(scenario)[0, 1]
-            ),
-            "q10": float(quantiles[0]),
-            "q50": float(quantiles[1]),
-            "q90": float(quantiles[2]),
+            "pFill": self.models["pFill"].predict_proba(base)[:, 1],
+            "pFullFill": self.models["pFullFill"].predict_proba(scenario)[:, 1],
+            "pWinGivenFill": self.models["pWinGivenFill"].predict_proba(scenario)[
+                :, 1
+            ],
+            "q10": quantiles[:, 0],
+            "q50": quantiles[:, 1],
+            "q90": quantiles[:, 2],
             "expectedNetReturnGivenFill": expected,
-            "stopHazard": float(
-                self.models["stopHazard"].predict_proba(base)[0, 1]
-            ),
+            "stopHazard": self.models["stopHazard"].predict_proba(base)[:, 1],
         }
-        if any(not math.isfinite(value) for key, value in result.items() if key != "modelBundleId"):
+        if any(not np.all(np.isfinite(values)) for values in result.values()):
             raise QuantBundleError("QUANT_PREDICTION_NON_FINITE")
         return result
+
+    def predict(self, *, base_features: dict, scenario_features: dict) -> dict:
+        predictions = self.predict_matrix(
+            base_values=self._vector(self.base_feature_names, base_features),
+            scenario_values=self._vector(
+                self.scenario_feature_names,
+                scenario_features,
+            ),
+        )
+        return {
+            "modelBundleId": self.manifest["bundleId"],
+            **{name: float(values[0]) for name, values in predictions.items()},
+        }
