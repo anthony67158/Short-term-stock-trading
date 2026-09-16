@@ -41,6 +41,15 @@ OFFICIAL_CODE_MIGRATIONS = (
 
 OFFICIAL_RETIRED_SOURCE_CODES = (
     {
+        "source_code": "300379.SZ",
+        "retired_from": "20260122",
+        "reason": "DELISTED",
+        "source_urls": (
+            "https://disc.static.szse.cn/download/disc/disk03/finalpage/"
+            "2026-01-22/447c27a4-a32e-423c-acfd-9db75f4cfa2c.PDF",
+        ),
+    },
+    {
         "source_code": "600087.SH",
         "retired_from": "20140605",
         "reason": "DELISTED",
