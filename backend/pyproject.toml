@@ -22,6 +22,7 @@ dev = ["pytest>=8.3,<10", "hypothesis>=6.130", "ruff>=0.11"]
 
 [project.scripts]
 platform-cli = "platform_app.entrypoints.cli:main"
+platform-ops = "platform_app.entrypoints.operations:main"
 stock-search-mcp = "platform_app.entrypoints.doubao_search_mcp:main"
 
 [build-system]
