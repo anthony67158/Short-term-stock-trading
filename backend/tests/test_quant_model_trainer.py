@@ -1,9 +1,13 @@
 import numpy as np
 
 from platform_app.modules.experiments.quant_model_trainer import (
+    ENRICHED_BASE_FEATURE_NAMES,
     QuantTrainingData,
     temporal_split,
     train_quant_models,
+)
+from platform_app.modules.experiments.ranking_model_trainer import (
+    MODEL_FEATURE_NAMES,
 )
 
 
@@ -60,6 +64,12 @@ def test_temporal_split_has_five_session_embargoes():
         - np.where(unique == split.calibration_end)[0][0]
         == 6
     )
+
+
+def test_enriched_execution_features_match_full_universe_ranking_semantics():
+    assert ENRICHED_BASE_FEATURE_NAMES == MODEL_FEATURE_NAMES
+    assert "rankWithinBoard" not in ENRICHED_BASE_FEATURE_NAMES
+    assert "boardRankLiquidity20" in ENRICHED_BASE_FEATURE_NAMES
 
 
 def test_quant_models_emit_all_required_targets_on_confirmation_data():

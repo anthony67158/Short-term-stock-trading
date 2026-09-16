@@ -7,6 +7,7 @@ import os
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from itertools import groupby
 from pathlib import Path
 
 import joblib
@@ -62,7 +63,6 @@ ENRICHED_BASE_FEATURE_NAMES = (
     "gap1",
     "closeLocation1",
     "logListingAgeDays",
-    "rankWithinBoard",
     "boardMain",
     "boardChinext",
     "boardStar",
@@ -70,7 +70,12 @@ ENRICHED_BASE_FEATURE_NAMES = (
     "marketMeanReturn1",
     "marketMeanReturn20",
     "marketBreadth20",
-    "marketMeanVolatility20",
+    "marketMedianVolatility20",
+    "boardRankReturn5",
+    "boardRankReturn20",
+    "boardRankReturn60",
+    "boardRankVolatility20",
+    "boardRankLiquidity20",
 )
 ENRICHED_SCENARIO_FEATURE_NAMES = (
     *ENRICHED_BASE_FEATURE_NAMES,
@@ -289,34 +294,49 @@ def load_training_data(
     }
 
 
-def _enriched_base_features(row: sqlite3.Row, regime: tuple[float, ...]) -> list[float]:
-    board = row["board"]
-    return [
-        float(row["adjusted_return_1"]),
-        float(row["adjusted_return_5"]),
-        float(row["adjusted_return_10"]),
-        float(row["adjusted_return_20"]),
-        float(row["adjusted_return_60"]),
-        float(row["realized_volatility_5"]),
-        float(row["realized_volatility_20"]),
-        float(row["realized_volatility_60"]),
-        float(row["drawdown_from_high_20"]),
-        float(row["distance_from_low_20"]),
-        math.log1p(float(row["median_amount_5_cny"])),
-        math.log1p(float(row["median_amount_20_cny"])),
-        math.log1p(float(row["median_amount_60_cny"])),
-        float(row["amount_to_median_20"]),
-        float(row["mean_range_20"]),
-        float(row["gap_1"]),
-        float(row["close_location_1"]),
-        math.log1p(float(row["listing_age_days"])),
-        float(row["rank_within_board"]),
-        float(board == "MAIN"),
-        float(board == "CHINEXT"),
-        float(board == "STAR"),
-        float(board == "BEIJING"),
-        *regime,
-    ]
+def _selected_ranking_features(
+    database: sqlite3.Connection,
+    *,
+    expected_count: int,
+) -> dict[tuple[str, str], list[float]]:
+    from platform_app.modules.experiments.ranking_model_trainer import (
+        RAW_COLUMNS,
+        _date_features,
+    )
+
+    selected_by_date: dict[str, set[str]] = {}
+    for row in database.execute(
+        "SELECT DISTINCT decision_date, instrument_id FROM episode_labels "
+        "ORDER BY decision_date, instrument_id"
+    ):
+        selected_by_date.setdefault(row["decision_date"], set()).add(
+            row["instrument_id"]
+        )
+    if not selected_by_date:
+        raise QuantModelError("MODEL_ENRICHED_SAMPLE_SUPPORT_EMPTY")
+    features = {}
+    columns = ", ".join((*RAW_COLUMNS, "forward_return_next_open_5"))
+    rows = database.execute(
+        f"SELECT instrument_id, decision_date, board, {columns} "
+        "FROM ranking.ranking_samples WHERE decision_date BETWEEN ? AND ? "
+        "ORDER BY decision_date, board, instrument_id",
+        (min(selected_by_date), max(selected_by_date)),
+    )
+    for decision_date, date_rows in groupby(
+        rows,
+        key=lambda row: row["decision_date"],
+    ):
+        group_rows = list(date_rows)
+        if decision_date not in selected_by_date:
+            continue
+        group_x, _target_rank = _date_features(group_rows)
+        selected_instruments = selected_by_date[decision_date]
+        for row, values in zip(group_rows, group_x, strict=True):
+            if row["instrument_id"] in selected_instruments:
+                features[(decision_date, row["instrument_id"])] = values.tolist()
+    if len(features) != expected_count:
+        raise QuantModelError("MODEL_ENRICHED_SAMPLE_COVERAGE_INCOMPLETE")
+    return features
 
 
 def load_enriched_training_data(
@@ -325,7 +345,7 @@ def load_enriched_training_data(
     label_dataset_root: Path,
     ranking_dataset_root: Path,
 ) -> tuple[QuantTrainingData, dict]:
-    episode_manifest, episode_path = _verified_database(
+    episode_manifest, _episode_path = _verified_database(
         episode_dataset_root, "episode-dataset.v4"
     )
     label_manifest, label_path = _verified_database(
@@ -345,30 +365,13 @@ def load_enriched_training_data(
     database = sqlite3.connect(label_uri, uri=True)
     database.row_factory = sqlite3.Row
     database.execute(
-        "ATTACH DATABASE ? AS episodes",
-        (f"{episode_path.resolve().as_uri()}?mode=ro&immutable=1",),
-    )
-    database.execute(
         "ATTACH DATABASE ? AS ranking",
         (f"{ranking_path.resolve().as_uri()}?mode=ro&immutable=1",),
     )
-    regimes = {
-        int(row["decision_date"]): (
-            row["mean_return_1"],
-            row["mean_return_20"],
-            row["breadth_20"],
-            row["mean_volatility_20"],
-        )
-        for row in database.execute(
-            "SELECT decision_date, "
-            "AVG(CAST(adjusted_return_1 AS REAL)) AS mean_return_1, "
-            "AVG(CAST(adjusted_return_20 AS REAL)) AS mean_return_20, "
-            "AVG(CASE WHEN CAST(adjusted_return_20 AS REAL) > 0 THEN 1.0 ELSE 0.0 END) "
-            "AS breadth_20, "
-            "AVG(CAST(realized_volatility_20 AS REAL)) AS mean_volatility_20 "
-            "FROM ranking.ranking_samples GROUP BY decision_date"
-        )
-    }
+    ranking_features = _selected_ranking_features(
+        database,
+        expected_count=label_manifest["labels"]["episodes"],
+    )
     base_x = []
     base_dates = []
     base_boards = []
@@ -383,39 +386,14 @@ def load_enriched_training_data(
     net_return = []
     conditional_available = []
     board_codes = {"MAIN": 0, "CHINEXT": 1, "STAR": 2, "BEIJING": 3}
-    raw_columns = (
-        "adjusted_return_1",
-        "adjusted_return_5",
-        "adjusted_return_10",
-        "adjusted_return_20",
-        "adjusted_return_60",
-        "realized_volatility_5",
-        "realized_volatility_20",
-        "realized_volatility_60",
-        "drawdown_from_high_20",
-        "distance_from_low_20",
-        "median_amount_5_cny",
-        "median_amount_20_cny",
-        "median_amount_60_cny",
-        "amount_to_median_20",
-        "mean_range_20",
-        "gap_1",
-        "close_location_1",
-        "listing_age_days",
-    )
     rows = database.execute(
-        "SELECT l.*, e.rank_within_board, "
-        + ", ".join(f"r.{column}" for column in raw_columns)
-        + " FROM episode_labels l JOIN episodes.candidate_episodes e "
-        "ON e.episode_id = l.episode_id "
-        "JOIN ranking.ranking_samples r "
-        "ON r.instrument_id = l.instrument_id AND r.decision_date = l.decision_date "
+        "SELECT l.* FROM episode_labels l "
         "ORDER BY l.decision_date, l.episode_id, l.target_shares"
     )
     current_episode = None
     for row in rows:
         decision_date = int(row["decision_date"])
-        base = _enriched_base_features(row, regimes[decision_date])
+        base = ranking_features[(row["decision_date"], row["instrument_id"])]
         board_code = board_codes[row["board"]]
         if row["episode_id"] != current_episode:
             current_episode = row["episode_id"]
