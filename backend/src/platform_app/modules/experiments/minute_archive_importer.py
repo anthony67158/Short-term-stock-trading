@@ -18,6 +18,7 @@ from platform_app.modules.experiments.episode_dataset import (
 AMOUNT_TOLERANCE_RATE = Decimal("0.0005")
 AMOUNT_TOLERANCE_CNY = Decimal("2")
 VOLUME_TOLERANCE_SHARES = Decimal("100")
+SSE_CLOSING_AUCTION_EFFECTIVE_DATE = "20180820"
 
 
 class MinuteArchiveError(EpisodeDatasetError):
@@ -94,13 +95,29 @@ def _normalize_rows(rows: object, instrument_id: str, trade_date: str) -> list[d
     return normalized
 
 
-def _validate_daily(rows: list[dict], daily: dict) -> dict:
+def _validate_daily(
+    rows: list[dict],
+    daily: dict,
+    *,
+    instrument_id: str,
+    trade_date: str,
+) -> dict:
     opening = Decimal(rows[0]["open"])
     closing = Decimal(rows[-1]["close"])
     high = max(Decimal(row["high"]) for row in rows)
     low = min(Decimal(row["low"]) for row in rows)
-    if opening != Decimal(daily["open"]) or closing != Decimal(daily["close"]):
+    daily_open = Decimal(daily["open"])
+    daily_close = Decimal(daily["close"])
+    if opening != daily_open:
         raise MinuteArchiveError("MINUTE_DAILY_OPEN_CLOSE_MISMATCH")
+    close_reconciliation = "EXACT"
+    if closing != daily_close:
+        if not (
+            instrument_id.startswith("SH.")
+            and trade_date < SSE_CLOSING_AUCTION_EFFECTIVE_DATE
+        ):
+            raise MinuteArchiveError("MINUTE_DAILY_OPEN_CLOSE_MISMATCH")
+        close_reconciliation = "SSE_PRE_20180820_OFFICIAL_CLOSE_VWAP"
     if high > Decimal(daily["high"]) or low < Decimal(daily["low"]):
         raise MinuteArchiveError("MINUTE_OUTSIDE_DAILY_RANGE")
     volume = sum((Decimal(row["volumeShares"]) for row in rows), Decimal(0))
@@ -120,6 +137,9 @@ def _validate_daily(rows: list[dict], daily: dict) -> dict:
         "high": format(high, "f"),
         "low": format(low, "f"),
         "close": format(closing, "f"),
+        "officialDailyClose": format(daily_close, "f"),
+        "terminalCloseAuthority": "DAILY_BAR",
+        "closeReconciliation": close_reconciliation,
         "volumeShares": format(volume, "f"),
         "amountCny": format(amount, "f"),
         "volumeDeltaShares": format(volume_delta, "f"),
@@ -155,7 +175,12 @@ def ingest_minute_requirement(
         ).fetchone()
         if not daily:
             raise MinuteArchiveError("MINUTE_DAILY_BAR_MISSING")
-        details = _validate_daily(rows, dict(daily))
+        details = _validate_daily(
+            rows,
+            dict(daily),
+            instrument_id=instrument_id,
+            trade_date=trade_date,
+        )
         for row in rows:
             dataset.db.execute(
                 "INSERT INTO episode_minute_bars VALUES "

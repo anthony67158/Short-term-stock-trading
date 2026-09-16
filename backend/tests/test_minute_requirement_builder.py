@@ -14,6 +14,7 @@ from platform_app.modules.experiments.market_dataset import (
 from platform_app.modules.experiments.minute_archive_importer import (
     MinuteArchiveError,
     MinuteArchiveImporter,
+    _validate_daily,
 )
 from platform_app.modules.experiments.minute_requirement_builder import (
     MinuteRequirementBuilder,
@@ -182,6 +183,77 @@ class _MinuteClient:
         if self.failure:
             raise HistoricalMarketError(self.failure)
         return self.rows_to_return
+
+
+def test_sse_pre_auction_close_uses_daily_bar_as_terminal_authority():
+    rows = [
+        {
+            "open": "10",
+            "high": "10.02",
+            "low": "9.99",
+            "close": "10",
+            "volumeShares": "1000",
+            "amountCny": "10000",
+        }
+    ]
+    daily = {
+        "open": "10",
+        "high": "10.02",
+        "low": "9.99",
+        "close": "10.01",
+        "volume_shares": "1000",
+        "amount_cny": "10000",
+        "source_row_sha256": "daily-source",
+    }
+
+    details = _validate_daily(
+        rows,
+        daily,
+        instrument_id="SH.600000",
+        trade_date="20180817",
+    )
+
+    assert details["close"] == "10"
+    assert details["officialDailyClose"] == "10.01"
+    assert details["terminalCloseAuthority"] == "DAILY_BAR"
+    assert details["closeReconciliation"] == "SSE_PRE_20180820_OFFICIAL_CLOSE_VWAP"
+
+
+@pytest.mark.parametrize(
+    ("instrument_id", "trade_date"),
+    [("SZ.000001", "20180817"), ("SH.600000", "20180820")],
+)
+def test_close_mismatch_outside_sse_historical_rule_is_rejected(
+    instrument_id,
+    trade_date,
+):
+    rows = [
+        {
+            "open": "10",
+            "high": "10.02",
+            "low": "9.99",
+            "close": "10",
+            "volumeShares": "1000",
+            "amountCny": "10000",
+        }
+    ]
+    daily = {
+        "open": "10",
+        "high": "10.02",
+        "low": "9.99",
+        "close": "10.01",
+        "volume_shares": "1000",
+        "amount_cny": "10000",
+        "source_row_sha256": "daily-source",
+    }
+
+    with pytest.raises(MinuteArchiveError, match="MINUTE_DAILY_OPEN_CLOSE_MISMATCH"):
+        _validate_daily(
+            rows,
+            daily,
+            instrument_id=instrument_id,
+            trade_date=trade_date,
+        )
 
 
 def test_builder_creates_five_session_requirements_and_marks_missing_daily(tmp_path):
