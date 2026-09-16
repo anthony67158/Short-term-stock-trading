@@ -25,10 +25,19 @@ def cross_source_sample(value: str) -> tuple[str, str]:
 
 def main():
     parser = argparse.ArgumentParser(description="A股投资平台")
-    parser.add_argument("command", choices=[
-        "export-contracts", "health", "create-user", "sync-instruments", "audit-market-archive",
-        "audit-market-cross-source", "build-market-dataset",
-    ])
+    parser.add_argument(
+        "command",
+        choices=[
+            "export-contracts",
+            "health",
+            "create-user",
+            "sync-instruments",
+            "audit-market-archive",
+            "audit-market-cross-source",
+            "audit-market-dataset",
+            "build-market-dataset",
+        ],
+    )
     parser.add_argument("--username")
     parser.add_argument("--archive-root", action="append", type=Path)
     parser.add_argument("--securities-file", type=Path)
@@ -65,8 +74,16 @@ def main():
         report = audit_roots(args.archive_root, args.securities_file)
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
-        print(json.dumps({"chunks": report["chunkCount"], "from": report["from"],
-                          "to": report["to"], "productionEligible": False}))
+        print(
+            json.dumps(
+                {
+                    "chunks": report["chunkCount"],
+                    "from": report["from"],
+                    "to": report["to"],
+                    "productionEligible": False,
+                }
+            )
+        )
     elif args.command == "audit-market-cross-source":
         from platform_app.modules.experiments.market_cross_source_audit import (
             audit_cross_sources,
@@ -83,11 +100,39 @@ def main():
         temporary = args.output.with_suffix(args.output.suffix + ".tmp")
         temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
         os.replace(temporary, args.output)
-        print(json.dumps({
-            "samples": report["summary"]["samples"],
-            "passed": report["passed"],
-            "reportSha256": report["reportSha256"],
-        }))
+        print(
+            json.dumps(
+                {
+                    "samples": report["summary"]["samples"],
+                    "passed": report["passed"],
+                    "reportSha256": report["reportSha256"],
+                }
+            )
+        )
+    elif args.command == "audit-market-dataset":
+        from platform_app.modules.experiments.market_dataset_audit import audit_market_dataset
+
+        if not args.dataset_root or not args.output:
+            parser.error("dataset-root and output are required")
+        try:
+            dataset_root = external_dataset_root(args.dataset_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        report = audit_market_dataset(dataset_root)
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        temporary = args.output.with_suffix(args.output.suffix + ".tmp")
+        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        os.replace(temporary, args.output)
+        print(
+            json.dumps(
+                {
+                    "passed": report["passed"],
+                    "dailyBars": report["totals"]["dailyBars"],
+                    "openDates": report["range"]["openDates"],
+                    "reportSha256": report["reportSha256"],
+                }
+            )
+        )
     elif args.command == "build-market-dataset":
         from platform_app.adapters.market_tushare import TushareClient
         from platform_app.modules.experiments.market_dataset import MarketDataset
@@ -138,10 +183,13 @@ def main():
                         (args.start_date, args.end_date),
                     )
                     for (trade_date,) in dates.fetchall():
-                        print(json.dumps(
-                            builder.sync_daily_partition(trade_date),
-                            ensure_ascii=False,
-                        ), flush=True)
+                        print(
+                            json.dumps(
+                                builder.sync_daily_partition(trade_date),
+                                ensure_ascii=False,
+                            ),
+                            flush=True,
+                        )
                 else:
                     dates = dataset.db.execute(
                         "SELECT cal_date FROM trade_calendar "
