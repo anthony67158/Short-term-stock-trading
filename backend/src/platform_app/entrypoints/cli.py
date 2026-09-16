@@ -53,6 +53,7 @@ def main():
             "audit-execution-coverage",
             "build-selected-backtest-dataset",
             "evaluate-quant-backtest",
+            "evaluate-account-backtest",
         ],
     )
     parser.add_argument("--username")
@@ -60,6 +61,7 @@ def main():
     parser.add_argument("--securities-file", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--coverage-report", type=Path)
+    parser.add_argument("--quant-backtest", type=Path)
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--source-dataset-root", type=Path)
     parser.add_argument("--episode-root", type=Path)
@@ -298,6 +300,76 @@ def main():
                                 ),
                                 flush=True,
                             )
+    elif args.command == "evaluate-account-backtest":
+        from platform_app.modules.experiments.account_backtest import (
+            write_account_backtest,
+        )
+
+        if not all(
+            (
+                args.quant_backtest,
+                args.dataset_root,
+                args.ranking_root,
+                args.model_root,
+                args.episode_root,
+                args.label_root,
+                args.output,
+            )
+        ):
+            parser.error(
+                "quant-backtest, dataset-root, ranking-root, model-root, "
+                "episode-root, label-root and output are required"
+            )
+        try:
+            market_root = external_dataset_root(args.dataset_root)
+            ranking_root = external_dataset_root(args.ranking_root)
+            model_root = external_dataset_root(args.model_root)
+            episode_root = external_dataset_root(args.episode_root)
+            label_root = external_dataset_root(args.label_root)
+            backtest_parent = external_dataset_root(
+                args.quant_backtest.resolve().parent
+            )
+            output_parent = external_dataset_root(args.output.resolve().parent)
+        except ValueError as exc:
+            parser.error(str(exc))
+        report = write_account_backtest(
+            quant_backtest_path=backtest_parent / args.quant_backtest.name,
+            market_dataset_root=market_root,
+            ranking_dataset_root=ranking_root,
+            quant_model_root=model_root,
+            episode_dataset_root=episode_root,
+            label_dataset_root=label_root,
+            output_path=output_parent / args.output.name,
+        )
+        print(
+            json.dumps(
+                {
+                    "output": str((output_parent / args.output.name).resolve()),
+                    "releaseStatus": report["releaseStatus"],
+                    "releaseBlockers": report["releaseBlockers"],
+                    "accountScenarios": [
+                        {
+                            key: value
+                            for key, value in scenario.items()
+                            if key
+                            in {
+                                "initialCashCny",
+                                "finalCashCny",
+                                "stressFinalCashCny",
+                                "netReturn",
+                                "stressNetReturn",
+                                "maximumDrawdown",
+                                "stressMaximumDrawdown",
+                                "maxConcurrentPositions",
+                                "counts",
+                            }
+                        }
+                        for scenario in report["accountScenarios"]
+                    ],
+                },
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "evaluate-quant-backtest":
         from platform_app.modules.experiments.quant_execution_backtest import (
             write_quant_execution_backtest,
