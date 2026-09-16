@@ -214,3 +214,26 @@ def test_builder_defers_last_market_date_and_resumes_completed_dates(tmp_path):
 
     assert [row["status"] for row in first] == ["COMPLETED", "DEFERRED"]
     assert [row["status"] for row in second] == ["SKIPPED", "DEFERRED"]
+
+    reference_root = tmp_path / "reference-episodes"
+    with EpisodeDataset(
+        reference_root,
+        dataset_id="synthetic-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as episodes:
+        with CandidateEpisodeBuilder(episodes, SHORT_HORIZON_POLICY) as builder:
+            builder.build_partition(dates[62], dates[63])
+        reference_hash = episodes.db.execute(
+            "SELECT payload_sha256 FROM candidate_partitions"
+        ).fetchone()[0]
+    with EpisodeDataset(
+        episode_root,
+        dataset_id="synthetic-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as episodes:
+        streaming_hash = episodes.db.execute(
+            "SELECT payload_sha256 FROM candidate_partitions"
+        ).fetchone()[0]
+    assert streaming_hash == reference_hash
