@@ -129,6 +129,122 @@ def _validate_daily(rows: list[dict], daily: dict) -> dict:
     }
 
 
+def ingest_minute_requirement(
+    dataset: EpisodeDataset,
+    market,
+    *,
+    instrument_id: str,
+    trade_date: str,
+    rows: list[dict],
+    source_kind: str,
+    source_asset_sha256: str,
+    attempted_at: str | None = None,
+) -> dict:
+    attempted_at = attempted_at or _now()
+    try:
+        if any(
+            row.get("instrumentId") != instrument_id or row.get("tradeDate") != trade_date
+            for row in rows
+        ):
+            raise MinuteArchiveError("MINUTE_REQUIREMENT_MISMATCH")
+        if [row.get("barEndShanghai") for row in rows] != _expected_bar_ends(trade_date):
+            raise MinuteArchiveError("MINUTE_SESSION_INCOMPLETE")
+        daily = market.execute(
+            "SELECT * FROM daily_bars WHERE instrument_id = ? AND trade_date = ?",
+            (instrument_id, trade_date),
+        ).fetchone()
+        if not daily:
+            raise MinuteArchiveError("MINUTE_DAILY_BAR_MISSING")
+        details = _validate_daily(rows, dict(daily))
+        for row in rows:
+            dataset.db.execute(
+                "INSERT INTO episode_minute_bars VALUES "
+                "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    instrument_id,
+                    trade_date,
+                    row["barEndShanghai"],
+                    row["open"],
+                    row["high"],
+                    row["low"],
+                    row["close"],
+                    row["volumeShares"],
+                    row["amountCny"],
+                    source_kind,
+                    source_asset_sha256,
+                    row["sourceRowSha256"],
+                ),
+            )
+        dataset.db.execute(
+            "UPDATE minute_requirements SET status = 'COMPLETED', reason = NULL, "
+            "attempt_count = attempt_count + 1, last_attempt_at = ?, completed_at = ? "
+            "WHERE instrument_id = ? AND trade_date = ? AND status = 'PENDING'",
+            (attempted_at, attempted_at, instrument_id, trade_date),
+        )
+        outcome = "ACCEPTED"
+        reason = None
+    except MinuteArchiveError as exc:
+        return reject_minute_requirement(
+            dataset,
+            instrument_id=instrument_id,
+            trade_date=trade_date,
+            source_kind=source_kind,
+            source_asset_sha256=source_asset_sha256,
+            reason=str(exc),
+            attempted_at=attempted_at,
+        )
+    dataset.db.execute(
+        "INSERT OR IGNORE INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            source_kind,
+            source_asset_sha256,
+            instrument_id,
+            trade_date,
+            outcome,
+            reason,
+            canonical_json(details),
+            attempted_at,
+        ),
+    )
+    return {"outcome": outcome, "reason": reason, "details": details}
+
+
+def reject_minute_requirement(
+    dataset: EpisodeDataset,
+    *,
+    instrument_id: str,
+    trade_date: str,
+    source_kind: str,
+    source_asset_sha256: str,
+    reason: str,
+    attempted_at: str | None = None,
+) -> dict:
+    attempted_at = attempted_at or _now()
+    dataset.db.execute(
+        "DELETE FROM episode_minute_bars WHERE instrument_id = ? AND trade_date = ?",
+        (instrument_id, trade_date),
+    )
+    dataset.db.execute(
+        "UPDATE minute_requirements SET reason = ?, attempt_count = attempt_count + 1, "
+        "last_attempt_at = ? WHERE instrument_id = ? AND trade_date = ? AND status = 'PENDING'",
+        (reason, attempted_at, instrument_id, trade_date),
+    )
+    dataset.db.execute(
+        "INSERT OR IGNORE INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            source_kind,
+            source_asset_sha256,
+            instrument_id,
+            trade_date,
+            "REJECTED",
+            reason,
+            canonical_json({}),
+            attempted_at,
+        ),
+    )
+    return {"outcome": "REJECTED", "reason": reason, "details": {}}
+
+
 class MinuteArchiveImporter:
     def __init__(self, dataset: EpisodeDataset, archive_root: Path):
         self.dataset = dataset
@@ -264,65 +380,28 @@ class MinuteArchiveImporter:
                 instrument_id = requirement["instrument_id"]
                 try:
                     rows = _normalize_rows(codes[code], instrument_id, trade_date)
-                    daily = self.market.execute(
-                        "SELECT * FROM daily_bars WHERE instrument_id = ? AND trade_date = ?",
-                        (instrument_id, trade_date),
-                    ).fetchone()
-                    if not daily:
-                        raise MinuteArchiveError("MINUTE_DAILY_BAR_MISSING")
-                    details = _validate_daily(rows, dict(daily))
-                    for row in rows:
-                        self.dataset.db.execute(
-                            "INSERT INTO episode_minute_bars VALUES "
-                            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                            (
-                                instrument_id,
-                                trade_date,
-                                row["barEndShanghai"],
-                                row["open"],
-                                row["high"],
-                                row["low"],
-                                row["close"],
-                                row["volumeShares"],
-                                row["amountCny"],
-                                self.source_kind,
-                                asset_hash,
-                                row["sourceRowSha256"],
-                            ),
-                        )
-                    self.dataset.db.execute(
-                        "UPDATE minute_requirements SET status = 'COMPLETED', reason = NULL, "
-                        "attempt_count = attempt_count + 1, last_attempt_at = ?, "
-                        "completed_at = ? WHERE instrument_id = ? AND trade_date = ?",
-                        (attempted_at, attempted_at, instrument_id, trade_date),
+                    result = ingest_minute_requirement(
+                        self.dataset,
+                        self.market,
+                        instrument_id=instrument_id,
+                        trade_date=trade_date,
+                        rows=rows,
+                        source_kind=self.source_kind,
+                        source_asset_sha256=asset_hash,
+                        attempted_at=attempted_at,
                     )
-                    outcome = "ACCEPTED"
-                    reason = None
-                    accepted += 1
                 except MinuteArchiveError as exc:
-                    details = {}
-                    outcome = "REJECTED"
-                    reason = str(exc)
-                    rejected += 1
-                    self.dataset.db.execute(
-                        "UPDATE minute_requirements SET reason = ?, "
-                        "attempt_count = attempt_count + 1, last_attempt_at = ? "
-                        "WHERE instrument_id = ? AND trade_date = ?",
-                        (reason, attempted_at, instrument_id, trade_date),
+                    result = reject_minute_requirement(
+                        self.dataset,
+                        instrument_id=instrument_id,
+                        trade_date=trade_date,
+                        source_kind=self.source_kind,
+                        source_asset_sha256=asset_hash,
+                        reason=str(exc),
+                        attempted_at=attempted_at,
                     )
-                self.dataset.db.execute(
-                    "INSERT INTO minute_ingestion_attempts VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        self.source_kind,
-                        asset_hash,
-                        instrument_id,
-                        trade_date,
-                        outcome,
-                        reason,
-                        canonical_json(details),
-                        attempted_at,
-                    ),
-                )
+                accepted += result["outcome"] == "ACCEPTED"
+                rejected += result["outcome"] == "REJECTED"
             self.dataset.db.execute(
                 "INSERT INTO minute_archive_files VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
@@ -351,4 +430,9 @@ class MinuteArchiveImporter:
         }
 
 
-__all__ = ["MinuteArchiveError", "MinuteArchiveImporter"]
+__all__ = [
+    "MinuteArchiveError",
+    "MinuteArchiveImporter",
+    "ingest_minute_requirement",
+    "reject_minute_requirement",
+]
