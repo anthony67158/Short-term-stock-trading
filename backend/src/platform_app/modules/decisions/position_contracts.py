@@ -1,6 +1,6 @@
 """Contracts for joint quant-Agent position decisions."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Annotated, Literal
 
 from pydantic import AwareDatetime, Field, model_validator
@@ -27,11 +27,12 @@ class ActionValueEstimate(Contract):
     action: PositionAction
     target_quantity_shares: Quantity
     expected_delta_return_vs_hold: ReturnValue
-    q10_delta_return_vs_hold: ReturnValue
-    q50_delta_return_vs_hold: ReturnValue
-    q90_delta_return_vs_hold: ReturnValue
-    stop_hazard: Probability
-    support: Probability
+    q10_delta_return_vs_hold: ReturnValue | None = None
+    q50_delta_return_vs_hold: ReturnValue | None = None
+    q90_delta_return_vs_hold: ReturnValue | None = None
+    stop_hazard: Probability | None = None
+    support: Probability | None = None
+    missing_prediction_fields: list[str] = Field(default_factory=list, max_length=8)
     execution_path: str | None = Field(default=None, min_length=1, max_length=160)
     price_lower: Price | None = None
     price_upper: Price | None = None
@@ -41,12 +42,32 @@ class ActionValueEstimate(Contract):
 
     @model_validator(mode="after")
     def ordered_quantiles(self):
-        if not (
-            self.q10_delta_return_vs_hold
-            <= self.q50_delta_return_vs_hold
-            <= self.q90_delta_return_vs_hold
+        quantiles = (
+            self.q10_delta_return_vs_hold,
+            self.q50_delta_return_vs_hold,
+            self.q90_delta_return_vs_hold,
+        )
+        if any(value is None for value in quantiles) != all(
+            value is None for value in quantiles
+        ):
+            raise ValueError("动作价值分位数必须同时提供或同时缺失")
+        if all(value is not None for value in quantiles) and not (
+            quantiles[0] <= quantiles[1] <= quantiles[2]
         ):
             raise ValueError("动作价值分位数必须按Q10、Q50、Q90递增")
+        missing = {
+            name
+            for name, value in (
+                ("q10", quantiles[0]),
+                ("q50", quantiles[1]),
+                ("q90", quantiles[2]),
+                ("stopHazard", self.stop_hazard),
+                ("support", self.support),
+            )
+            if value is None
+        }
+        if missing != set(self.missing_prediction_fields):
+            raise ValueError("缺失预测字段必须显式列出")
         execution = (
             self.execution_path,
             self.price_lower,
@@ -81,6 +102,8 @@ class PositionValueReference(Contract):
     as_of: AwareDatetime
     valid_until: AwareDatetime
     horizon: str = Field(min_length=1, max_length=160)
+    horizon_end_date: date
+    market_snapshot_ref: str = Field(min_length=1, max_length=300)
     trend: Literal["BULLISH", "NEUTRAL", "BEARISH", "UNCERTAIN"]
     current_quantity_shares: Quantity
     values: list[ActionValueEstimate] = Field(min_length=4, max_length=4)
@@ -99,9 +122,15 @@ class PositionValueReference(Contract):
                 value != 0
                 for value in (
                     hold.expected_delta_return_vs_hold,
-                    hold.q10_delta_return_vs_hold,
-                    hold.q50_delta_return_vs_hold,
-                    hold.q90_delta_return_vs_hold,
+                    *(
+                        value
+                        for value in (
+                            hold.q10_delta_return_vs_hold,
+                            hold.q50_delta_return_vs_hold,
+                            hold.q90_delta_return_vs_hold,
+                        )
+                        if value is not None
+                    ),
                 )
             )
         ):
@@ -185,10 +214,12 @@ class PositionAssessment(Contract):
         }
         if not referenced <= signal_ids:
             raise ValueError("研判只能引用当前来源快照内的证据")
-        signals = {signal.evidence_id: signal for signal in self.signals}
+        signals = {}
+        for signal in self.signals:
+            signals.setdefault(signal.evidence_id, set()).add(signal.statement)
         for claim in (*self.claims, *self.counter_claims):
             if claim.kind == "OBSERVED" and not any(
-                claim.statement == signals[evidence_id].statement
+                claim.statement in signals[evidence_id]
                 for evidence_id in claim.evidence_ids
             ):
                 raise ValueError("OBSERVED必须逐字引用来源信号")
@@ -199,6 +230,16 @@ class JointReleaseReference(Contract):
     release_id: str = Field(min_length=1, max_length=160)
     status: Literal["READY", "SHADOW", "UNAVAILABLE"]
     allows_new_risk: bool = False
+    ranking_model_bundle_id: str | None = Field(default=None, min_length=1, max_length=160)
+    ranking_model_artifact_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
+    quant_model_bundle_id: str | None = Field(default=None, min_length=1, max_length=160)
+    quant_model_artifact_sha256: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{64}$",
+    )
     position_model_bundle_id: str | None = Field(default=None, min_length=1, max_length=160)
     position_model_artifact_sha256: str | None = Field(
         default=None,
@@ -210,7 +251,11 @@ class JointReleaseReference(Contract):
     @model_validator(mode="after")
     def ready_has_bound_components(self):
         if self.status == "READY" and (
-            not self.position_model_bundle_id
+            not self.ranking_model_bundle_id
+            or not self.ranking_model_artifact_sha256
+            or not self.quant_model_bundle_id
+            or not self.quant_model_artifact_sha256
+            or not self.position_model_bundle_id
             or not self.position_model_artifact_sha256
             or not self.agent_protocol_version
             or self.blocker_codes
@@ -218,7 +263,11 @@ class JointReleaseReference(Contract):
         ):
             raise ValueError("READY联合版本必须绑定完整组件且没有阻断项")
         if self.status == "SHADOW" and (
-            not self.position_model_bundle_id
+            not self.ranking_model_bundle_id
+            or not self.ranking_model_artifact_sha256
+            or not self.quant_model_bundle_id
+            or not self.quant_model_artifact_sha256
+            or not self.position_model_bundle_id
             or not self.position_model_artifact_sha256
             or not self.agent_protocol_version
             or self.allows_new_risk

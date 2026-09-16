@@ -1477,6 +1477,14 @@ export interface components {
              * @default false
              */
             allowsNewRisk: boolean;
+            /** Rankingmodelbundleid */
+            rankingModelBundleId?: string | null;
+            /** Rankingmodelartifactsha256 */
+            rankingModelArtifactSha256?: string | null;
+            /** Quantmodelbundleid */
+            quantModelBundleId?: string | null;
+            /** Quantmodelartifactsha256 */
+            quantModelArtifactSha256?: string | null;
             /** Positionmodelbundleid */
             positionModelBundleId?: string | null;
             /** Positionmodelartifactsha256 */

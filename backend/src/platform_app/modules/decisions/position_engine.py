@@ -47,6 +47,18 @@ def _unavailable(
     )
 
 
+def unavailable_position(
+    request: PositionDecisionRequest,
+    reason_code: str,
+    decision_reason: str,
+) -> PositionDecision:
+    return _unavailable(
+        request,
+        reason_code,
+        decision_reason=decision_reason,
+    )
+
+
 def _risk_override(request: PositionDecisionRequest) -> PositionDecision:
     constraints = request.constraints
     sellable = constraints.sellable_quantity_shares
@@ -196,6 +208,14 @@ def arbitrate_position(request: PositionDecisionRequest) -> PositionDecision:
             request,
             "JOINT_INPUT_NOT_CAUSAL_OR_EXPIRED",
             decision_reason="模型、Agent或证据在当前决策时点不可用。",
+        )
+    if request.release.status == "READY" and any(
+        value.missing_prediction_fields for value in request.quant.values
+    ):
+        return _unavailable(
+            request,
+            "POSITION_PREDICTION_DISTRIBUTION_INCOMPLETE",
+            decision_reason="生产持仓动作缺少收益分布、止损风险或样本支持。",
         )
     feasible = [
         value for value in request.quant.values if _is_feasible(value, request)

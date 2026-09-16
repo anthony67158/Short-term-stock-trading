@@ -40,21 +40,15 @@ def _volatility(prices: list[Decimal]) -> Decimal:
     return variance.sqrt()
 
 
-def build_daily_ranking_sample(
+def build_daily_ranking_features(
     *,
     history: list[dict],
-    future: list[dict],
     listing_age_days: int,
 ) -> dict:
-    if (
-        len(history) != HISTORY_SESSIONS
-        or len(future) != HORIZON_SESSIONS
-        or listing_age_days <= 0
-    ):
+    if len(history) != HISTORY_SESSIONS or listing_age_days <= 0:
         raise ValueError("RANKING_PATH_LENGTH_INVALID")
-    if any(row.get("factor") is None for row in [*history, *future]):
+    if any(row.get("factor") is None for row in history):
         raise ValueError("RANKING_ADJUSTMENT_FACTOR_MISSING")
-
     with localcontext() as context:
         context.prec = 28
         adjusted_closes = [
@@ -116,7 +110,33 @@ def build_daily_ranking_sample(
             "closeLocation1": _text(close_location),
             "listingAgeDays": str(listing_age_days),
         }
+    return {
+        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+        "featureAvailableAt": max(
+            history[-1]["daily_available_at"],
+            history[-1]["factor_available_at"],
+        ),
+        "features": features,
+    }
 
+
+def build_daily_ranking_sample(
+    *,
+    history: list[dict],
+    future: list[dict],
+    listing_age_days: int,
+) -> dict:
+    if len(future) != HORIZON_SESSIONS:
+        raise ValueError("RANKING_PATH_LENGTH_INVALID")
+    if any(row.get("factor") is None for row in future):
+        raise ValueError("RANKING_ADJUSTMENT_FACTOR_MISSING")
+    feature_result = build_daily_ranking_features(
+        history=history,
+        listing_age_days=listing_age_days,
+    )
+    with localcontext() as context:
+        context.prec = 28
+        latest = _decimal(history[-1]["close"]) * _decimal(history[-1]["factor"])
         entry = _decimal(future[0]["open"]) * _decimal(future[0]["factor"])
         terminal = _decimal(future[-1]["close"]) * _decimal(future[-1]["factor"])
         future_lows = [
@@ -134,12 +154,7 @@ def build_daily_ranking_sample(
             "maximumFavorableExcursion5": _text(max(future_highs) / entry - 1),
         }
     return {
-        "featureSchemaVersion": FEATURE_SCHEMA_VERSION,
+        **feature_result,
         "outcomeSchemaVersion": OUTCOME_SCHEMA_VERSION,
-        "featureAvailableAt": max(
-            history[-1]["daily_available_at"],
-            history[-1]["factor_available_at"],
-        ),
-        "features": features,
         "outcomes": outcomes,
     }

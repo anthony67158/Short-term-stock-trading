@@ -4820,6 +4820,56 @@
             "title": "Allowsnewrisk",
             "default": false
           },
+          "rankingModelBundleId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rankingmodelbundleid"
+          },
+          "rankingModelArtifactSha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rankingmodelartifactsha256"
+          },
+          "quantModelBundleId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantmodelbundleid"
+          },
+          "quantModelArtifactSha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantmodelartifactsha256"
+          },
           "positionModelBundleId": {
             "anyOf": [
               {

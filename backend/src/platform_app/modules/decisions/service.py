@@ -22,8 +22,16 @@ from platform_app.modules.decisions.position_contracts import (
     PositionDecisionRequest,
     PositionEvaluationInput,
 )
-from platform_app.modules.decisions.position_engine import arbitrate_position
+from platform_app.modules.decisions.position_engine import (
+    arbitrate_position,
+    unavailable_position,
+)
+from platform_app.modules.decisions.position_runtime import (
+    PositionRuntimeError,
+    enrich_shadow_request,
+)
 from platform_app.modules.experiments.joint_bundle import JointBundle, JointBundleError
+from platform_app.modules.learning.models import ProspectiveSample
 from platform_app.modules.operations import jobs
 from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.portfolio.models import Account, PositionLot
@@ -143,7 +151,11 @@ def submit_position_evaluation(
                 instrument_id=body.instrument_id,
                 current_quantity_shares=current,
                 sellable_quantity_shares=sellable,
-                max_target_quantity_shares=current,
+                max_target_quantity_shares=(
+                    current + max(current, 100)
+                    if release.status == "SHADOW" and account.kind == "SIMULATED"
+                    else current
+                ),
                 lot_size_shares=100,
                 allowed_actions={"HOLD", "ADD", "REDUCE", "EXIT"},
                 quantity_rule_version="a-share-lot.v1",
@@ -177,8 +189,28 @@ def submit_position_evaluation(
         return job
 
 
-def _publish(db, job: Job, decision: PositionDecision) -> dict:
-    request = PositionDecisionRequest.model_validate(job.payload["request"])
+def _position_agent_features(assessment) -> dict:
+    claims = [*assessment.claims, *assessment.counter_claims]
+    return {
+        "schemaVersion": "position-agent-features.v1",
+        "thesisStatus": assessment.thesis_status,
+        "claimCounts": {
+            kind: sum(claim.kind == kind for claim in claims)
+            for kind in ("OBSERVED", "INFERRED", "HYPOTHESIS")
+        },
+        "counterClaimCount": len(assessment.counter_claims),
+        "uncertaintyCount": len(assessment.uncertainties),
+        "signalCategories": sorted({signal.category for signal in assessment.signals}),
+        "evidenceCount": len({signal.evidence_id for signal in assessment.signals}),
+    }
+
+
+def _publish(
+    db,
+    job: Job,
+    decision: PositionDecision,
+    request: PositionDecisionRequest,
+) -> dict:
     account = db.scalar(
         select(Account).where(
             Account.id == request.constraints.account_id,
@@ -230,6 +262,37 @@ def _publish(db, job: Job, decision: PositionDecision) -> dict:
         valid_until=decision.valid_until,
     )
     db.add_all((context, record))
+    if request.release.status == "SHADOW" and request.quant and request.agent:
+        db.add(
+            ProspectiveSample(
+                owner_id=job.owner_id,
+                account_id=account.id,
+                instrument_id=decision.instrument_id,
+                assessment_id=request.agent.assessment_id,
+                source_key=decision.decision_id,
+                request_hash=hashlib.sha256(
+                    decision.model_dump_json().encode()
+                ).hexdigest(),
+                decision_context_hash=job.payload["contextHash"],
+                schema_version="prospective-position-sample.v1",
+                decision_as_of=request.as_of,
+                horizon_end_date=request.quant.horizon_end_date,
+                market_snapshot_ref=request.quant.market_snapshot_ref,
+                ranking_bundle_id=request.release.ranking_model_bundle_id,
+                quant_bundle_id=request.release.quant_model_bundle_id,
+                agent_protocol_version=request.agent.protocol_version,
+                agent_feature_schema_version="position-agent-features.v1",
+                agent_features=_position_agent_features(request.agent),
+                quant_prediction=request.quant.model_dump(mode="json"),
+                scenario={
+                    "decisionStatus": decision.status,
+                    "selectedAction": decision.action,
+                    "targetQuantityShares": decision.target_quantity_shares,
+                },
+                context=job.payload["snapshot"],
+                status="PENDING",
+            )
+        )
     db.flush()
     db.execute(
         insert(CurrentDecision)
@@ -274,11 +337,26 @@ def process_one() -> bool:
     ).release:
         jobs.finish(job, error="JOINT_RELEASE_CHANGED")
         return True
-    decision = arbitrate_position(
-        PositionDecisionRequest.model_validate(job.payload["request"])
-    )
+    request = PositionDecisionRequest.model_validate(job.payload["request"])
     try:
-        jobs.finish(job, publish=lambda db, current: _publish(db, current, decision))
+        request = enrich_shadow_request(job.owner_id, request, settings())
+        decision = arbitrate_position(request)
+    except PositionRuntimeError as exc:
+        decision = unavailable_position(
+            request,
+            str(exc),
+            "影子评估缺少可验证的量化特征、价格或有效Agent研判。",
+        )
+    try:
+        jobs.finish(
+            job,
+            publish=lambda db, current: _publish(
+                db,
+                current,
+                decision,
+                request,
+            ),
+        )
     except DecisionError as exc:
         jobs.finish(job, error=exc.code)
     return True

@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     joint_bundle_root: Path | None = Path(
         "~/.local/share/stock-platform/joint-releases/active-shadow.json"
     ).expanduser()
+    ranking_dataset_root: Path = Path(
+        "~/.local/share/stock-platform/full-universe-ranking-v1"
+    ).expanduser()
+    market_dataset_root: Path = Path(
+        "~/.local/share/stock-platform/a-share-20160101-20260915-v5"
+    ).expanduser()
+    ranking_model_root: Path = Path(
+        "~/.local/share/stock-platform/full-universe-ranking-model-v1"
+    ).expanduser()
+    position_model_root: Path = Path(
+        "~/.local/share/stock-platform/position-action-model-v2"
+    ).expanduser()
     cookie_secure: bool = False
 
     @field_validator("agent_base_url")
