@@ -139,6 +139,7 @@ class EpisodeDataset:
             raise EpisodeDatasetError("EPISODE_DATASET_ALREADY_SEALED")
 
         market = verify_market_dataset(market_dataset_root)
+        self.market_database_path = market["database"]
         policy_json = canonical_json(policy)
         policy_hash = hashlib.sha256(policy_json.encode()).hexdigest()
         self.root.mkdir(parents=True, exist_ok=True)
