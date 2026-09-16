@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 from pydantic import AwareDatetime
 
 from platform_app.adapters.market_public import fetch_quote
@@ -10,11 +10,22 @@ from platform_app.kernel.calendar import CalendarDay, calendar_day
 from platform_app.modules.identity.routes import CurrentUser
 from platform_app.modules.market import service
 from platform_app.modules.market.contracts import (
-    InstrumentPage, InstrumentView, QuoteView, WatchInput, WatchPage,
+    InstrumentPage,
+    InstrumentView,
+    QuoteView,
+    SavedViewInput,
+    SavedViewPage,
+    SavedViewView,
+    WatchInput,
+    WatchPage,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["market"])
 Limit = Annotated[int, Query(ge=1, le=100)]
+CommandKey = Annotated[
+    str,
+    Header(alias="Idempotency-Key", min_length=8, max_length=128),
+]
 
 
 @router.get("/market/calendar", response_model=Envelope[CalendarDay])
@@ -57,3 +68,32 @@ def add_watch(body: WatchInput, user: CurrentUser):
 @router.delete("/watchlists/{instrument_id}", status_code=204)
 def remove_watch(instrument_id: InstrumentId, user: CurrentUser):
     service.set_watch(user.id, instrument_id, False)
+
+
+@router.post(
+    "/market/saved-views",
+    response_model=Envelope[SavedViewView],
+    status_code=201,
+)
+def create_saved_view(
+    body: SavedViewInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(data=service.save_view(user.id, body, key))
+
+
+@router.get(
+    "/market/saved-views",
+    response_model=Envelope[SavedViewPage],
+)
+def list_saved_views(user: CurrentUser):
+    return Envelope(data=service.saved_views(user.id))
+
+
+@router.delete(
+    "/market/saved-views/{view_id}",
+    status_code=204,
+)
+def delete_saved_view(view_id: str, user: CurrentUser):
+    service.delete_saved_view(user.id, view_id)

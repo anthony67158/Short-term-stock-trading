@@ -1,8 +1,19 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import delete
 
-from platform_app.adapters.market_public import normalize_universe, parse_quote
+from platform_app.adapters.database import sessions
+from platform_app.adapters.market_public import (
+    MarketError,
+    normalize_universe,
+    parse_quote,
+)
+from platform_app.contracts.base import new_id
+from platform_app.modules.identity.models import User
+from platform_app.modules.market import service
+from platform_app.modules.market.contracts import SavedViewInput
+from platform_app.modules.market.models import SavedView
 
 
 def test_universe_requires_complete_unique_ordered_market_identity():
@@ -41,3 +52,46 @@ def test_quote_uses_provider_timestamp_and_null_missing_price():
     fields[3] = "NaN"
     with pytest.raises(ValueError):
         parse_quote(raw(), "SZ.000001", received)
+
+
+def test_saved_market_views_are_owner_scoped_and_idempotent():
+    owner_id = new_id()
+    other_id = new_id()
+    with sessions().begin() as db:
+        db.add_all(
+            [
+                User(
+                    id=owner_id,
+                    username="market-view-" + owner_id[:8],
+                    password_hash="synthetic",
+                ),
+                User(
+                    id=other_id,
+                    username="market-view-" + other_id[:8],
+                    password_hash="synthetic",
+                ),
+            ]
+        )
+    body = SavedViewInput(
+        name="我的关注",
+        query=" 平安 ",
+        watch_only=True,
+    )
+    key = new_id()
+    saved = service.save_view(owner_id, body, key)
+    assert service.save_view(owner_id, body, key).id == saved.id
+    assert saved.query == "平安"
+    assert service.saved_views(owner_id).views[0].id == saved.id
+    assert service.saved_views(other_id).views == []
+    with pytest.raises(MarketError, match="保存视图"):
+        service.delete_saved_view(other_id, saved.id)
+    service.delete_saved_view(owner_id, saved.id)
+    with sessions().begin() as db:
+        db.execute(
+            delete(SavedView).where(
+                SavedView.owner_id.in_([owner_id, other_id])
+            )
+        )
+        db.execute(
+            delete(User).where(User.id.in_([owner_id, other_id]))
+        )

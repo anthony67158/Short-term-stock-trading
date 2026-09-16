@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useParams } from "react-router";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Star } from "lucide-react";
@@ -10,9 +10,51 @@ import { CandidateScan } from "./CandidateScan";
 const boardNames = { MAIN: "主板", STAR: "科创板", CHINEXT: "创业板", BEIJING: "北交所", UNKNOWN: "待核验" };
 
 export function Market() {
+  const cache = useQueryClient();
+  const command = useRef("");
   const [draft, setDraft] = useState("");
   const [query, setQuery] = useState("");
   const [watchOnly, setWatchOnly] = useState(false);
+  const [viewName, setViewName] = useState("");
+  const views = useQuery({
+    queryKey: ["market-saved-views"],
+    queryFn: async ({ signal }) => {
+      const result = await api.GET("/api/v1/market/saved-views", { signal });
+      if (!result.data) throw new Error(errorMessage(result.error));
+      return result.data.data.views;
+    },
+  });
+  const saveView = useMutation({
+    mutationFn: async () => {
+      command.current = crypto.randomUUID();
+      const result = await api.POST("/api/v1/market/saved-views", {
+        params: { header: { "Idempotency-Key": command.current } },
+        body: {
+          name: viewName.trim(),
+          query,
+          watchOnly,
+        },
+      });
+      if (!result.data) throw new Error(errorMessage(result.error));
+      return result.data.data;
+    },
+    onSuccess: async () => {
+      setViewName("");
+      await cache.invalidateQueries({ queryKey: ["market-saved-views"] });
+    },
+  });
+  const removeView = useMutation({
+    mutationFn: async (viewId: string) => {
+      const result = await api.DELETE(
+        "/api/v1/market/saved-views/{view_id}",
+        { params: { path: { view_id: viewId } } },
+      );
+      if (!result.response.ok) throw new Error(errorMessage(result.error));
+    },
+    onSuccess: async () => {
+      await cache.invalidateQueries({ queryKey: ["market-saved-views"] });
+    },
+  });
   const listing = useInfiniteQuery({
     queryKey: ["instruments", query, watchOnly], initialPageParam: undefined as string | undefined,
     queryFn: async ({ signal, pageParam }) => {
@@ -35,6 +77,65 @@ export function Market() {
         <Button type="submit" variant="primary">搜索</Button>
         <Button type="button" aria-pressed={watchOnly} onClick={() => setWatchOnly(!watchOnly)}><Star size={16} />{watchOnly ? "查看全部" : "我的关注"}</Button>
       </form>
+      <div className="saved-view-toolbar">
+        <label className="field compact-select">
+          <span>保存视图</span>
+          <select
+            value=""
+            onChange={(event) => {
+              const view = views.data?.find(
+                (item) => item.id === event.target.value,
+              );
+              if (!view) return;
+              setDraft(view.query);
+              setQuery(view.query);
+              setWatchOnly(view.watchOnly);
+            }}
+          >
+            <option value="">选择已保存条件</option>
+            {views.data?.map((view) => (
+              <option key={view.id} value={view.id}>
+                {view.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Input
+          id="saved-view-name"
+          label="新视图名称"
+          value={viewName}
+          onChange={(event) => setViewName(event.target.value)}
+          maxLength={80}
+        />
+        <Button
+          disabled={!viewName.trim() || saveView.isPending}
+          onClick={() => saveView.mutate()}
+        >
+          保存当前条件
+        </Button>
+        {(views.data?.length ?? 0) > 0 && (
+          <details className="saved-view-list">
+            <summary>管理</summary>
+            {views.data?.map((view) => (
+              <div key={view.id}>
+                <span>{view.name}</span>
+                <Button
+                  variant="ghost"
+                  disabled={removeView.isPending}
+                  onClick={() => removeView.mutate(view.id)}
+                >
+                  删除
+                </Button>
+              </div>
+            ))}
+          </details>
+        )}
+      </div>
+      {(saveView.isError || removeView.isError || views.isError) && (
+        <p className="error" role="alert">
+          {errorMessage(saveView.error ?? removeView.error ?? views.error)}
+        </p>
+      )}
       {universe && <p className="source-note">{universe.source} · 当前目录 {universe.count.toLocaleString()} 只 · 采集于 {new Date(universe.acquiredAt).toLocaleString("zh-CN")} · 历史股票池待补齐</p>}
       <CandidateScan />
       {listing.isPending ? <p role="status">正在读取证券目录…</p> : listing.isError ? <div role="alert"><p>{errorMessage(listing.error)}</p><Button onClick={() => listing.refetch()}>重新读取</Button></div>

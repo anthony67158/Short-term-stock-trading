@@ -1,6 +1,13 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String
+from sqlalchemy import (
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,3 +47,36 @@ class Watch(Base):
     owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), primary_key=True)
     instrument_id: Mapped[str] = mapped_column(ForeignKey("instruments.id"), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SavedView(Base):
+    __tablename__ = "market_saved_views"
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_id",
+            "name",
+            name="uq_market_saved_view_name",
+        ),
+        UniqueConstraint(
+            "owner_id",
+            "command_key",
+            name="uq_market_saved_view_command",
+        ),
+    )
+    id: Mapped[str] = mapped_column(
+        String(32),
+        primary_key=True,
+        default=new_id,
+    )
+    owner_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id"),
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(80))
+    filters: Mapped[dict] = mapped_column(JSONB)
+    command_key: Mapped[str] = mapped_column(String(128))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utcnow,
+    )

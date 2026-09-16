@@ -420,6 +420,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market/saved-views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Saved Views */
+        get: operations["list_saved_views_api_v1_market_saved_views_get"];
+        put?: never;
+        /** Create Saved View */
+        post: operations["create_saved_view_api_v1_market_saved_views_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market/saved-views/{view_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Saved View */
+        delete: operations["delete_saved_view_api_v1_market_saved_views__view_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/research-capability": {
         parameters: {
             query?: never;
@@ -1708,6 +1743,16 @@ export interface components {
             data: components["schemas"]["ReviewReportPage"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[SavedViewPage] */
+        Envelope_SavedViewPage_: {
+            data: components["schemas"]["SavedViewPage"];
+            meta?: components["schemas"]["Meta"];
+        };
+        /** Envelope[SavedViewView] */
+        Envelope_SavedViewView_: {
+            data: components["schemas"]["SavedViewView"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[StrategyVersionPage] */
         Envelope_StrategyVersionPage_: {
             data: components["schemas"]["StrategyVersionPage"];
@@ -2985,6 +3030,48 @@ export interface components {
              * Format: date
              */
             reviewDate: string;
+        };
+        /** SavedViewInput */
+        SavedViewInput: {
+            /** Name */
+            name: string;
+            /**
+             * Query
+             * @default
+             */
+            query: string;
+            /**
+             * Watchonly
+             * @default false
+             */
+            watchOnly: boolean;
+        };
+        /** SavedViewPage */
+        SavedViewPage: {
+            /** Views */
+            views: components["schemas"]["SavedViewView"][];
+        };
+        /** SavedViewView */
+        SavedViewView: {
+            /** Name */
+            name: string;
+            /**
+             * Query
+             * @default
+             */
+            query: string;
+            /**
+             * Watchonly
+             * @default false
+             */
+            watchOnly: boolean;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
         };
         /** SplitContract */
         SplitContract: {
@@ -4281,6 +4368,90 @@ export interface operations {
             header?: never;
             path: {
                 instrument_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_saved_views_api_v1_market_saved_views_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_SavedViewPage_"];
+                };
+            };
+        };
+    };
+    create_saved_view_api_v1_market_saved_views_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SavedViewInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_SavedViewView_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_saved_view_api_v1_market_saved_views__view_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                view_id: string;
             };
             cookie?: never;
         };

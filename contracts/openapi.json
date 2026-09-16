@@ -1819,6 +1819,114 @@
         }
       }
     },
+    "/api/v1/market/saved-views": {
+      "post": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Create Saved View",
+        "operationId": "create_saved_view_api_v1_market_saved_views_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SavedViewInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SavedViewView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "market"
+        ],
+        "summary": "List Saved Views",
+        "operationId": "list_saved_views_api_v1_market_saved_views_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_SavedViewPage_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market/saved-views/{view_id}": {
+      "delete": {
+        "tags": [
+          "market"
+        ],
+        "summary": "Delete Saved View",
+        "operationId": "delete_saved_view_api_v1_market_saved_views__view_id__delete",
+        "parameters": [
+          {
+            "name": "view_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "View Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/research-capability": {
       "get": {
         "tags": [
@@ -5714,6 +5822,38 @@
         ],
         "title": "Envelope[ReviewReportPage]"
       },
+      "Envelope_SavedViewPage_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SavedViewPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[SavedViewPage]"
+      },
+      "Envelope_SavedViewView_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SavedViewView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[SavedViewView]"
+      },
       "Envelope_StrategyVersionPage_": {
         "properties": {
           "data": {
@@ -9423,6 +9563,90 @@
           "reviewDate"
         ],
         "title": "ReviewRunInput"
+      },
+      "SavedViewInput": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Name"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Query",
+            "default": ""
+          },
+          "watchOnly": {
+            "type": "boolean",
+            "title": "Watchonly",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "SavedViewInput"
+      },
+      "SavedViewPage": {
+        "properties": {
+          "views": {
+            "items": {
+              "$ref": "#/components/schemas/SavedViewView"
+            },
+            "type": "array",
+            "title": "Views"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "views"
+        ],
+        "title": "SavedViewPage"
+      },
+      "SavedViewView": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "\\S",
+            "title": "Name"
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 80,
+            "title": "Query",
+            "default": ""
+          },
+          "watchOnly": {
+            "type": "boolean",
+            "title": "Watchonly",
+            "default": false
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Createdat"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "id",
+          "createdAt"
+        ],
+        "title": "SavedViewView"
       },
       "SplitContract": {
         "properties": {

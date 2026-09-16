@@ -58,3 +58,18 @@ class WatchInput(Contract):
 class WatchPage(Contract):
     instruments: list[InstrumentView]
     next_cursor: str | None
+
+
+class SavedViewInput(Contract):
+    name: str = Field(min_length=1, max_length=80, pattern=r"\S")
+    query: str = Field(default="", max_length=80)
+    watch_only: bool = False
+
+
+class SavedViewView(SavedViewInput):
+    id: str
+    created_at: AwareDatetime
+
+
+class SavedViewPage(Contract):
+    views: list[SavedViewView]

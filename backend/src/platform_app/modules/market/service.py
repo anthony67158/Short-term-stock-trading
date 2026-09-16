@@ -1,4 +1,5 @@
 import hashlib
+import json
 
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -6,10 +7,22 @@ from sqlalchemy.dialects.postgresql import insert
 from platform_app.adapters.database import sessions
 from platform_app.adapters.market_public import MarketError, SINA, canonical, download_universe
 from platform_app.contracts.base import utcnow
+from platform_app.contracts.base import new_id
 from platform_app.modules.market.contracts import (
-    InstrumentPage, InstrumentView, UniverseView, WatchPage,
+    InstrumentPage,
+    InstrumentView,
+    SavedViewInput,
+    SavedViewPage,
+    SavedViewView,
+    UniverseView,
+    WatchPage,
 )
-from platform_app.modules.market.models import Instrument, UniverseSnapshot, Watch
+from platform_app.modules.market.models import (
+    Instrument,
+    SavedView,
+    UniverseSnapshot,
+    Watch,
+)
 
 
 def sync_universe() -> UniverseView:
@@ -104,3 +117,98 @@ def watches(user_id: str, cursor: str | None, limit: int) -> WatchPage:
             instruments=[InstrumentView.model_validate(row) for row in rows[:limit]],
             next_cursor=rows[limit - 1].id if len(rows) > limit else None,
         )
+
+
+def _view(row: SavedView) -> SavedViewView:
+    return SavedViewView(
+        id=row.id,
+        name=row.name,
+        query=row.filters["query"],
+        watch_only=row.filters["watchOnly"],
+        created_at=row.created_at,
+    )
+
+
+def save_view(
+    owner_id: str,
+    body: SavedViewInput,
+    key: str,
+) -> SavedViewView:
+    filters = {
+        "query": body.query.strip(),
+        "watchOnly": body.watch_only,
+    }
+    request_hash = hashlib.sha256(
+        json.dumps(
+            {"name": body.name.strip(), "filters": filters},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    with sessions().begin() as db:
+        existing = db.scalar(
+            select(SavedView).where(
+                SavedView.owner_id == owner_id,
+                SavedView.command_key == key,
+            )
+        )
+        if existing:
+            if existing.request_hash != request_hash:
+                raise MarketError(
+                    "IDEMPOTENCY_CONFLICT",
+                    "同一请求编号对应不同保存视图",
+                    409,
+                )
+            return _view(existing)
+        duplicate = db.scalar(
+            select(SavedView).where(
+                SavedView.owner_id == owner_id,
+                SavedView.name == body.name.strip(),
+            )
+        )
+        if duplicate:
+            raise MarketError(
+                "SAVED_VIEW_NAME_EXISTS",
+                "已有同名保存视图",
+                409,
+            )
+        row = SavedView(
+            id=new_id(),
+            owner_id=owner_id,
+            name=body.name.strip(),
+            filters=filters,
+            command_key=key,
+            request_hash=request_hash,
+        )
+        db.add(row)
+        db.flush()
+        return _view(row)
+
+
+def saved_views(owner_id: str) -> SavedViewPage:
+    with sessions()() as db:
+        rows = list(
+            db.scalars(
+                select(SavedView)
+                .where(SavedView.owner_id == owner_id)
+                .order_by(SavedView.created_at, SavedView.id)
+            )
+        )
+        return SavedViewPage(views=[_view(row) for row in rows])
+
+
+def delete_saved_view(owner_id: str, view_id: str) -> None:
+    with sessions().begin() as db:
+        result = db.execute(
+            delete(SavedView).where(
+                SavedView.id == view_id,
+                SavedView.owner_id == owner_id,
+            )
+        )
+        if result.rowcount != 1:
+            raise MarketError(
+                "SAVED_VIEW_NOT_FOUND",
+                "保存视图不存在或无权访问",
+                404,
+            )

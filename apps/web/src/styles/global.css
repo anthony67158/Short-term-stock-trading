@@ -76,6 +76,11 @@ tbody tr:hover { background: var(--hover); }
 .save-notice { padding-top: var(--space-4); color: var(--accent); font-size: 13px; }
 .market-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); margin-bottom: var(--space-4); }
 .market-toolbar .field { width: min(100%, 320px); }
+.saved-view-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); padding-bottom: var(--space-5); border-bottom: 1px solid var(--border); margin-bottom: var(--space-4); }
+.saved-view-toolbar > .field { width: min(100%, 240px); }
+.saved-view-list { align-self: center; position: relative; }
+.saved-view-list summary { cursor: pointer; color: var(--secondary); }
+.saved-view-list > div { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 220px; padding: var(--space-2) 0; border-bottom: 1px solid var(--border); }
 .source-note { font-size: 12px; color: var(--secondary); margin: var(--space-4) 0; }
 .capability-note { color: var(--secondary); border-left: 2px solid var(--border); padding: var(--space-2) var(--space-3); margin: var(--space-4) 0 var(--space-6); font-size: 13px; }
 .research-heading { display: flex; flex-wrap: wrap; gap: var(--space-4); align-items: center; justify-content: space-between; padding-bottom: var(--space-6); border-bottom: 1px solid var(--border); }
