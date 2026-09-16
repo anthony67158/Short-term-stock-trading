@@ -128,21 +128,21 @@ class MinuteRequirementFetcher:
             raw_rows = self.client.rows("stk_mins", params, MINUTE_FIELDS)
             if len(raw_rows) >= UPSTREAM_ROW_LIMIT:
                 raise HistoricalMarketError("MINUTE_MAY_BE_TRUNCATED")
-            aliases = {
-                row["source_code"]: f"{row['instrument_id'][3:]}.{row['instrument_id'][:2]}"
-                for row in self.market.execute(
-                    "SELECT source_code, instrument_id FROM instrument_aliases"
-                )
-            }
-            normalized = [normalize_minute(row, instrument_id, aliases) for row in raw_rows]
-            if any(row["sourceCode"] != source_code for row in normalized):
+            if any(str(row.get("ts_code") or "").upper() != source_code for row in raw_rows):
                 raise HistoricalMarketError("MINUTE_SOURCE_CODE_MISMATCH")
-            rows_by_date: dict[str, list[dict]] = defaultdict(list)
-            for row in normalized:
-                trade_date = row["barEndShanghai"][:10].replace("-", "")
+            raw_rows_by_date: dict[str, list[dict]] = defaultdict(list)
+            for row in raw_rows:
+                try:
+                    timestamp = datetime.strptime(
+                        str(row.get("trade_time") or ""),
+                        "%Y-%m-%d %H:%M:%S",
+                    )
+                except ValueError as exc:
+                    raise HistoricalMarketError("INVALID_MINUTE_TIME") from exc
+                trade_date = timestamp.strftime("%Y%m%d")
                 if not window["startDate"] <= trade_date <= window["endDate"]:
                     raise HistoricalMarketError("MINUTE_RESPONSE_OUTSIDE_WINDOW")
-                rows_by_date[trade_date].append({**row, "tradeDate": trade_date})
+                raw_rows_by_date[trade_date].append(row)
         except HistoricalMarketError as exc:
             with self.dataset.db:
                 for trade_date in window["requiredDates"]:
@@ -158,22 +158,46 @@ class MinuteRequirementFetcher:
             raise
 
         response_hash = canonical_sha256(raw_rows)
+        aliases = {
+            row["source_code"]: f"{row['instrument_id'][3:]}.{row['instrument_id'][:2]}"
+            for row in self.market.execute(
+                "SELECT source_code, instrument_id FROM instrument_aliases"
+            )
+        }
         accepted = 0
         rejected = 0
         reasons: dict[str, int] = defaultdict(int)
         for trade_date in window["requiredDates"]:
-            rows = sorted(rows_by_date[trade_date], key=lambda row: row["barEndShanghai"])
             with self.dataset.db:
-                result = ingest_minute_requirement(
-                    self.dataset,
-                    self.market,
-                    instrument_id=instrument_id,
-                    trade_date=trade_date,
-                    rows=rows,
-                    source_kind=SOURCE_KIND,
-                    source_asset_sha256=response_hash,
-                    attempted_at=attempted_at,
-                )
+                try:
+                    rows = [
+                        {
+                            **normalize_minute(row, instrument_id, aliases),
+                            "tradeDate": trade_date,
+                        }
+                        for row in raw_rows_by_date[trade_date]
+                    ]
+                    rows.sort(key=lambda row: row["barEndShanghai"])
+                    result = ingest_minute_requirement(
+                        self.dataset,
+                        self.market,
+                        instrument_id=instrument_id,
+                        trade_date=trade_date,
+                        rows=rows,
+                        source_kind=SOURCE_KIND,
+                        source_asset_sha256=response_hash,
+                        attempted_at=attempted_at,
+                    )
+                except HistoricalMarketError as exc:
+                    result = reject_minute_requirement(
+                        self.dataset,
+                        instrument_id=instrument_id,
+                        trade_date=trade_date,
+                        source_kind=SOURCE_KIND,
+                        source_asset_sha256=response_hash,
+                        reason=str(exc),
+                        attempted_at=attempted_at,
+                    )
             accepted += result["outcome"] == "ACCEPTED"
             rejected += result["outcome"] == "REJECTED"
             if result["reason"]:

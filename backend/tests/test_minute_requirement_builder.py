@@ -151,12 +151,8 @@ def _tushare_minute_rows(trade_dates):
     rows = []
     for trade_date in trade_dates:
         starts = (
-            datetime.fromisoformat(
-                f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]} 09:35:00"
-            ),
-            datetime.fromisoformat(
-                f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]} 13:05:00"
-            ),
+            datetime.fromisoformat(f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]} 09:35:00"),
+            datetime.fromisoformat(f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]} 13:05:00"),
         )
         times = [start + timedelta(minutes=5 * offset) for start in starts for offset in range(24)]
         rows.extend(
@@ -451,8 +447,41 @@ def test_fetcher_records_upstream_failure_and_can_resume(tmp_path):
             resumed = list(fetcher.fetch_pending(dates[1], dates[2]))
 
         assert resumed[0]["accepted"] == 2
-        assert dataset.db.execute(
-            "SELECT COUNT(*) FROM minute_requirements WHERE status = 'PENDING' "
-            "AND trade_date BETWEEN ? AND ?",
+        assert (
+            dataset.db.execute(
+                "SELECT COUNT(*) FROM minute_requirements WHERE status = 'PENDING' "
+                "AND trade_date BETWEEN ? AND ?",
+                (dates[1], dates[2]),
+            ).fetchone()[0]
+            == 0
+        )
+
+
+def test_fetcher_isolates_invalid_ohlc_to_its_requirement_date(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    rows = _tushare_minute_rows([dates[1], dates[2]])
+    rows[0]["high"] = "9"
+    client = _MinuteClient(rows)
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        with MinuteRequirementFetcher(client, dataset) as fetcher:
+            results = list(fetcher.fetch_pending(dates[1], dates[2]))
+
+        assert results[0]["accepted"] == 1
+        assert results[0]["rejected"] == 1
+        states = dataset.db.execute(
+            "SELECT trade_date, status, reason FROM minute_requirements "
+            "WHERE trade_date BETWEEN ? AND ? ORDER BY trade_date",
             (dates[1], dates[2]),
-        ).fetchone()[0] == 0
+        ).fetchall()
+        assert [tuple(row) for row in states] == [
+            (dates[1], "PENDING", "INVALID_OHLC"),
+            (dates[2], "COMPLETED", None),
+        ]
