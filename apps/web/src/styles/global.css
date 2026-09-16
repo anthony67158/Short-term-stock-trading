@@ -87,6 +87,9 @@ tbody tr:hover { background: var(--hover); }
 .center-link { text-align: center; }
 .section-toolbar { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .section-toolbar h2 { margin: 0; }
+.status-label { display: inline-flex; align-items: center; min-height: 24px; padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: 4px; color: var(--secondary); font-size: 12px; white-space: nowrap; }
+.status-label.shadow { color: var(--warning); border-color: currentColor; }
+.status-label.ready { color: var(--down); border-color: currentColor; }
 .wide-field { grid-column: 1 / -1; }
 .evidence-form textarea { min-height: 120px; padding: var(--space-3); resize: vertical; }
 .evidence-form > p { font-size: 12px; }

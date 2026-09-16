@@ -556,6 +556,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/decision-capability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Decision Capability */
+        get: operations["decision_capability_api_v1_decision_capability_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/accounts/{account_id}/evaluations": {
         parameters: {
             query?: never;
@@ -1066,6 +1083,11 @@ export interface components {
             data: components["schemas"]["JobView"];
             meta?: components["schemas"]["Meta"];
         };
+        /** Envelope[JointReleaseReference] */
+        Envelope_JointReleaseReference_: {
+            data: components["schemas"]["JointReleaseReference"];
+            meta?: components["schemas"]["Meta"];
+        };
         /** Envelope[OpeningPage] */
         Envelope_OpeningPage_: {
             data: components["schemas"]["OpeningPage"];
@@ -1440,6 +1462,29 @@ export interface components {
             errorCode: string | null;
             /** Message */
             message?: string | null;
+        };
+        /** JointReleaseReference */
+        JointReleaseReference: {
+            /** Releaseid */
+            releaseId: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "READY" | "SHADOW" | "UNAVAILABLE";
+            /**
+             * Allowsnewrisk
+             * @default false
+             */
+            allowsNewRisk: boolean;
+            /** Positionmodelbundleid */
+            positionModelBundleId?: string | null;
+            /** Positionmodelartifactsha256 */
+            positionModelArtifactSha256?: string | null;
+            /** Agentprotocolversion */
+            agentProtocolVersion?: string | null;
+            /** Blockercodes */
+            blockerCodes?: string[];
         };
         /** LoginInput */
         LoginInput: {
@@ -3349,6 +3394,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decision_capability_api_v1_decision_capability_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_JointReleaseReference_"];
                 };
             };
         };

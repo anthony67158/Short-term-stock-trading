@@ -5,6 +5,7 @@ from fastapi import APIRouter, Header, Query
 from platform_app.contracts.base import Envelope
 from platform_app.modules.decisions import service
 from platform_app.modules.decisions.position_contracts import (
+    JointReleaseReference,
     PositionDecision,
     PositionDecisionPage,
     PositionEvaluationInput,
@@ -17,6 +18,14 @@ CommandKey = Annotated[
     str,
     Header(alias="Idempotency-Key", min_length=8, max_length=128),
 ]
+
+
+@router.get(
+    "/decision-capability",
+    response_model=Envelope[JointReleaseReference],
+)
+def decision_capability(_user: CurrentUser):
+    return Envelope(data=service.active_release())
 
 
 @router.post(

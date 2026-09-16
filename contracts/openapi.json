@@ -2216,6 +2216,27 @@
         }
       }
     },
+    "/api/v1/decision-capability": {
+      "get": {
+        "tags": [
+          "decisions"
+        ],
+        "summary": "Decision Capability",
+        "operationId": "decision_capability_api_v1_decision_capability_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JointReleaseReference_"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/accounts/{account_id}/evaluations": {
       "post": {
         "tags": [
@@ -3732,6 +3753,22 @@
         ],
         "title": "Envelope[JobView]"
       },
+      "Envelope_JointReleaseReference_": {
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/JointReleaseReference"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "Envelope[JointReleaseReference]"
+      },
       "Envelope_OpeningPage_": {
         "properties": {
           "data": {
@@ -4760,6 +4797,83 @@
           "errorCode"
         ],
         "title": "JobView"
+      },
+      "JointReleaseReference": {
+        "properties": {
+          "releaseId": {
+            "type": "string",
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Releaseid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "SHADOW",
+              "UNAVAILABLE"
+            ],
+            "title": "Status"
+          },
+          "allowsNewRisk": {
+            "type": "boolean",
+            "title": "Allowsnewrisk",
+            "default": false
+          },
+          "positionModelBundleId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positionmodelbundleid"
+          },
+          "positionModelArtifactSha256": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positionmodelartifactsha256"
+          },
+          "agentProtocolVersion": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 160,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agentprotocolversion"
+          },
+          "blockerCodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 32,
+            "title": "Blockercodes"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "releaseId",
+          "status"
+        ],
+        "title": "JointReleaseReference"
       },
       "LoginInput": {
         "properties": {

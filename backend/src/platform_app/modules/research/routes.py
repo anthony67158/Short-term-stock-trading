@@ -26,6 +26,8 @@ MESSAGES = {
     "INVALID_EVIDENCE_REFERENCE": "研判引用了材料包之外的证据，已拒绝发布",
     "UNSUPPORTED_OBSERVATION": "研判中的事实无法在引用原文定位，已拒绝发布",
     "DEADLINE_EXCEEDED": "研究任务超过有效处理期限",
+    "JOINT_RELEASE_CHANGED": "评估期间联合版本已变化，本次结果未发布",
+    "ACCOUNT_VERSION_CONFLICT": "评估期间账户已变化，请重新评估",
 }
 
 

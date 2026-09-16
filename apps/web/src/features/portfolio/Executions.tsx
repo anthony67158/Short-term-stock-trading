@@ -5,6 +5,7 @@ import type { components } from "../../../../../packages/api-client/schema";
 import { Button, Empty, Input } from "../../components/Controls";
 import { api, errorMessage } from "../../lib/api";
 import { CorrectionEditor, CorrectionHistory } from "./Corrections";
+import { PositionDecisions } from "./PositionDecisions";
 
 type Account = components["schemas"]["AccountView"];
 type ExecutionInput = components["schemas"]["ExecutionInput"];
@@ -102,6 +103,11 @@ export function Executions({ account }: { account: Account }) {
             <tbody>{rows.map((row) => <tr key={row.instrumentId}><td><Link to={`/research/${row.instrumentId}`}>{row.name}</Link><div className="secondary">{row.instrumentId}</div></td><td className="numeric">{row.quantityShares} / {row.sellableShares}</td><td className="numeric">{row.lockedShares}</td><td className="numeric">{row.remainingBasis}</td></tr>)}</tbody></table></div>}
       {positions.hasNextPage && <Button disabled={positions.isFetchingNextPage} onClick={() => positions.fetchNextPage()}>更多持仓</Button>}
     </section>
+    <PositionDecisions
+      account={account}
+      positions={rows}
+      accountVersion={positions.data?.pages[0]?.accountVersion ?? account.version}
+    />
     <section className="ledger-section"><h2>成交记录</h2>
       {correcting && <CorrectionEditor key={correcting.id} account={account} trade={correcting} close={() => setCorrecting(null)} />}
       {history.isPending ? <p role="status">正在读取成交…</p> : history.isError ? <div role="alert">{errorMessage(history.error)}<Button onClick={() => history.refetch()}>重新读取成交</Button></div>
