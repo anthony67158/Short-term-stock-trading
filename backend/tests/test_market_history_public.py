@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from platform_app.adapters.market_history_public import (
+    EastmoneyDailyClient,
     PublicHistoryError,
     SinaDailyClient,
     TencentDailyClient,
@@ -111,6 +112,34 @@ def test_tencent_daily_client_keeps_star_market_volume_in_shares():
     assert rows["20221115"]["volumeShares"] == "1718381.000"
 
 
+def test_eastmoney_daily_client_normalizes_raw_amount_and_lot_volume():
+    def handler(request):
+        assert request.url.host == "push2his.eastmoney.com"
+        assert request.url.params["secid"] == "0.920185"
+        assert request.url.params["fqt"] == "0"
+        assert request.url.params["beg"] == "20211115"
+        return httpx.Response(
+            200,
+            json={
+                "rc": 0,
+                "data": {
+                    "klines": [
+                        "2021-11-15,197.88,171.68,198.08,168.88,"
+                        "38269,692725376.00,15.54,-8.62,-16.19,2.63"
+                    ]
+                },
+            },
+        )
+
+    rows = EastmoneyDailyClient(transport=httpx.MockTransport(handler)).bars(
+        "BJ.920185", "20211115", "20211115"
+    )
+
+    assert rows["20211115"]["volumeShares"] == "3826900"
+    assert rows["20211115"]["amountCny"] == "692725376.00"
+    assert rows["20211115"]["close"] == "171.68"
+
+
 def test_public_daily_clients_reject_duplicate_dates_and_invalid_shapes():
     sina = SinaDailyClient(
         transport=httpx.MockTransport(
@@ -155,3 +184,14 @@ def test_public_daily_clients_reject_duplicate_dates_and_invalid_shapes():
     )
     with pytest.raises(PublicHistoryError, match="TENCENT_HISTORY_RESPONSE_INVALID"):
         tencent.bars("SH.600000", "20260915", "20260915")
+
+    eastmoney = EastmoneyDailyClient(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(
+                200,
+                json={"rc": 0, "data": {"klines": ["2026-09-15,1"]}},
+            )
+        )
+    )
+    with pytest.raises(PublicHistoryError, match="EASTMONEY_HISTORY_RESPONSE_INVALID"):
+        eastmoney.bars("SH.600000", "20260915", "20260915")

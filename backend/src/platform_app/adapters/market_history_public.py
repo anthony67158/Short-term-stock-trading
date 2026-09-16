@@ -7,10 +7,9 @@ import httpx
 
 from platform_app.adapters.market_tushare import decimal_text
 
-SINA_DAILY_URL = (
-    "https://quotes.sina.cn/cn/api/openapi.php/CN_MarketDataService.getKLineData"
-)
+SINA_DAILY_URL = "https://quotes.sina.cn/cn/api/openapi.php/CN_MarketDataService.getKLineData"
 TENCENT_DAILY_URL = "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get"
+EASTMONEY_DAILY_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 MAX_RESPONSE_BYTES = 2_000_000
 
 
@@ -20,7 +19,12 @@ class PublicHistoryError(ValueError):
 
 def _symbol(instrument_id: str) -> str:
     exchange, separator, code = instrument_id.partition(".")
-    if separator != "." or exchange not in {"SH", "SZ", "BJ"} or len(code) != 6 or not code.isdigit():
+    if (
+        separator != "."
+        or exchange not in {"SH", "SZ", "BJ"}
+        or len(code) != 6
+        or not code.isdigit()
+    ):
         raise PublicHistoryError("INVALID_PUBLIC_HISTORY_INSTRUMENT")
     return f"{exchange.lower()}{code}"
 
@@ -34,6 +38,11 @@ def _date(value: str) -> str:
 
 def _tencent_volume_multiplier(instrument_id: str) -> int:
     return 1 if instrument_id.startswith(("SH.688", "SH.689")) else 100
+
+
+def _eastmoney_secid(instrument_id: str) -> str:
+    exchange, _separator, code = instrument_id.partition(".")
+    return f"{1 if exchange == 'SH' else 0}.{code}"
 
 
 def _bar(
@@ -180,4 +189,60 @@ class TencentDailyClient:
         keyed = {row["tradeDate"]: row for row in normalized}
         if len(keyed) != len(normalized):
             raise PublicHistoryError("TENCENT_HISTORY_DUPLICATE_DATE")
+        return keyed
+
+
+class EastmoneyDailyClient:
+    source = "EASTMONEY"
+
+    def __init__(self, *, transport=None, timeout=15):
+        self.transport = transport
+        self.timeout = timeout
+
+    def bars(self, instrument_id: str, start_date: str, end_date: str) -> dict[str, dict]:
+        _symbol(instrument_id)
+        datetime.strptime(start_date, "%Y%m%d")
+        datetime.strptime(end_date, "%Y%m%d")
+        with httpx.Client(
+            timeout=httpx.Timeout(self.timeout, connect=min(5, self.timeout)),
+            follow_redirects=False,
+            transport=self.transport,
+        ) as client:
+            payload = _json(
+                client.get(
+                    EASTMONEY_DAILY_URL,
+                    params={
+                        "secid": _eastmoney_secid(instrument_id),
+                        "klt": "101",
+                        "fqt": "0",
+                        "beg": start_date,
+                        "end": end_date,
+                        "fields1": "f1,f2,f3,f4,f5,f6",
+                        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+                    },
+                )
+            )
+        data = payload.get("data")
+        rows = data.get("klines") if isinstance(data, dict) else None
+        if payload.get("rc") != 0 or not isinstance(rows, list):
+            raise PublicHistoryError("EASTMONEY_HISTORY_RESPONSE_INVALID")
+        normalized = []
+        for raw in rows:
+            fields = raw.split(",") if isinstance(raw, str) else []
+            if len(fields) < 7:
+                raise PublicHistoryError("EASTMONEY_HISTORY_RESPONSE_INVALID")
+            row = _bar(
+                trade_date=fields[0],
+                opening=fields[1],
+                close=fields[2],
+                high=fields[3],
+                low=fields[4],
+                volume=fields[5],
+                volume_multiplier=100,
+            )
+            row["amountCny"] = decimal_text(fields[6], nonnegative=True)
+            normalized.append(row)
+        keyed = {row["tradeDate"]: row for row in normalized}
+        if len(keyed) != len(normalized):
+            raise PublicHistoryError("EASTMONEY_HISTORY_DUPLICATE_DATE")
         return keyed

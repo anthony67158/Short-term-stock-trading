@@ -47,8 +47,8 @@ def daily(instrument_id, source_code, trade_date, *, high="11"):
     }
 
 
-def public_bar(trade_date, *, high="11", volume="10050"):
-    return {
+def public_bar(trade_date, *, high="11", volume="10050", amount=None):
+    row = {
         "tradeDate": trade_date,
         "open": "10",
         "high": high,
@@ -56,6 +56,9 @@ def public_bar(trade_date, *, high="11", volume="10050"):
         "close": "10.5",
         "volumeShares": volume,
     }
+    if amount is not None:
+        row["amountCny"] = amount
+    return row
 
 
 def dataset(tmp_path):
@@ -78,7 +81,7 @@ def dataset(tmp_path):
     return root
 
 
-def test_cross_source_audit_requires_two_sources_except_for_beijing(tmp_path):
+def test_cross_source_audit_requires_one_complete_independent_confirmation(tmp_path):
     root = dataset(tmp_path)
     sina = FakeHistoryClient(
         "SINA",
@@ -91,12 +94,20 @@ def test_cross_source_audit_requires_two_sources_except_for_beijing(tmp_path):
         "TENCENT",
         {"SH.600000": {"20260915": public_bar("20260915", volume="9950")}},
     )
+    eastmoney = FakeHistoryClient(
+        "EASTMONEY",
+        {
+            "SH.600000": {"20260915": public_bar("20260915")},
+            "BJ.920000": {"20260915": public_bar("20260915")},
+        },
+    )
 
     report = audit_cross_sources(
         root,
         [("SH.600000", "20260915"), ("BJ.920000", "20260915")],
         sina=sina,
         tencent=tencent,
+        eastmoney=eastmoney,
         observed_at=lambda: "2026-09-16T02:00:00+00:00",
     )
 
@@ -105,9 +116,10 @@ def test_cross_source_audit_requires_two_sources_except_for_beijing(tmp_path):
         "samples": 2,
         "passed": 2,
         "failed": 0,
+        "withSourceConflicts": 0,
         "boards": ["BEIJING", "MAIN"],
     }
-    assert report["samples"][1]["requiredSources"] == ["SINA"]
+    assert report["samples"][1]["matchingIndependentSources"] == ["SINA", "EASTMONEY"]
     assert report["samples"][1]["sources"][1] == {
         "source": "TENCENT",
         "available": False,
@@ -117,13 +129,32 @@ def test_cross_source_audit_requires_two_sources_except_for_beijing(tmp_path):
     assert report_hash == canonical_sha256(report)
 
 
+def test_cross_source_audit_discloses_conflict_when_another_source_corroborates(tmp_path):
+    root = dataset(tmp_path)
+    sina = FakeHistoryClient("SINA", {"SH.600000": {"20260915": public_bar("20260915", high="12")}})
+    matching = {"SH.600000": {"20260915": public_bar("20260915")}}
+
+    report = audit_cross_sources(
+        root,
+        [("SH.600000", "20260915")],
+        sina=sina,
+        tencent=FakeHistoryClient("TENCENT", matching),
+        eastmoney=FakeHistoryClient("EASTMONEY", matching),
+    )
+
+    assert report["passed"]
+    assert report["summary"]["withSourceConflicts"] == 1
+    assert report["samples"][0]["conflictingIndependentSources"] == ["SINA"]
+
+
 def test_cross_source_audit_fails_price_mismatch(tmp_path):
     root = dataset(tmp_path)
-    sina = FakeHistoryClient(
-        "SINA", {"SH.600000": {"20260915": public_bar("20260915", high="12")}}
-    )
+    sina = FakeHistoryClient("SINA", {"SH.600000": {"20260915": public_bar("20260915", high="12")}})
     tencent = FakeHistoryClient(
-        "TENCENT", {"SH.600000": {"20260915": public_bar("20260915")}}
+        "TENCENT", {"SH.600000": {"20260915": public_bar("20260915", high="12")}}
+    )
+    eastmoney = FakeHistoryClient(
+        "EASTMONEY", {"SH.600000": {"20260915": public_bar("20260915", high="12")}}
     )
 
     report = audit_cross_sources(
@@ -131,8 +162,27 @@ def test_cross_source_audit_fails_price_mismatch(tmp_path):
         [("SH.600000", "20260915")],
         sina=sina,
         tencent=tencent,
+        eastmoney=eastmoney,
     )
 
     assert not report["passed"]
     assert report["summary"]["failed"] == 1
     assert not report["samples"][0]["sources"][0]["priceMatches"]["high"]
+
+
+def test_cross_source_audit_fails_uncorroborated_amount(tmp_path):
+    root = dataset(tmp_path)
+    mismatched = {"SH.600000": {"20260915": public_bar("20260915", amount="200000")}}
+
+    report = audit_cross_sources(
+        root,
+        [("SH.600000", "20260915")],
+        sina=FakeHistoryClient("SINA", mismatched),
+        tencent=FakeHistoryClient("TENCENT", mismatched),
+        eastmoney=FakeHistoryClient("EASTMONEY", mismatched),
+    )
+
+    assert not report["passed"]
+    source = report["samples"][0]["sources"][0]
+    assert source["amountDeltaCny"] == "100000"
+    assert not source["amountWithinTolerance"]
