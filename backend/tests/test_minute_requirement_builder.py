@@ -281,6 +281,52 @@ def test_archive_import_accepts_stockdb_final_replay_manifest(tmp_path):
         assert result[0]["accepted"] == 1
 
 
+def test_archive_import_verifies_tushare_chunk_audit(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    archive_root = tmp_path / "archive"
+    _write_archive(archive_root, dates[1])
+    (archive_root / "backfill-minutes-report.json").unlink()
+    minute_path = archive_root / "minutes" / f"{dates[1]}.json.gz"
+    (archive_root / "minute-manifest.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "stockdb-minute-export-manifest.v1",
+                "dates": [{"date": dates[1], "codes": ["000001"]}],
+            }
+        )
+    )
+    (archive_root / "tushare-minute-report.json").write_text(
+        json.dumps({"schemaVersion": "tushare-minute-export.v1", "frequency": "5min"})
+    )
+    (archive_root / "audit.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": "v4-tushare-chunk-audit.v1",
+                "files": [
+                    {
+                        "path": f"minutes/{dates[1]}.json.gz",
+                        "sha256": hashlib.sha256(minute_path.read_bytes()).hexdigest(),
+                    }
+                ],
+            }
+        )
+    )
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        with MinuteArchiveImporter(dataset, archive_root) as importer:
+            result = importer.import_range(dates[1], dates[1])
+
+        assert result[0]["sourceKind"].startswith("TUSHARE_5MIN_CHUNK_")
+        assert result[0]["accepted"] == 1
+
+
 def test_tushare_archive_hash_mismatch_fails_before_writes(tmp_path):
     market_root, dates = _sealed_market(tmp_path)
     archive_root = tmp_path / "archive"

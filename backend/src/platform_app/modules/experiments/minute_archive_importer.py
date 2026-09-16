@@ -145,6 +145,8 @@ class MinuteArchiveImporter:
 
     def _identify_archive(self) -> tuple[str, dict[str, str]]:
         tushare_report = self.root / "backfill-minutes-report.json"
+        tushare_chunk_report = self.root / "tushare-minute-report.json"
+        chunk_audit = self.root / "audit.json"
         stockdb_manifest = self.root / "minute-manifest.json"
         stockdb_replay_manifest = self.root / "archive-replay-manifest.json"
         if tushare_report.is_file():
@@ -158,6 +160,29 @@ class MinuteArchiveImporter:
             if len(expected) != report.get("datesWritten"):
                 raise MinuteArchiveError("TUSHARE_ARCHIVE_REPORT_INVALID")
             return "TUSHARE_5MIN_ARCHIVE_V1", expected
+        if tushare_chunk_report.is_file() and stockdb_manifest.is_file() and chunk_audit.is_file():
+            report = json.loads(tushare_chunk_report.read_text())
+            audit = json.loads(chunk_audit.read_text())
+            if (
+                report.get("schemaVersion") != "tushare-minute-export.v1"
+                or report.get("frequency") != "5min"
+                or audit.get("schemaVersion") != "v4-tushare-chunk-audit.v1"
+            ):
+                raise MinuteArchiveError("TUSHARE_CHUNK_ARCHIVE_INVALID")
+            expected = {
+                Path(row["path"]).name.removesuffix(".json.gz"): row["sha256"]
+                for row in audit.get("files", [])
+                if re.fullmatch(r"minutes/\d{8}\.json\.gz", str(row.get("path") or ""))
+                and re.fullmatch(r"[0-9a-f]{64}", str(row.get("sha256") or ""))
+            }
+            manifest_hash = hashlib.sha256(stockdb_manifest.read_bytes()).hexdigest()
+            declared_dates = {
+                str(row.get("date") or "")
+                for row in json.loads(stockdb_manifest.read_text()).get("dates", [])
+            }
+            if not expected or set(expected) != declared_dates:
+                raise MinuteArchiveError("TUSHARE_CHUNK_ARCHIVE_INVALID")
+            return f"TUSHARE_5MIN_CHUNK_{manifest_hash[:16]}", expected
         if stockdb_replay_manifest.is_file() or stockdb_manifest.is_file():
             manifest_path = (
                 stockdb_replay_manifest if stockdb_replay_manifest.is_file() else stockdb_manifest
