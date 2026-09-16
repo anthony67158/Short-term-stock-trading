@@ -90,12 +90,12 @@ tbody tr:hover { background: var(--hover); }
 .status-label { display: inline-flex; align-items: center; min-height: 24px; padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: 4px; color: var(--secondary); font-size: 12px; white-space: nowrap; }
 .status-label.shadow { color: var(--warning); border-color: currentColor; }
 .status-label.ready { color: var(--down); border-color: currentColor; }
-.status-label.active, .status-label.evaluated, .status-label.succeeded { color: var(--down); border-color: currentColor; }
-.status-label.failed, .status-label.rejected { color: var(--warning); border-color: currentColor; }
+.status-label.active, .status-label.evaluated, .status-label.succeeded, .status-label.stable { color: var(--down); border-color: currentColor; }
+.status-label.failed, .status-label.rejected, .status-label.warning { color: var(--warning); border-color: currentColor; }
 .status-label.approved, .status-label.frozen { color: var(--accent); border-color: currentColor; }
 .status-label.strategy, .status-label.hypothesis, .status-label.draft { color: var(--warning); border-color: currentColor; }
 .status-label.execution, .status-label.observed, .status-label.compiled { color: var(--accent); border-color: currentColor; }
-.status-label.data { color: var(--secondary); }
+.status-label.data, .status-label.unsupported { color: var(--secondary); }
 .wide-field { grid-column: 1 / -1; }
 .evidence-form textarea { min-height: 120px; padding: var(--space-3); resize: vertical; }
 .evidence-form > p { font-size: 12px; }
@@ -140,6 +140,10 @@ blockquote { margin: var(--space-3) 0; border-left: 2px solid var(--accent); pad
 .review-picker { margin: var(--space-6) 0 0 auto; }
 .review-summary { padding-top: var(--space-6); }
 .review-summary .experiment-summary { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.cycle-support { display: flex; flex-wrap: wrap; gap: var(--space-8); padding: var(--space-4) 0; }
+.cycle-support > div { display: grid; gap: var(--space-1); min-width: 180px; }
+.cycle-support span { font-size: 12px; }
+.cycle-support strong { font-size: 13px; font-weight: 500; }
 .review-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-8); padding-top: var(--space-8); }
 .review-section { min-width: 0; border-top: 1px solid var(--border); padding-top: var(--space-5); }
 .review-section > h2 { margin-bottom: var(--space-4); }

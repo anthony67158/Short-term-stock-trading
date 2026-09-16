@@ -8,6 +8,7 @@ import { api, errorMessage } from "../../lib/api";
 
 type ReviewReport = components["schemas"]["ReviewReportView"];
 type ReviewMetric = components["schemas"]["ReviewMetric"];
+type DriftReport = components["schemas"]["CycleDriftReportView"];
 
 const categoryLabels = {
   STRATEGY: "策略",
@@ -40,13 +41,96 @@ function metricValue(metric: ReviewMetric) {
   return `${(Number(metric.value) * 100).toFixed(2)}%`;
 }
 
+function DriftPanel({ drift }: { drift?: DriftReport }) {
+  if (!drift) {
+    return (
+      <section className="ledger-section">
+        <h2>周期与漂移</h2>
+        <p className="secondary">尚无可比较的周期报告。</p>
+      </section>
+    );
+  }
+  return (
+    <section className="ledger-section" aria-labelledby="drift-title">
+      <div className="section-toolbar">
+        <h2 id="drift-title">周期与漂移</h2>
+        <span className={`status-label ${drift.status.toLowerCase()}`}>
+          {drift.status === "STABLE"
+            ? "稳定"
+            : drift.status === "WARNING"
+              ? "检测到漂移"
+              : "暂不可比较"}
+        </span>
+      </div>
+      <div className="cycle-support">
+        {drift.cycleSupport.map((cycle) => (
+          <div key={cycle.horizon}>
+            <span className="secondary">
+              {cycle.horizon === "5_TRADING_DAYS"
+                ? "短周期"
+                : "中周期"}
+            </span>
+            <strong>
+              {cycle.status === "ACTIVE"
+                ? "已支持"
+                : `不支持 · ${cycle.reasonCode}`}
+            </strong>
+          </div>
+        ))}
+      </div>
+      <div
+        className="table-scroll"
+        role="region"
+        aria-label="跨周期漂移指标，可横向滚动"
+        tabIndex={0}
+      >
+        <table>
+          <thead>
+            <tr>
+              <th>指标</th>
+              <th className="numeric">基线</th>
+              <th className="numeric">当前</th>
+              <th className="numeric">变化</th>
+              <th>判断</th>
+            </tr>
+          </thead>
+          <tbody>
+            {drift.metrics.map((metric) => (
+              <tr key={metric.metricId}>
+                <td>{metric.metricId}</td>
+                <td className="numeric">{metric.baselineValue ?? "—"}</td>
+                <td className="numeric">{metric.currentValue ?? "—"}</td>
+                <td className="numeric">{metric.delta ?? "—"}</td>
+                <td>
+                  {metric.drifted == null
+                    ? "不可比较"
+                    : metric.drifted
+                      ? "超出阈值"
+                      : "阈值内"}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {drift.blockerCodes.length > 0 && (
+        <p className="source-note">
+          {drift.blockerCodes.join(" · ")}
+        </p>
+      )}
+    </section>
+  );
+}
+
 function Report({
   report,
+  drift,
   canCompile,
   compilingId,
   onCompile,
 }: {
   report: ReviewReport;
+  drift?: DriftReport;
   canCompile: boolean;
   compilingId?: string;
   onCompile: (proposalId: string) => void;
@@ -80,6 +164,7 @@ function Report({
           ))}
         </div>
       </section>
+      <DriftPanel drift={drift} />
       <section className="ledger-section" aria-labelledby="failure-clusters-title">
         <h2 id="failure-clusters-title">失败簇与偏差</h2>
         {report.metricSnapshot.failureClusters.length === 0 ? (
@@ -227,6 +312,17 @@ export function Review() {
       return result.data.data.reports;
     },
   });
+  const drift = useQuery({
+    queryKey: ["drift-reports"],
+    queryFn: async ({ signal }) => {
+      const result = await api.GET("/api/v1/drift-reports", {
+        params: { query: { limit: 30 } },
+        signal,
+      });
+      if (!result.data) throw new Error(errorMessage(result.error));
+      return result.data.data.reports;
+    },
+  });
   const job = useQuery({
     queryKey: ["job", jobId],
     enabled: !!jobId,
@@ -301,7 +397,12 @@ export function Review() {
     reports.data?.find((report) => report.id === selectedId)
     ?? reports.data?.[0];
   const running = ["QUEUED", "RUNNING"].includes(job.data?.status ?? "");
-  const error = reports.error ?? run.error ?? compile.error ?? job.error;
+  const error =
+    reports.error
+    ?? drift.error
+    ?? run.error
+    ?? compile.error
+    ?? job.error;
   return (
     <>
       <header className="workspace-header">
@@ -311,7 +412,10 @@ export function Review() {
           aria-label="刷新复盘记录"
           title="刷新"
           disabled={reports.isFetching}
-          onClick={() => void reports.refetch()}
+          onClick={() => {
+            void reports.refetch();
+            void drift.refetch();
+          }}
         >
           <RefreshCw size={16} />
         </Button>
@@ -378,6 +482,9 @@ export function Review() {
             )}
             <Report
               report={selected}
+              drift={drift.data?.find(
+                (item) => item.currentDate === selected.reviewDate,
+              )}
               canCompile={
                 (capability.data?.available ?? false) && !running
               }
