@@ -78,7 +78,11 @@ def test_quant_models_emit_all_required_targets_on_confirmation_data():
         "q10",
         "q50",
         "q90",
+        "postProcessors",
     }
     assert metrics["pFill"]["samples"] > 0
     assert metrics["pWinGivenFill"]["samples"] > 0
     assert 0 <= metrics["q10Q90Coverage"] <= 1
+    assert metrics["postProcessors"]["quantileCrossingPolicy"] == (
+        "SORT_AFTER_CALIBRATION"
+    )

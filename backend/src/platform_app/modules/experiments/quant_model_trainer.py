@@ -601,12 +601,41 @@ def train_quant_models(
             quantile=quantile,
         ).fit(data.scenario_x[conditional_train], data.net_return[conditional_train])
 
+    calibration_x = data.scenario_x[conditional_calibration]
+    calibration_y = data.net_return[conditional_calibration]
+    quantile_offsets = {}
+    for name, quantile in (("q10", 0.1), ("q50", 0.5), ("q90", 0.9)):
+        residual = calibration_y - models[name].predict(calibration_x)
+        quantile_offsets[name] = float(np.quantile(residual, quantile))
+    expected_offset = float(
+        np.mean(
+            calibration_y
+            - models["expectedNetReturnGivenFill"].predict(calibration_x)
+        )
+    )
+    models["postProcessors"] = {
+        "expectedNetReturnOffset": expected_offset,
+        "quantileOffsets": quantile_offsets,
+        "quantileOrder": ["q10", "q50", "q90"],
+        "quantileCrossingPolicy": "SORT_AFTER_CALIBRATION",
+    }
     conditional_x = data.scenario_x[conditional_confirmation]
     conditional_y = data.net_return[conditional_confirmation]
+    raw_quantiles = np.column_stack(
+        [
+            models[name].predict(conditional_x) + quantile_offsets[name]
+            for name in ("q10", "q50", "q90")
+        ]
+    )
+    ordered_quantiles = np.sort(raw_quantiles, axis=1)
     quantile_predictions = {
-        name: models[name].predict(conditional_x) for name in ("q10", "q50", "q90")
+        name: ordered_quantiles[:, index]
+        for index, name in enumerate(("q10", "q50", "q90"))
     }
-    expected = models["expectedNetReturnGivenFill"].predict(conditional_x)
+    expected = (
+        models["expectedNetReturnGivenFill"].predict(conditional_x)
+        + expected_offset
+    )
     metrics = {
         "split": split.as_dict(),
         "pFill": _classification_metrics(
@@ -657,10 +686,11 @@ def train_quant_models(
         ),
         "quantileCrossingRate": float(
             np.mean(
-                (quantile_predictions["q10"] > quantile_predictions["q50"])
-                | (quantile_predictions["q50"] > quantile_predictions["q90"])
+                (raw_quantiles[:, 0] > raw_quantiles[:, 1])
+                | (raw_quantiles[:, 1] > raw_quantiles[:, 2])
             )
         ),
+        "postProcessors": models["postProcessors"],
     }
     return models, metrics
 
