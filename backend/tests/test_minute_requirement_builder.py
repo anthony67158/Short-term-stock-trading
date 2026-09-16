@@ -287,6 +287,46 @@ def test_repeated_rejection_updates_audit_details_idempotently(tmp_path):
         assert json.loads(attempts[0][0])["volumeDeltaShares"] == "-200"
 
 
+def test_daily_volume_reconciliation_uses_bounded_relative_tolerance():
+    daily = {
+        "open": "10",
+        "high": "10",
+        "low": "10",
+        "close": "10",
+        "volume_shares": "10000000",
+        "amount_cny": "100000000",
+        "source_row_sha256": "daily-source",
+    }
+    rows = [
+        {
+            "open": "10",
+            "high": "10",
+            "low": "10",
+            "close": "10",
+            "volumeShares": "9995001",
+            "amountCny": "100000000",
+        }
+    ]
+
+    details = _validate_daily(
+        rows,
+        daily,
+        instrument_id="SZ.000001",
+        trade_date="20260102",
+    )
+
+    assert details["volumeDeltaShares"] == "-4999"
+    assert details["volumeToleranceShares"] == "5000.0000"
+    rows[0]["volumeShares"] = "9995000"
+    with pytest.raises(MinuteArchiveError, match="MINUTE_DAILY_VOLUME_MISMATCH"):
+        _validate_daily(
+            rows,
+            daily,
+            instrument_id="SZ.000001",
+            trade_date="20260102",
+        )
+
+
 def test_builder_creates_five_session_requirements_and_marks_missing_daily(tmp_path):
     market_root, dates = _sealed_market(tmp_path)
     with EpisodeDataset(

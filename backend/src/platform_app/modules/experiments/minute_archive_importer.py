@@ -17,6 +17,7 @@ from platform_app.modules.experiments.episode_dataset import (
 
 AMOUNT_TOLERANCE_RATE = Decimal("0.0005")
 AMOUNT_TOLERANCE_CNY = Decimal("2")
+VOLUME_TOLERANCE_RATE = Decimal("0.0005")
 VOLUME_TOLERANCE_SHARES = Decimal("100")
 SSE_CLOSING_AUCTION_EFFECTIVE_DATE = "20180820"
 
@@ -120,6 +121,10 @@ def _validate_daily(
         AMOUNT_TOLERANCE_CNY,
         abs(daily_amount) * AMOUNT_TOLERANCE_RATE,
     )
+    volume_tolerance = max(
+        VOLUME_TOLERANCE_SHARES,
+        abs(daily_volume) * VOLUME_TOLERANCE_RATE,
+    )
     details = {
         "open": format(opening, "f"),
         "high": format(high, "f"),
@@ -135,6 +140,7 @@ def _validate_daily(
         "amountCny": format(amount, "f"),
         "officialDailyAmountCny": format(daily_amount, "f"),
         "volumeDeltaShares": format(volume_delta, "f"),
+        "volumeToleranceShares": format(volume_tolerance, "f"),
         "amountDeltaCny": format(amount_delta, "f"),
         "amountToleranceCny": format(amount_tolerance, "f"),
         "dailySourceRowSha256": daily["source_row_sha256"],
@@ -152,7 +158,7 @@ def _validate_daily(
     details["closeReconciliation"] = close_reconciliation
     if high > Decimal(daily["high"]) or low < Decimal(daily["low"]):
         raise MinuteArchiveError("MINUTE_OUTSIDE_DAILY_RANGE", details=details)
-    if abs(volume_delta) >= VOLUME_TOLERANCE_SHARES:
+    if abs(volume_delta) >= volume_tolerance:
         raise MinuteArchiveError("MINUTE_DAILY_VOLUME_MISMATCH", details=details)
     if abs(amount_delta) > amount_tolerance:
         raise MinuteArchiveError("MINUTE_DAILY_AMOUNT_MISMATCH", details=details)
