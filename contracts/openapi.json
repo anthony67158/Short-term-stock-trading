@@ -6873,6 +6873,9 @@
             ],
             "title": "Agentprotocolversion"
           },
+          "experimentParameters": {
+            "$ref": "#/components/schemas/StrategyExperimentParameters"
+          },
           "blockerCodes": {
             "items": {
               "type": "string"
@@ -9218,6 +9221,78 @@
         "additionalProperties": false,
         "type": "object",
         "title": "StrategyCompilationInput"
+      },
+      "StrategyExperimentParameters": {
+        "properties": {
+          "minimumExpectedDeltaForAdd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 10.0,
+                "minimum": -10.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimumexpecteddeltaforadd"
+          },
+          "maximumAgentUncertaintyCountForAdd": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 12.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximumagentuncertaintycountforadd"
+          },
+          "minimumAgentEvidenceCountForAdd": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 32.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimumagentevidencecountforadd"
+          },
+          "maximumStopHazardForAdd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximumstophazardforadd"
+          },
+          "minimumExecutionSupportForAdd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minimumexecutionsupportforadd"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StrategyExperimentParameters"
       },
       "StrategyVersionInput": {
         "properties": {

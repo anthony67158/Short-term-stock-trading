@@ -226,6 +226,24 @@ class PositionAssessment(Contract):
         return self
 
 
+class StrategyExperimentParameters(Contract):
+    minimum_expected_delta_for_add: ReturnValue | None = None
+    maximum_agent_uncertainty_count_for_add: int | None = Field(
+        default=None,
+        strict=True,
+        ge=0,
+        le=12,
+    )
+    minimum_agent_evidence_count_for_add: int | None = Field(
+        default=None,
+        strict=True,
+        ge=0,
+        le=32,
+    )
+    maximum_stop_hazard_for_add: Probability | None = None
+    minimum_execution_support_for_add: Probability | None = None
+
+
 class JointReleaseReference(Contract):
     release_id: str = Field(min_length=1, max_length=160)
     status: Literal["READY", "SHADOW", "UNAVAILABLE"]
@@ -246,6 +264,9 @@ class JointReleaseReference(Contract):
         pattern=r"^[0-9a-f]{64}$",
     )
     agent_protocol_version: str | None = Field(default=None, min_length=1, max_length=160)
+    experiment_parameters: StrategyExperimentParameters = Field(
+        default_factory=StrategyExperimentParameters
+    )
     blocker_codes: list[str] = Field(default_factory=list, max_length=32)
 
     @model_validator(mode="after")

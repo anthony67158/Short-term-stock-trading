@@ -145,6 +145,57 @@ def _is_feasible(
     )
 
 
+def _apply_experiment_parameters(
+    selected: ActionValueEstimate,
+    feasible: list[ActionValueEstimate],
+    request: PositionDecisionRequest,
+) -> tuple[ActionValueEstimate, list[str]]:
+    if selected.action != "ADD":
+        return selected, []
+    parameters = request.release.experiment_parameters
+    blockers = []
+    if (
+        parameters.minimum_expected_delta_for_add is not None
+        and selected.expected_delta_return_vs_hold
+        < parameters.minimum_expected_delta_for_add
+    ):
+        blockers.append("EXPERIMENT_MINIMUM_ADD_DELTA")
+    if (
+        parameters.maximum_agent_uncertainty_count_for_add is not None
+        and len(request.agent.uncertainties)
+        > parameters.maximum_agent_uncertainty_count_for_add
+    ):
+        blockers.append("EXPERIMENT_AGENT_UNCERTAINTY_LIMIT")
+    if (
+        parameters.minimum_agent_evidence_count_for_add is not None
+        and len({signal.evidence_id for signal in request.agent.signals})
+        < parameters.minimum_agent_evidence_count_for_add
+    ):
+        blockers.append("EXPERIMENT_AGENT_EVIDENCE_MINIMUM")
+    if (
+        parameters.maximum_stop_hazard_for_add is not None
+        and (
+            selected.stop_hazard is None
+            or selected.stop_hazard
+            > parameters.maximum_stop_hazard_for_add
+        )
+    ):
+        blockers.append("EXPERIMENT_STOP_HAZARD_LIMIT")
+    if (
+        parameters.minimum_execution_support_for_add is not None
+        and (
+            selected.support is None
+            or selected.support
+            < parameters.minimum_execution_support_for_add
+        )
+    ):
+        blockers.append("EXPERIMENT_EXECUTION_SUPPORT_MINIMUM")
+    if not blockers:
+        return selected, []
+    hold = next(value for value in feasible if value.action == "HOLD")
+    return hold, blockers
+
+
 def arbitrate_position(request: PositionDecisionRequest) -> PositionDecision:
     risk = request.hard_risk
     if not risk.as_of <= request.as_of < risk.valid_until:
@@ -227,6 +278,11 @@ def arbitrate_position(request: PositionDecisionRequest) -> PositionDecision:
             -ACTION_ORDER.index(value.action),
         ),
     )
+    selected, experiment_reasons = _apply_experiment_parameters(
+        selected,
+        feasible,
+        request,
+    )
     if selected.action == "ADD" and (
         request.agent.thesis_status != "SUPPORTED"
         or request.agent.counter_claims
@@ -260,6 +316,7 @@ def arbitrate_position(request: PositionDecisionRequest) -> PositionDecision:
             "JOINT_EVALUATION_COMPLETE",
             f"QUANT_ACTION_{selected.action}",
             f"AGENT_THESIS_{request.agent.thesis_status}",
+            *experiment_reasons,
         ],
         evidence_ids=evidence_ids,
         current_quantity_shares=current,

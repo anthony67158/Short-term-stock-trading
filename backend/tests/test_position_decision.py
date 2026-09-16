@@ -16,6 +16,7 @@ from platform_app.modules.decisions.position_contracts import (
     PositionDecisionRequest,
     PositionEvidenceSignal,
     PositionValueReference,
+    StrategyExperimentParameters,
 )
 from platform_app.modules.decisions.position_engine import arbitrate_position
 from platform_app.modules.decisions.position_runtime import _latest_market_date
@@ -267,6 +268,29 @@ def test_ready_joint_decision_selects_feasible_quant_value_with_agent_gate():
     assert decision.evidence_ids == ["evidence-1"]
 
 
+def test_published_experiment_gate_changes_runtime_action():
+    request = decision_request()
+    request = request.model_copy(
+        update={
+            "release": request.release.model_copy(
+                update={
+                    "experiment_parameters": (
+                        StrategyExperimentParameters(
+                            minimum_expected_delta_for_add=0.04
+                        )
+                    )
+                }
+            )
+        }
+    )
+
+    decision = arbitrate_position(request)
+
+    assert decision.status == "READY"
+    assert decision.action == "HOLD"
+    assert "EXPERIMENT_MINIMUM_ADD_DELTA" in decision.reason_codes
+
+
 def test_agent_quant_conflict_does_not_expand_risk():
     decision = arbitrate_position(decision_request(thesis_status="WEAKENED"))
     assert decision.status == "UNAVAILABLE"
@@ -301,7 +325,20 @@ def test_joint_bundle_binds_runtime_position_release(tmp_path):
     root = tmp_path / "joint"
     root.mkdir()
     strategy = root / "strategy.json"
-    strategy.write_text('{"schemaVersion":"strategy-freeze.v1"}')
+    strategy.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "strategy-freeze.v1",
+                "snapshot": {
+                    "config": {
+                        "experimentParameters": {
+                            "minimumExpectedDeltaForAdd": "0.010"
+                        }
+                    }
+                },
+            }
+        )
+    )
     ablation = root / "ablation.json"
     ablation.write_text('{"schemaVersion":"four-way-ablation.v1"}')
     (root / "manifest.json").write_text(
@@ -330,6 +367,11 @@ def test_joint_bundle_binds_runtime_position_release(tmp_path):
         )
     )
     bundle = JointBundle(root, require_ready=False)
+    assert (
+        bundle.position_release()
+        .experiment_parameters.minimum_expected_delta_for_add
+        == 0.01
+    )
     request = decision_request(release_status="UNAVAILABLE").model_copy(
         update={"release": bundle.position_release()}
     )

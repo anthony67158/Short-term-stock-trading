@@ -2125,6 +2125,7 @@ export interface components {
             positionModelArtifactSha256?: string | null;
             /** Agentprotocolversion */
             agentProtocolVersion?: string | null;
+            experimentParameters?: components["schemas"]["StrategyExperimentParameters"];
             /** Blockercodes */
             blockerCodes?: string[];
         };
@@ -2917,6 +2918,19 @@ export interface components {
         StrategyCompilationInput: {
             /** Basestrategyversionid */
             baseStrategyVersionId?: string | null;
+        };
+        /** StrategyExperimentParameters */
+        StrategyExperimentParameters: {
+            /** Minimumexpecteddeltaforadd */
+            minimumExpectedDeltaForAdd?: number | null;
+            /** Maximumagentuncertaintycountforadd */
+            maximumAgentUncertaintyCountForAdd?: number | null;
+            /** Minimumagentevidencecountforadd */
+            minimumAgentEvidenceCountForAdd?: number | null;
+            /** Maximumstophazardforadd */
+            maximumStopHazardForAdd?: number | null;
+            /** Minimumexecutionsupportforadd */
+            minimumExecutionSupportForAdd?: number | null;
         };
         /** StrategyVersionInput */
         StrategyVersionInput: {

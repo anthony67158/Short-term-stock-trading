@@ -22,6 +22,7 @@ from platform_app.modules.decisions.position_contracts import (
     POSITION_AGENT_PROTOCOL_VERSION,
     PositionDecision,
     PositionDecisionRequest,
+    StrategyExperimentParameters,
 )
 from platform_app.modules.decisions.position_engine import arbitrate_position
 from platform_app.modules.experiments.quant_model_bundle import QuantModelBundle
@@ -35,6 +36,9 @@ from platform_app.modules.research.agent import (
 from platform_app.modules.research.contracts import (
     ASSESSMENT_PROTOCOL_VERSION,
     AssessmentOutput,
+)
+from platform_app.modules.review.strategy_agent import (
+    EXPERIMENT_PARAMETER_REGISTRY,
 )
 
 JOINT_SCHEMA_VERSION = "joint-bundle.v2"
@@ -350,7 +354,7 @@ class JointBundle:
         ):
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
         components = self.manifest.get("components", {})
-        _verified_component_path(
+        strategy_path = _verified_component_path(
             manifest_path,
             components.get("strategyArtifact"),
             components.get("strategyArtifactSha256"),
@@ -360,6 +364,37 @@ class JointBundle:
             components.get("ablationArtifact"),
             components.get("ablationArtifactSha256"),
         )
+        strategy = _read_artifact(
+            strategy_path,
+            "JOINT_STRATEGY_ARTIFACT_INVALID",
+        )
+        parameters = (
+            strategy.get("snapshot", {})
+            .get("config", {})
+            .get("experimentParameters", {})
+        )
+        if (
+            not isinstance(parameters, dict)
+            or any(
+                key not in EXPERIMENT_PARAMETER_REGISTRY
+                or value
+                not in EXPERIMENT_PARAMETER_REGISTRY[key][
+                    "allowedValues"
+                ]
+                for key, value in parameters.items()
+            )
+        ):
+            raise JointBundleError(
+                "JOINT_STRATEGY_PARAMETERS_INVALID"
+            )
+        try:
+            self.experiment_parameters = (
+                StrategyExperimentParameters.model_validate(parameters)
+            )
+        except ValueError as exc:
+            raise JointBundleError(
+                "JOINT_STRATEGY_PARAMETERS_INVALID"
+            ) from exc
         status = self.manifest.get("releaseStatus")
         if status not in {"READY", "SHADOW", "UNAVAILABLE"}:
             raise JointBundleError("JOINT_BUNDLE_MANIFEST_INVALID")
@@ -394,6 +429,7 @@ class JointBundle:
             position_model_bundle_id=components.get("positionModelBundleId"),
             position_model_artifact_sha256=components.get("positionModelArtifactSha256"),
             agent_protocol_version=self.manifest.get("agent", {}).get("positionProtocolVersion"),
+            experiment_parameters=self.experiment_parameters,
             blocker_codes=self.manifest.get("releaseBlockers", []),
         )
 
