@@ -127,6 +127,21 @@ def _sealed_feature_snapshot(
     return rows, prices, available, terminal_date, feature_matrix
 
 
+@lru_cache(maxsize=16)
+def _latest_market_date(market_path: str, candidate_date: str) -> str:
+    with sqlite3.connect(
+        f"{Path(market_path).resolve().as_uri()}?mode=ro&immutable=1",
+        uri=True,
+    ) as market:
+        decision_date = market.execute(
+            "SELECT MAX(trade_date) FROM daily_bars WHERE trade_date <= ?",
+            (candidate_date,),
+        ).fetchone()[0]
+    if decision_date is None:
+        raise PositionRuntimeError("POSITION_RUNTIME_FEATURES_UNAVAILABLE")
+    return decision_date
+
+
 def _fees(action: str, shares: int, price: Decimal, board: str, trade_date: str):
     if action == "HOLD" or shares == 0:
         return "0"
@@ -303,14 +318,10 @@ def build_position_value_reference(
     candidate_date = local_as_of.date()
     if local_as_of.hour < 17:
         candidate_date -= timedelta(days=1)
-    with sqlite3.connect(
-        f"{market_path.resolve().as_uri()}?mode=ro&immutable=1",
-        uri=True,
-    ) as market:
-        decision_date = market.execute(
-            "SELECT MAX(trade_date) FROM daily_bars WHERE trade_date <= ?",
-            (candidate_date.strftime("%Y%m%d"),),
-        ).fetchone()[0]
+    decision_date = _latest_market_date(
+        str(market_path),
+        candidate_date.strftime("%Y%m%d"),
+    )
     causal_cutoff = (
         local_as_of.replace(hour=17, minute=0, second=0, microsecond=0)
         if candidate_date == local_as_of.date()

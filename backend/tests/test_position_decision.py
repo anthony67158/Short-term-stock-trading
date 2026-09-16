@@ -1,4 +1,5 @@
 import json
+import sqlite3
 from datetime import timedelta
 
 import pytest
@@ -16,6 +17,7 @@ from platform_app.modules.decisions.position_contracts import (
     PositionValueReference,
 )
 from platform_app.modules.decisions.position_engine import arbitrate_position
+from platform_app.modules.decisions.position_runtime import _latest_market_date
 from platform_app.modules.experiments.joint_bundle import (
     AGENT_FEATURE_NAMES,
     JointBundle,
@@ -188,6 +190,20 @@ def test_position_contract_requires_complete_zero_based_action_vector():
     invalid["values"][0]["expected_delta_return_vs_hold"] = 0.01
     with pytest.raises(ValidationError, match="HOLD"):
         PositionValueReference.model_validate(invalid)
+
+
+def test_latest_market_date_is_cached_for_sealed_database(tmp_path):
+    database = tmp_path / "market.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.execute("CREATE TABLE daily_bars (trade_date TEXT NOT NULL)")
+        connection.executemany(
+            "INSERT INTO daily_bars VALUES (?)",
+            [("20260912",), ("20260915",)],
+        )
+    _latest_market_date.cache_clear()
+    assert _latest_market_date(str(database), "20260916") == "20260915"
+    assert _latest_market_date(str(database), "20260916") == "20260915"
+    assert _latest_market_date.cache_info().hits == 1
 
 
 def test_position_assessment_preserves_vendor_methodology_and_causal_time():
