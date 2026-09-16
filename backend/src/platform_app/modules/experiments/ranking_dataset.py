@@ -153,8 +153,11 @@ class RankingDataset:
         policy_json = canonical_json(RANKING_POLICY)
         policy_hash = hashlib.sha256(policy_json.encode()).hexdigest()
         self.root.mkdir(parents=True, exist_ok=True)
-        self.db = sqlite3.connect(self.database_path, autocommit=False)
+        self.db = sqlite3.connect(self.database_path, autocommit=True)
         self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA journal_mode = WAL")
+        self.db.execute("PRAGMA synchronous = NORMAL")
+        self.db.autocommit = False
         self.db.executescript(SCHEMA)
         identity = (
             dataset_id,
@@ -394,6 +397,7 @@ class RankingDataset:
         universe_dates = sum(row["universe_date_count"] for row in progress)
         sample_count = sum(row["sample_count"] for row in progress)
         self.db.commit()
+        self.db.autocommit = True
         self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         database_hash = _file_sha256(self.database_path)
         manifest = {
