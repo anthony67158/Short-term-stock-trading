@@ -51,11 +51,25 @@ uv run platform-cli build-market-dataset --dataset-root /absolute/external/path 
 不得执行`seal`，封存后数据集拒绝继续写入。
 
 研究Worker单独启动：`uv run python -m platform_app.modules.research.worker`。
+联合持仓评估Worker单独启动：
+`uv run python -m platform_app.modules.decisions.worker`。当前活动联合版本为
+SHADOW时只对模拟账户生成影子动作，真实账户不开放新增风险。
 账本维护单独启动：`uv run python -m platform_app.modules.portfolio.worker`，
 每秒为到期人工计划释放剩余预留并追加审计；读取时也立即排除到期占用。
 `PLATFORM_AGENT_ENABLED`默认关闭，完成供应商真实鉴权验证后才启用；
 未启用时仍可保存研究材料。调用次数、时间与材料包均有限额，
 当前研判只用于研究，不能生成生产交易动作。
+
+每日联合评估由外部调度器在数据归档完成后调用；命令会验证活动发布、数据和
+账户回放lineage，门禁未通过时保留当前版本：
+
+```bash
+uv run platform-cli run-daily-joint-cycle \
+  --registry-root ~/.local/share/stock-platform/joint-releases \
+  --dataset-root ~/.local/share/stock-platform/a-share-20160101-20260915-v5 \
+  --account-backtest ~/.local/share/stock-platform/quant-short-horizon-enriched-v2/account-backtest-v1.json \
+  --output ~/.local/share/stock-platform/daily-joint-cycles
+```
 
 ## 验证
 

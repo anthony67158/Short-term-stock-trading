@@ -35,7 +35,7 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端托管PG、容器部署与
 | T05运行验证 | 本机数据库与任务验证通过，云端未验证 | Alembic迁移、并发领取、幂等、租约隔离与取消测试通过 |
 | T06身份 | 会话及基础安全已实现 | Argon2、HttpOnly cookie、注销/过期、Origin校验、共享限流；账户级授权随后扩展 |
 | Agent连通性 | 真实只读链路可完成，质量与稳定性待验收 | `gpt-5.6-terra`在180秒预算内完成搜索规划、3次豆包检索和结构化研判；历史尾延迟仍保留为风险 |
-| 应用/模型/全流程验收 | 持续实施中 | 全市场排序、执行、账户回放、持仓动作及联合候选已实现并保持`UNAVAILABLE`；前瞻Agent样本、联合训练、真实账本迁移、部署和切流未完成 |
+| 应用/模型/全流程验收 | 持续实施中 | 联合架构已作为`SHADOW`发布并禁止真实账户新增风险；前瞻Agent样本、联合训练、真实账本迁移、云部署和切流未完成 |
 
 ### 首批验证（2026-09-15）
 
@@ -580,5 +580,37 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端托管PG、容器部署与
 - 聚焦与全量验证：`uv run pytest -q`为204 passed；`uv run ruff check src tests`
   通过。尚未实现Position Agent任务持久化、前瞻样本采集和完整联合模型训练，
   因此本增量只完成可审计运行时合同与仲裁链路，不代表AC08或M3验收完成。
+
+### 联合架构影子发布与每日评估（T25/T30/T40/T41/T46 增量）
+
+- 用户明确要求直接发布Agent+量化架构并按日回测迭代。当前候选不满足实盘收益
+  门禁，因此发布为正式`SHADOW`模式而非伪造`READY`：
+  `joint-shadow-20260916-v1`已原子写入仓库外
+  `~/.local/share/stock-platform/joint-releases/active-shadow.json`。发布时重新校验
+  ranking、quant、position artifact及账户回放SHA；活动指针绑定不可变manifest，
+  `allowsNewRisk=false`。
+- SHADOW允许模拟账户运行并保存唯一动作，真实账户固定返回不可用且不能据此创建
+  新增风险计划。持仓页面展示活动版本、影子状态、门禁数、量化趋势、Agent论点、
+  唯一动作及阻断原因；任务和决策刷新后从服务端恢复。
+- 影子量化运行时不读取含未来结果的训练行。它从封存市场库截至决策时点重新计算
+  当日全市场横截面特征，使用发布包绑定的ranking和position artifact；2026-09-16
+  探针实际使用2026-09-15行情，官方年度交易日历给出的第五交易日为2026-09-22。
+  当前position artifact只提供动作均值，非HOLD动作的Q10/Q50/Q90、stopHazard和
+  support明确标记缺失；READY模式会拒绝这些不完整预测。
+- 有效`research-assessment.v1`可规范化为影子`position-assessment.v1`，保留原
+  evidence、发布时间、首次获取和可用时间；主力资金、订单流和实时交易缺失被写入
+  uncertainties，不以零值代替。完整影子评估会写入`prospective_samples`，等待
+  5交易日结果成熟后用于联合训练和消融。
+- 首次每日周期
+  `daily-20260916T105434Z`已运行并保存于仓库外
+  `~/.local/share/stock-platform/daily-joint-cycles/`。10万/50万/100万元压力收益
+  分别为+3.73%/+2.02%/+0.42%，500万元为-7.86%；分钟覆盖91.11%，成熟前瞻Agent
+  样本0，因此结论为`KEEP_CURRENT_RELEASE`。每日运行不等于每日强制升级，只有
+  所有冻结门禁通过才生成晋级候选。
+- 恢复缺失的前瞻样本迁移revision `e4a9c6f87d10`和ORM；既有数据库无业务行被
+  重写，新建临时数据库从base升级到head共25张表通过，随后决策发布迁移
+  `0010_decision_publication`上线。当前全量验证为211 passed，Ruff、Alembic
+  drift、TypeScript与生产构建通过。尚未完成Position Agent独立前瞻运行、
+  样本成熟结算、四组联合消融及实盘READY晋级。
 
 每个切片记录实际修改、验证命令、结果、限制和提交，不记录密钥、完整私人账户或无关日志。只有实际通过的任务才更新完成状态。
