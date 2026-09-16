@@ -56,12 +56,15 @@ uv run platform-cli build-market-dataset --dataset-root /absolute/external/path 
 SHADOW时只对模拟账户生成影子动作，真实账户不开放新增风险。
 账本维护单独启动：`uv run python -m platform_app.modules.portfolio.worker`，
 每秒为到期人工计划释放剩余预留并追加审计；读取时也立即排除到期占用。
+复盘与策略提案Worker单独启动：
+`uv run python -m platform_app.modules.review.worker`。
 `PLATFORM_AGENT_ENABLED`默认关闭，完成供应商真实鉴权验证后才启用；
 未启用时仍可保存研究材料。调用次数、时间与材料包均有限额，
 当前研判只用于研究，不能生成生产交易动作。
 
 每日联合评估由外部调度器在数据归档完成后调用；命令会验证活动发布、数据和
-账户回放lineage，门禁未通过时保留当前版本：
+账户回放lineage，随后按“质量检查→成熟结算→复盘→受限提案→冻结实验→
+保留或发布”推进一个可恢复阶段。门禁未通过或没有可信改善时保留当前版本：
 
 ```bash
 uv run platform-cli run-daily-joint-cycle \
@@ -70,6 +73,10 @@ uv run platform-cli run-daily-joint-cycle \
   --account-backtest ~/.local/share/stock-platform/quant-short-horizon-enriched-v2/account-backtest-v1.json \
   --output ~/.local/share/stock-platform/daily-joint-cycles
 ```
+
+本机同源部署可运行`./infra/deploy/run-local-stack.sh`，默认访问
+`http://127.0.0.1:8000`。容器模板、备份恢复、迁移与维护窗口步骤见
+[生产部署与恢复手册](docs/operations/production-runbook.md)。
 
 ## 验证
 
