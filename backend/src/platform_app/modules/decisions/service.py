@@ -28,8 +28,10 @@ from platform_app.modules.decisions.position_engine import (
     unavailable_position,
 )
 from platform_app.modules.decisions.position_runtime import (
+    build_position_assessment,
+    build_position_value_reference,
     PositionRuntimeError,
-    enrich_shadow_request,
+    run_position_agent_assessment,
 )
 from platform_app.modules.experiments.joint_bundle import JointBundle, JointBundleError
 from platform_app.modules.learning.models import ProspectiveSample
@@ -45,6 +47,9 @@ from platform_app.modules.portfolio.plan_contracts import (
 from platform_app.modules.portfolio import plans
 from platform_app.modules.portfolio.service import owned_account
 from platform_app.kernel.trading import trading_date
+from platform_app.modules.research.agent import AgentFailure
+from platform_app.modules.research.contracts import EvidenceView
+from platform_app.modules.research.models import Evidence
 
 
 class DecisionError(ValueError):
@@ -72,6 +77,57 @@ def active_release() -> JointReleaseReference:
             status="UNAVAILABLE",
             blocker_codes=["JOINT_RELEASE_INVALID"],
         )
+
+
+def _position_agent_payload(
+    db,
+    owner_id: str,
+    request: PositionDecisionRequest,
+    reason: str,
+) -> dict:
+    rows = list(
+        db.scalars(
+            select(Evidence)
+            .where(
+                Evidence.owner_id == owner_id,
+                Evidence.instrument_id
+                == request.constraints.instrument_id,
+                Evidence.available_at <= request.as_of,
+            )
+            .order_by(Evidence.available_at.desc(), Evidence.id)
+            .limit(16)
+        )
+    )
+    evidence = []
+    for row in rows:
+        candidate = EvidenceView.model_validate(row).model_dump(mode="json")
+        if len(json.dumps([*evidence, candidate], ensure_ascii=False)) > 60000:
+            break
+        evidence.append(candidate)
+    config = settings()
+    return {
+        "purpose": "POSITION",
+        "request": {
+            "instrument_id": request.constraints.instrument_id,
+            "question": reason,
+            "evidence_ids": [item["id"] for item in evidence],
+        },
+        "positionContext": {
+            "currentQuantityShares": (
+                request.constraints.current_quantity_shares
+            ),
+            "sellableQuantityShares": (
+                request.constraints.sellable_quantity_shares
+            ),
+            "accountKind": request.constraints.account_kind,
+            "reason": reason,
+        },
+        "evidence": evidence,
+        "protocolVersion": "position-source-assessment.v1",
+        "model": config.agent_model,
+        "asOf": request.as_of.isoformat(),
+        "deadline": (request.as_of + timedelta(minutes=3)).isoformat(),
+    }
 
 
 def submit_position_evaluation(
@@ -179,6 +235,12 @@ def submit_position_evaluation(
                 estimated_costs="0",
             ),
         )
+        position_agent = _position_agent_payload(
+            db,
+            owner_id,
+            request,
+            body.reason,
+        )
         job = Job(
             owner_id=owner_id,
             kind="POSITION_EVALUATION",
@@ -189,7 +251,8 @@ def submit_position_evaluation(
                 "request": request.model_dump(mode="json"),
                 "contextHash": context_hash,
                 "snapshot": snapshot,
-                "deadline": (now + timedelta(minutes=2)).isoformat(),
+                "positionAgent": position_agent,
+                "deadline": (now + timedelta(minutes=3)).isoformat(),
             },
         )
         db.add(job)
@@ -342,8 +405,56 @@ def _publish(
     return {"decisionId": decision.decision_id}
 
 
+def _enrich_shadow_job(
+    job: Job,
+    request: PositionDecisionRequest,
+) -> PositionDecisionRequest:
+    config = settings()
+    quant = build_position_value_reference(request, config)
+    try:
+        agent = build_position_assessment(
+            job.owner_id,
+            request,
+            require_position_source=True,
+        )
+    except PositionRuntimeError:
+        payload = job.payload.get("positionAgent")
+        can_run = (
+            config.agent_enabled
+            and bool(config.agent_api_key.get_secret_value())
+            and isinstance(payload, dict)
+            and (
+                bool(payload.get("evidence"))
+                or (
+                    config.search_enabled
+                    and bool(config.search_api_key.get_secret_value())
+                )
+            )
+        )
+        if can_run:
+            if not jobs.mark_external(job):
+                raise PositionRuntimeError("POSITION_AGENT_JOB_FENCED")
+            try:
+                agent = run_position_agent_assessment(
+                    job.owner_id,
+                    job.id,
+                    request,
+                    payload,
+                )
+            except AgentFailure as exc:
+                raise PositionRuntimeError(str(exc)) from exc
+        else:
+            agent = build_position_assessment(job.owner_id, request)
+    return request.model_copy(
+        update={
+            "quant": quant,
+            "agent": agent,
+        }
+    )
+
+
 def process_one() -> bool:
-    job = jobs.claim(["POSITION_EVALUATION"], lease_seconds=150)
+    job = jobs.claim(["POSITION_EVALUATION"], lease_seconds=210)
     if not job:
         return False
     if active_release() != PositionDecisionRequest.model_validate(
@@ -353,7 +464,8 @@ def process_one() -> bool:
         return True
     request = PositionDecisionRequest.model_validate(job.payload["request"])
     try:
-        request = enrich_shadow_request(job.owner_id, request, settings())
+        if request.release.status == "SHADOW":
+            request = _enrich_shadow_job(job, request)
         decision = arbitrate_position(request)
     except PositionRuntimeError as exc:
         decision = unavailable_position(

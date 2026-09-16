@@ -45,10 +45,13 @@ from platform_app.modules.experiments.ranking_model_trainer import (
     _verified_ranking_database,
 )
 from platform_app.modules.experiments.ranking_dataset import FEATURE_COLUMNS
+from platform_app.modules.operations.models import Outbox
+from platform_app.modules.research.agent import run_agent
 from platform_app.modules.research.contracts import AssessmentOutput
 from platform_app.modules.research.models import Assessment, Evidence
 
 RUNTIME_FEATURE_POLICY_VERSION = "position-runtime-features.v1"
+POSITION_SOURCE_PROTOCOL_VERSION = "position-source-assessment.v1"
 
 
 class PositionRuntimeError(ValueError):
@@ -454,19 +457,24 @@ def build_position_value_reference(
 def build_position_assessment(
     owner_id: str,
     request: PositionDecisionRequest,
+    *,
+    require_position_source: bool = False,
 ) -> PositionAssessment:
     with sessions()() as db:
+        query = select(Assessment).where(
+            Assessment.owner_id == owner_id,
+            Assessment.instrument_id
+            == request.constraints.instrument_id,
+            Assessment.as_of <= request.as_of,
+        )
+        if require_position_source:
+            query = query.where(
+                Assessment.protocol_version
+                == POSITION_SOURCE_PROTOCOL_VERSION
+            )
         candidates = list(
             db.scalars(
-                select(Assessment)
-                .where(
-                    Assessment.owner_id == owner_id,
-                    Assessment.instrument_id
-                    == request.constraints.instrument_id,
-                    Assessment.as_of <= request.as_of,
-                )
-                .order_by(Assessment.created_at.desc())
-                .limit(20)
+                query.order_by(Assessment.created_at.desc()).limit(20)
             )
         )
         selected = None
@@ -540,6 +548,15 @@ def build_position_assessment(
             sort_keys=True,
         ).encode()
     ).hexdigest()
+    uncertainties = [
+        *output.uncertainties,
+        "本次持仓研判缺少结构化主力资金、订单流与实时交易证据。",
+    ]
+    if selected.protocol_version != POSITION_SOURCE_PROTOCOL_VERSION:
+        uncertainties.append(
+            "research-assessment.v1已规范化为影子position-assessment.v1，"
+            "尚待独立持仓Agent前瞻样本。"
+        )
     return PositionAssessment(
         assessment_id=selected.id,
         model_id=selected.model_id,
@@ -554,17 +571,92 @@ def build_position_assessment(
         claims=output.claims,
         counter_claims=output.counter_claims,
         signals=signals,
-        uncertainties=[
-            *output.uncertainties,
-            "本次持仓研判缺少结构化主力资金、订单流与实时交易证据。",
-            "research-assessment.v1已规范化为影子position-assessment.v1，尚待独立持仓Agent前瞻样本。",
-        ],
+        uncertainties=uncertainties,
         invalidation_conditions=[output.invalidation],
         review_after=min(
             output.valid_until,
             request.valid_until,
             request.as_of + timedelta(minutes=10),
         ),
+    )
+
+
+def run_position_agent_assessment(
+    owner_id: str,
+    job_id: str,
+    request: PositionDecisionRequest,
+    payload: dict,
+) -> PositionAssessment:
+    run = run_agent(payload)
+    with sessions().begin() as db:
+        for item in run.discovered_evidence:
+            db.add(
+                Evidence(
+                    id=item["id"],
+                    owner_id=owner_id,
+                    instrument_id=item["instrument_id"],
+                    source_key=item["source_key"],
+                    request_hash=item["request_hash"],
+                    title=item["title"],
+                    source_url=item["source_url"],
+                    text=item["text"],
+                    quote=item["quote"],
+                    content_hash=item["content_hash"],
+                    published_at=datetime.fromisoformat(
+                        item["published_at"]
+                    ),
+                    first_seen_at=datetime.fromisoformat(
+                        item["first_seen_at"]
+                    ),
+                    available_at=datetime.fromisoformat(
+                        item["available_at"]
+                    ),
+                    provenance=item["provenance"],
+                    validation=item["validation"],
+                )
+            )
+        db.flush()
+        assessment = Assessment(
+            owner_id=owner_id,
+            instrument_id=request.constraints.instrument_id,
+            job_id=job_id,
+            protocol_version=POSITION_SOURCE_PROTOCOL_VERSION,
+            model_id=payload["model"],
+            as_of=datetime.fromisoformat(payload["asOf"]),
+            input_hash=hashlib.sha256(
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest(),
+            evidence_ids=[
+                item["id"]
+                for item in [
+                    *payload["evidence"],
+                    *run.discovered_evidence,
+                ]
+            ],
+            output=run.assessment.model_dump(mode="json"),
+            tool_trace=run.tool_trace,
+        )
+        db.add(assessment)
+        db.flush()
+        db.add(
+            Outbox(
+                owner_id=owner_id,
+                event_type="research.position_assessment.updated",
+                aggregate_id=assessment.id,
+                payload={
+                    "instrumentId": assessment.instrument_id,
+                    "assessmentId": assessment.id,
+                },
+            )
+        )
+    return build_position_assessment(
+        owner_id,
+        request,
+        require_position_source=True,
     )
 
 

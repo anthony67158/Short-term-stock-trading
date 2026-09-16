@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 from sqlalchemy import delete, select
 
 from platform_app.adapters.database import sessions
@@ -11,6 +12,7 @@ from platform_app.config import settings
 from platform_app.contracts.base import new_id, utcnow
 from platform_app.entrypoints.api import app
 from platform_app.modules.decisions import service
+from platform_app.modules.decisions import position_runtime
 from platform_app.modules.decisions.models import (
     CurrentDecision,
     DecisionMonitor,
@@ -48,6 +50,8 @@ from platform_app.modules.portfolio.service import create_account
 from platform_app.modules.portfolio.contracts import AccountInput
 from platform_app.modules.research.models import Assessment, Evidence
 from platform_app.modules.decisions.position_runtime import build_position_assessment
+from platform_app.modules.research.agent import AgentRunResult
+from platform_app.modules.research.contracts import AssessmentOutput
 
 
 @pytest.fixture
@@ -141,6 +145,69 @@ def evaluation(instrument_id, version):
         instrument_id=instrument_id,
         expected_version=version,
         reason="合成持仓联合复核",
+    )
+
+
+def shadow_quant(request):
+    values = []
+    for action, target, expected in (
+        ("HOLD", 1000, 0.0),
+        ("ADD", 2000, 0.02),
+        ("REDUCE", 500, -0.01),
+        ("EXIT", 0, -0.02),
+    ):
+        is_hold = action == "HOLD"
+        values.append(
+            ActionValueEstimate(
+                action=action,
+                target_quantity_shares=target,
+                expected_delta_return_vs_hold=expected,
+                q10_delta_return_vs_hold=0 if is_hold else None,
+                q50_delta_return_vs_hold=0 if is_hold else None,
+                q90_delta_return_vs_hold=0 if is_hold else None,
+                missing_prediction_fields=(
+                    ["stopHazard", "support"]
+                    if is_hold
+                    else [
+                        "q10",
+                        "q50",
+                        "q90",
+                        "stopHazard",
+                        "support",
+                    ]
+                ),
+                estimated_costs="0" if is_hold else "5",
+                execution_path=(
+                    None if is_hold else "SHADOW_MARKET_REFERENCE"
+                ),
+                price_lower=None if is_hold else "10",
+                price_upper=None if is_hold else "10",
+                price_basis=(
+                    None if is_hold else "SEALED_CLOSE:20260915"
+                ),
+                trigger_conditions=(
+                    [] if is_hold else ["SHADOW_SIMULATION_ONLY"]
+                ),
+            )
+        )
+    return PositionValueReference(
+        model_bundle_id="position-v1",
+        model_artifact_sha256="c" * 64,
+        feature_schema_version="position-runtime-features.v1",
+        context_id=request.context_id,
+        account_id=request.constraints.account_id,
+        account_version=request.constraints.account_version,
+        instrument_id=request.constraints.instrument_id,
+        as_of=request.as_of,
+        valid_until=request.valid_until,
+        horizon="5_TRADING_DAYS",
+        horizon_end_date=(request.as_of + timedelta(days=7)).date(),
+        market_snapshot_ref="market-v1:20260915:" + "e" * 64,
+        trend="BULLISH",
+        current_quantity_shares=1000,
+        values=values,
+        cost_assumptions_ref="fees-v1",
+        calibration_ref="position-v1",
     )
 
 
@@ -381,6 +448,113 @@ def test_server_monitor_triggers_once_and_delivers_deduplicated_inbox(
     assert read.read_at is not None
 
 
+def test_position_evaluation_runs_and_persists_dedicated_position_agent(
+    decision_scope,
+    monkeypatch,
+):
+    owner, instrument_id, account_id, version = decision_scope
+    now = utcnow()
+    evidence_id = new_id()
+    statement = "这是专用持仓Agent测试使用的合成事实，不代表投资结论。"
+    with sessions().begin() as db:
+        db.add(
+            Evidence(
+                id=evidence_id,
+                owner_id=owner,
+                instrument_id=instrument_id,
+                source_key=new_id(),
+                request_hash="b" * 64,
+                title="专用持仓Agent合成证据",
+                source_url="https://example.com/position-agent",
+                text=statement + "补充文本用于满足证据长度要求。",
+                quote=statement,
+                content_hash="c" * 64,
+                published_at=now - timedelta(days=1),
+                first_seen_at=now - timedelta(minutes=5),
+                available_at=now - timedelta(minutes=5),
+                provenance="USER_SUPPLIED",
+                validation="QUOTE_MATCHED",
+            )
+        )
+    release = JointReleaseReference(
+        release_id="joint-shadow-test",
+        status="SHADOW",
+        ranking_model_bundle_id="ranking-v1",
+        ranking_model_artifact_sha256="a" * 64,
+        quant_model_bundle_id="quant-v1",
+        quant_model_artifact_sha256="b" * 64,
+        position_model_bundle_id="position-v1",
+        position_model_artifact_sha256="c" * 64,
+        agent_protocol_version="position-assessment.v1",
+        blocker_codes=["PROSPECTIVE_AGENT_SAMPLE_SUPPORT_INSUFFICIENT"],
+    )
+    config = settings().model_copy(
+        update={
+            "agent_enabled": True,
+            "agent_api_key": SecretStr("synthetic-only"),
+        }
+    )
+    monkeypatch.setattr(service, "active_release", lambda: release)
+    monkeypatch.setattr(service, "settings", lambda: config)
+    monkeypatch.setattr(
+        service,
+        "build_position_value_reference",
+        lambda request, _config: shadow_quant(request),
+    )
+    assessment = AssessmentOutput(
+        summary="专用持仓Agent合成研判",
+        claims=[
+            {
+                "kind": "OBSERVED",
+                "statement": statement,
+                "evidence_ids": [evidence_id],
+            }
+        ],
+        counter_claims=[],
+        thesis_status="SUPPORTED",
+        strategy_fit=["QUALITY"],
+        uncertainties=["缺少实时订单流"],
+        invalidation="合成证据被撤回",
+        next_check="下一交易日复核",
+        valid_until=now + timedelta(minutes=20),
+    )
+    monkeypatch.setattr(
+        position_runtime,
+        "run_agent",
+        lambda _payload: AgentRunResult(
+            assessment=assessment,
+            discovered_evidence=[],
+            tool_trace=[],
+        ),
+    )
+    job = service.submit_position_evaluation(
+        owner,
+        account_id,
+        evaluation(instrument_id, version),
+        new_id(),
+    )
+    assert service.process_one()
+    with sessions()() as db:
+        finished = db.get(Job, job.id)
+        source = db.scalar(
+            select(Assessment).where(Assessment.job_id == job.id)
+        )
+        sample = db.scalar(
+            select(ProspectiveSample).where(
+                ProspectiveSample.owner_id == owner
+            )
+        )
+    decision = service.decision_by_id(
+        owner,
+        finished.result["decisionId"],
+    )
+    assert finished.external_started is True
+    assert source.protocol_version == "position-source-assessment.v1"
+    assert decision.status == "READY"
+    assert decision.agent_contribution_ref == source.id
+    assert sample.assessment_id == source.id
+
+
 def test_valid_research_is_normalized_to_audited_position_assessment(
     decision_scope,
     monkeypatch,
@@ -481,54 +655,7 @@ def test_valid_research_is_normalized_to_audited_position_assessment(
     assert assessment.signals[0].statement == statement
     assert assessment.signals[0].validation == "UNVERIFIED"
     assert any("主力资金" in item for item in assessment.uncertainties)
-    values = []
-    for action, target, expected in (
-        ("HOLD", 1000, 0.0),
-        ("ADD", 2000, 0.02),
-        ("REDUCE", 500, -0.01),
-        ("EXIT", 0, -0.02),
-    ):
-        is_hold = action == "HOLD"
-        values.append(
-            ActionValueEstimate(
-                action=action,
-                target_quantity_shares=target,
-                expected_delta_return_vs_hold=expected,
-                q10_delta_return_vs_hold=0 if is_hold else None,
-                q50_delta_return_vs_hold=0 if is_hold else None,
-                q90_delta_return_vs_hold=0 if is_hold else None,
-                missing_prediction_fields=(
-                    ["stopHazard", "support"]
-                    if is_hold
-                    else ["q10", "q50", "q90", "stopHazard", "support"]
-                ),
-                estimated_costs="0" if is_hold else "5",
-                execution_path=None if is_hold else "SHADOW_MARKET_REFERENCE",
-                price_lower=None if is_hold else "10",
-                price_upper=None if is_hold else "10",
-                price_basis=None if is_hold else "SEALED_CLOSE:20260915",
-                trigger_conditions=[] if is_hold else ["SHADOW_SIMULATION_ONLY"],
-            )
-        )
-    quant = PositionValueReference(
-        model_bundle_id="position-v1",
-        model_artifact_sha256="c" * 64,
-        feature_schema_version="position-runtime-features.v1",
-        context_id=request.context_id,
-        account_id=account_id,
-        account_version=version,
-        instrument_id=instrument_id,
-        as_of=request.as_of,
-        valid_until=request.valid_until,
-        horizon="5_TRADING_DAYS",
-        horizon_end_date=(request.as_of + timedelta(days=7)).date(),
-        market_snapshot_ref="market-v1:20260915:" + "e" * 64,
-        trend="BULLISH",
-        current_quantity_shares=1000,
-        values=values,
-        cost_assumptions_ref="fees-v1",
-        calibration_ref="position-v1",
-    )
+    quant = shadow_quant(request)
     enriched = request.model_copy(
         update={"quant": quant, "agent": assessment}
     )

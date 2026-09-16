@@ -36,10 +36,17 @@ def _content(event: Outbox) -> tuple[str, str, str] | None:
             "持仓监控未能发起复核",
             str(event.payload.get("errorCode", "MONITOR_FAILED")),
         )
-    if event.event_type == "research.assessment.updated":
+    if event.event_type in {
+        "research.assessment.updated",
+        "research.position_assessment.updated",
+    }:
         return (
             "INFO",
-            "股票研判已更新",
+            (
+                "持仓研判已更新"
+                if event.event_type == "research.position_assessment.updated"
+                else "股票研判已更新"
+            ),
             str(event.payload.get("instrumentId", "研究结果")),
         )
     if event.event_type == "portfolio.changed" and event.payload.get("planId"):

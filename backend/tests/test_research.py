@@ -181,6 +181,64 @@ def test_agent_http_contract_and_auth_failure_without_retry(research_owner, monk
         agent.run_agent(job.payload)
 
 
+def test_position_agent_uses_bounded_position_prompt(
+    research_owner,
+    monkeypatch,
+):
+    owner, code = research_owner
+    source = evidence(owner, code)
+    config = settings().model_copy(
+        update={
+            "agent_enabled": True,
+            "agent_api_key": SecretStr("synthetic-only"),
+        }
+    )
+    monkeypatch.setattr(service, "settings", lambda: config)
+    monkeypatch.setattr(agent, "settings", lambda: config)
+    job = service.submit_research(
+        owner,
+        ResearchInput(
+            instrument_id=code,
+            question="评估合成持仓论点是否变化",
+            evidence_ids=[source.id],
+        ),
+        new_id(),
+    )
+    payload = {
+        **job.payload,
+        "purpose": "POSITION",
+        "positionContext": {
+            "currentQuantityShares": 1000,
+            "sellableQuantityShares": 1000,
+            "accountKind": "SIMULATED",
+        },
+    }
+    seen = {}
+
+    async def model_request(_config, messages, _timeout, *, allow_search):
+        seen["system"] = messages[0]["content"]
+        seen["allowSearch"] = allow_search
+        return {
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "position-assessment",
+                    "type": "function",
+                    "function": {
+                        "name": "submit_assessment",
+                        "arguments": json.dumps(output(payload)),
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr(agent, "_model_request", model_request)
+    result = agent.run_agent(payload)
+    assert result.assessment.thesis_status == "UNCERTAIN"
+    assert "A股持仓研判Agent" in seen["system"]
+    assert "不得输出买卖动作" in seen["system"]
+
+
 def test_agent_search_tool_adds_causal_evidence_and_trace(
     research_owner,
     monkeypatch,
