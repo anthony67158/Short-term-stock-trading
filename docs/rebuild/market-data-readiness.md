@@ -184,11 +184,24 @@ uv run platform-cli build-market-dataset \
 - `BJ.920045@20260915`公开源比规范`daily`多40,000股和22,472,787.53元。
   同日`block_trade`事实为40,000股、22,472,800元，另3只北交所股票的量额
   差异也逐笔对应大宗交易，说明规范日线是竞价时段口径，公开源包含大宗交易。
-  后续特征合同必须把竞价与大宗交易分账；在大宗交易事实进入规范数据集前，
-  不把`daily_bars.amount_cny`称为全市场总成交额。
+  v5已将两类事实分账；`daily_bars.amount_cny`仍只表示竞价成交额。
 - 扩展抽样和全量自身审计互补，仍不是逐行多源证明。当前阻断项是大宗交易
-  独立事实尚未入库，以及3个扩展样本未形成可复跑的自动确认；不能因此标记
-  T08或训练数据验收完成。
+  与分钟数据的独立来源覆盖，以及3个扩展样本未形成可复跑的自动确认；不能
+  因此标记全部训练数据验收完成。
+
+## 大宗交易分账与v5封存
+
+- `market-dataset.v4`明确日线量额口径为
+  `ORDER_BOOK_EXCLUDES_BLOCK_TRADES`，大宗交易按证券日独立保存笔数、价格范围、
+  股数、金额、源行哈希和21:00保守可用时间。
+- `block_trade`按自然月获取，达到6,000行上游边界时自动二分；最终仍按每个
+  开放日写独立checkpoint。B股、基金、债券、未知代码、北交所开市前新三板记录
+  和不在当日生效期的复用代码均分类审计，不混入A股事实；其他生命周期越界失败。
+- v5覆盖全部2,601个开放日，包含152,629条证券日汇总和279,882笔A股大宗交易。
+  全库审计无违规，SQLite完整性为`ok`。数据库SHA-256为
+  `b6e55037230dab8350de4585fd27127254de29b24d53eb3efa237db523ccbab0`，
+  报告SHA-256为
+  `c86d0107a40b15f4e64a3053a1f38f72029bc25be80de77d7b194a9f1b60b5ed`。
 
 实现依据：
 
@@ -198,10 +211,11 @@ uv run platform-cli build-market-dataset \
 - Tushare `adj_factor`：https://tushare.pro/document/2?doc_id=28
 - Tushare `namechange`：https://tushare.pro/document/2?doc_id=100
 - Tushare `suspend_d`：https://tushare.pro/document/2?doc_id=214
+- Tushare `block_trade`：https://tushare.pro/document/2?doc_id=161
 - Tushare `stk_mins`：https://tushare.pro/document/2?doc_id=234
 - 北交所2021-11-15开市事实：https://www.bse.cn/important_news/200011776.html
 - 上交所2014交易规则收盘价定义：
   https://www.sse.com.cn/aboutus/mediacenter/hotandd/c/c_20150912_3988782.shtml
 
-全量日线自身完整性已通过，但分钟episode、大宗交易分账和扩展独立来源确认
-仍未完成；在这些门禁完成前不得训练或发布生产模型。
+全量日线与大宗交易分账自身完整性已通过，但分钟episode和扩展独立来源确认
+仍未完成；在这些门禁完成前不得发布生产模型。

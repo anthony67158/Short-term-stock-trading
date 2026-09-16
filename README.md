@@ -41,6 +41,9 @@ uv run platform-cli build-market-dataset --dataset-root /absolute/external/path 
   --dataset-id a-share-2016-current --start-date 20160101 --end-date YYYYMMDD \
   --stage daily
 uv run platform-cli build-market-dataset --dataset-root /absolute/external/path \
+  --dataset-id a-share-2016-current --start-date 20160101 --end-date YYYYMMDD \
+  --stage block-trades
+uv run platform-cli build-market-dataset --dataset-root /absolute/external/path \
   --dataset-id a-share-2016-current --stage seal
 ```
 
