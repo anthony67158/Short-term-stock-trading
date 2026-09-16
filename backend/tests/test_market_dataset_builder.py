@@ -308,6 +308,60 @@ def test_builder_syncs_block_trades_by_month_with_daily_checkpoints(tmp_path):
             builder.sync_block_trade_range("20260801", "20260930")
 
 
+def test_builder_splits_block_trade_ranges_that_may_be_truncated(tmp_path):
+    data = responses()
+    data[("trade_cal", "")].append(
+        {
+            "exchange": "SSE",
+            "cal_date": "20260916",
+            "is_open": "1",
+            "pretrade_date": "20260915",
+        }
+    )
+    codes = ["000001.SZ", "300001.SZ", "688001.SH", "920729.BJ"]
+    data[("daily", "20260916")] = [bar(code, "20260916") for code in codes]
+    data[("adj_factor", "20260916")] = [
+        {"ts_code": code, "trade_date": "20260916", "adj_factor": "1"} for code in codes
+    ]
+
+    class SplitClient(FakeClient):
+        def rows(self, api_name, params, fields):
+            if api_name != "block_trade":
+                return super().rows(api_name, params, fields)
+            self.calls.append((api_name, params, fields))
+            if params["start_date"] == "20260901" and params["end_date"] == "20260930":
+                return [{}] * 6000
+            trade_date = "20260915" if params["end_date"] == "20260915" else "20260916"
+            return [
+                {
+                    "ts_code": "000001.SZ",
+                    "trade_date": trade_date,
+                    "price": "10",
+                    "vol": "1",
+                    "amount": "10",
+                    "buyer": "",
+                    "seller": "",
+                }
+            ]
+
+    with MarketDataset(
+        tmp_path / "dataset",
+        dataset_id="block-trade-split",
+        source="TUSHARE_COMPATIBLE",
+    ) as ds:
+        client = SplitClient(data)
+        builder = MarketDatasetBuilder(client, ds)
+        builder.sync_reference("20160101", "20260930")
+        builder.sync_daily_partition("20260915")
+        builder.sync_daily_partition("20260916")
+
+        result = builder.sync_block_trade_range("20260901", "20260930")
+
+        assert result["partitions"] == 2
+        assert result["transactions"] == 2
+        assert len([call for call in client.calls if call[0] == "block_trade"]) == 3
+
+
 def test_builder_syncs_paginated_name_changes_with_historical_availability(tmp_path):
     data = responses()
     current = {

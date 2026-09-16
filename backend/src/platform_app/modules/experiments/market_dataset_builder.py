@@ -842,7 +842,19 @@ class MarketDatasetBuilder:
             BLOCK_TRADE_FIELDS,
         )
         if len(raw_rows) >= 6000:
-            raise MarketDatasetError("BLOCK_TRADE_RANGE_MAY_BE_TRUNCATED")
+            if len(open_dates) == 1:
+                raise MarketDatasetError("BLOCK_TRADE_RANGE_MAY_BE_TRUNCATED")
+            midpoint = len(open_dates) // 2
+            left = self.sync_block_trade_range(start_date, open_dates[midpoint - 1])
+            right = self.sync_block_trade_range(open_dates[midpoint], end_date)
+            return {
+                "status": "COMPLETED",
+                "from": start_date,
+                "to": end_date,
+                "partitions": left.get("partitions", 0) + right.get("partitions", 0),
+                "transactions": left.get("transactions", 0) + right.get("transactions", 0),
+                "summaryRows": left.get("summaryRows", 0) + right.get("summaryRows", 0),
+            }
         grouped: dict[str, list[dict]] = {trade_date: [] for trade_date in pending_dates}
         for row in raw_rows:
             trade_date = str(row.get("trade_date") or "")
