@@ -94,4 +94,6 @@ class ProspectiveOutcome(Base):
         ForeignKey("executions.id"),
         unique=True,
     )
+    actual_execution_outcome: Mapped[dict] = mapped_column(JSONB)
+    attribution: Mapped[dict] = mapped_column(JSONB)
     matured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
