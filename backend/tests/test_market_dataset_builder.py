@@ -222,6 +222,7 @@ def test_builder_syncs_block_trade_summaries_with_audited_discards(tmp_path):
             "transactions": 2,
             "summaryRows": 1,
             "discardedNonAShareRows": 1,
+            "discardedPreListingBseRows": 0,
             "discardedUnknownInstruments": 1,
             "discardedSourceCodesOutsideEffectivePeriod": 1,
         }
@@ -274,6 +275,35 @@ def test_builder_rejects_block_trade_outside_instrument_lifecycle(tmp_path):
 
         with pytest.raises(MarketDatasetError, match="BLOCK_TRADE_OUTSIDE_LIFECYCLE"):
             builder.sync_block_trade_partition("20260915")
+
+
+def test_builder_audits_pre_listing_bse_block_trades(tmp_path):
+    data = responses()
+    data[("block_trade", "20200102")] = [
+        {
+            "ts_code": "839729.BJ",
+            "trade_date": "20200102",
+            "price": "5",
+            "vol": "1",
+            "amount": "5",
+            "buyer": "",
+            "seller": "",
+        }
+    ]
+    with MarketDataset(
+        tmp_path / "dataset",
+        dataset_id="block-trade-pre-bse",
+        source="TUSHARE_COMPATIBLE",
+    ) as ds:
+        builder = MarketDatasetBuilder(FakeClient(data), ds)
+        builder.sync_reference("20160101", "20260915")
+        ds.checkpoint("daily", "20200102", [])
+
+        result = builder.sync_block_trade_partition("20200102")
+
+        assert result["transactions"] == 0
+        assert result["discardedPreListingBseRows"] == 1
+        assert ds.db.execute("SELECT COUNT(*) FROM block_trade_summaries").fetchone()[0] == 0
 
 
 def test_builder_syncs_block_trades_by_month_with_daily_checkpoints(tmp_path):

@@ -891,6 +891,13 @@ class MarketDatasetBuilder:
             source_code = str(row.get("ts_code") or "").upper()
             (known_rows if source_code in known_source_codes else unknown_rows).append(row)
 
+        lifecycles = self.dataset.instrument_lifecycles()
+        known_rows, pre_listing_bse_rows = _filter_pre_listing_bse_rows(
+            known_rows,
+            trade_date=trade_date,
+            aliases=aliases,
+            lifecycles=lifecycles,
+        )
         normalized = [normalize_block_trade(row, aliases) for row in known_rows]
         transactions = []
         source_code_outside_effective_period = []
@@ -969,6 +976,7 @@ class MarketDatasetBuilder:
             availability_method="RECONSTRUCTED_FROM_VENDOR_SCHEDULE",
             details={
                 "discardedNonAShareRows": _discard_audit(non_a_share_rows),
+                "discardedPreListingBseRows": _discard_audit(pre_listing_bse_rows),
                 "discardedUnknownInstruments": _discard_audit(unknown_rows),
                 "discardedSourceCodesOutsideEffectivePeriod": _discard_audit(
                     source_code_outside_effective_period
@@ -982,6 +990,7 @@ class MarketDatasetBuilder:
             "transactions": len(transactions),
             "summaryRows": len(summaries),
             "discardedNonAShareRows": len(non_a_share_rows),
+            "discardedPreListingBseRows": len(pre_listing_bse_rows),
             "discardedUnknownInstruments": len(unknown_rows),
             "discardedSourceCodesOutsideEffectivePeriod": len(
                 source_code_outside_effective_period
