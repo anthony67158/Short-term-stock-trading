@@ -5,7 +5,7 @@ export default defineConfig({
   workers: 1,
   timeout: 60_000,
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:5173",
     browserName: "chromium",
     trace: "off",
     screenshot: "only-on-failure",

@@ -2,10 +2,11 @@ import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
 
 test("期初持仓不扣现金、刷新、卖出FIFO与独立核对", async ({ browser, playwright }) => {
+  const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
   const identity = JSON.parse(execFileSync("uv", ["run", "python", "tests/provision_browser.py"],
     { cwd: "backend", encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const auth = await playwright.request.newContext({
-    baseURL: "http://localhost:5173", extraHTTPHeaders: { Origin: "http://localhost:5173" },
+    baseURL, extraHTTPHeaders: { Origin: baseURL },
   });
   let context;
   try {
@@ -17,7 +18,7 @@ test("期初持仓不扣现金、刷新、卖出FIFO与独立核对", async ({ b
     const page = await context.newPage();
     const errors: string[] = [];
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto("http://localhost:5173/portfolio");
+    await page.goto(`${baseURL}/portfolio`);
     await expect(page.locator(".skip")).toHaveCSS("clip-path", "inset(100%)");
     await page.keyboard.press("Tab");
     await expect(page.locator(".skip")).toBeFocused();
@@ -116,6 +117,17 @@ test("期初持仓不扣现金、刷新、卖出FIFO与独立核对", async ({ b
     await expect(page.getByRole("region", { name: "持仓明细，可横向滚动" })).toContainText("40 / 40");
     await expect(page.getByRole("region", { name: "持仓明细，可横向滚动" })).toContainText("403.67");
     await expect(page.getByRole("region", { name: "转托管明细，可横向滚动" })).toContainText("130.01");
+    await page.getByRole("button", { name: "录入到账股份", exact: true }).click();
+    await page.getByLabel("证券代码", { exact: true }).fill("000001");
+    await page.getByLabel("实际到账股数").fill("4");
+    await page.getByLabel("到账时间（本设备时区）").fill(local());
+    await page.getByLabel("券商凭据编号").fill("synthetic-stock-dividend-1");
+    await page.getByLabel("凭据说明", { exact: true }).fill("合成送股到账凭据");
+    await page.getByRole("button", { name: "保存到账股份" }).click();
+    await expect(page.getByText("到账股份已保存，总成本与现金保持不变。")).toBeVisible();
+    await expect(page.getByRole("region", { name: "持仓明细，可横向滚动" })).toContainText("44 / 44");
+    await expect(page.getByRole("region", { name: "持仓明细，可横向滚动" })).toContainText("403.67");
+    await expect(page.getByRole("region", { name: "送转股份记录，可横向滚动" })).toContainText("synthetic-stock-dividend-1");
     await page.getByRole("button", { name: "核对账本", exact: true }).click();
     await expect(page.getByText("账本核对一致", { exact: true })).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });

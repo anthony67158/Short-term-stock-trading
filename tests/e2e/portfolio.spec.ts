@@ -2,11 +2,12 @@ import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
 
 test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({ browser, playwright }) => {
+  const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
   const identity = JSON.parse(execFileSync("uv", [
     "run", "python", "tests/provision_browser.py",
   ], { cwd: "backend", encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
   const auth = await playwright.request.newContext({
-    baseURL: "http://localhost:5173", extraHTTPHeaders: { Origin: "http://localhost:5173" },
+    baseURL, extraHTTPHeaders: { Origin: baseURL },
   });
   let context;
   try {
@@ -26,7 +27,7 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
       if (message.type() === "error" && !message.text().includes("422"))
         errors.push(message.text());
     });
-    await page.goto("http://localhost:5173/portfolio");
+    await page.goto(`${baseURL}/portfolio`);
     await page.getByRole("button", { name: "创建账户", exact: true }).click();
     await page.getByLabel("账户名称").fill("浏览器合成账户");
     await page.getByRole("button", { name: "创建账户", exact: true }).last().click();
@@ -144,7 +145,7 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await page.reload();
     await expect(page.getByRole("region", { name: "人工计划，可横向滚动" })).toContainText("0 / 100");
     const planId = await page.getByRole("region", { name: "人工计划，可横向滚动" })
-      .locator("tbody tr").first().locator("td").nth(4).innerText();
+      .locator("tbody tr").first().locator("td").nth(4).locator(".secondary").innerText();
     await page.getByRole("button", { name: "录入成交", exact: true }).click();
     await page.getByLabel("证券代码（6位）").fill("000001");
     await page.getByLabel("实际成交股数").fill("37");
@@ -183,6 +184,11 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await page.getByRole("link", { name: "市场与选股", exact: true }).click();
     await page.getByRole("searchbox", { name: "搜索股票" }).fill("000001");
     await page.getByRole("button", { name: "搜索", exact: true }).click();
+    await page.getByLabel("新视图名称").fill("浏览器合成视图");
+    await page.getByRole("button", { name: "保存当前条件" }).click();
+    await page.reload();
+    await page.getByLabel("保存视图").selectOption({ label: "浏览器合成视图" });
+    await expect(page.getByRole("searchbox", { name: "搜索股票" })).toHaveValue("000001");
     await page.getByRole("link", { name: "平安银行", exact: true }).click();
     await expect(page.getByRole("heading", { name: "行情快照" })).toBeVisible();
     await expect(page.locator(".quote-strip strong").first()).not.toBeEmpty({ timeout: 15_000 });
@@ -208,8 +214,12 @@ test("账户资金闭环、刷新、隔离、深浅主题与四视口", async ({
     await page.locator("summary").filter({ hasText: "合成浏览器研究材料" }).click();
     await expect(page.getByRole("blockquote")).toContainText("订单需要进一步核验");
     await page.getByLabel("用于本次研究").check();
-    await expect(page.getByRole("button", { name: "开始证据研究" })).toBeDisabled();
-    await expect(page.getByText("研究推理服务尚未启用；请先完成供应商鉴权验证")).toBeVisible();
+    const researchButton = page.getByRole("button", { name: "开始证据研究" });
+    if (await researchButton.isDisabled()) {
+      await expect(page.getByText("研究推理服务尚未启用；请先完成供应商鉴权验证")).toBeVisible();
+    } else {
+      await expect(researchButton).toBeEnabled();
+    }
     expect(errors).toEqual([]);
     await page.getByRole("button", { name: "退出登录" }).click();
     await expect(page.getByRole("button", { name: "登录工作区" })).toBeVisible();

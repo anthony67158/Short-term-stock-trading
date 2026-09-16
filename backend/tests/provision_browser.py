@@ -11,11 +11,22 @@ from platform_app.config import settings
 from platform_app.contracts.base import new_id
 from platform_app.modules.identity.models import LoginSession, User
 from platform_app.modules.identity.service import create_user
-from platform_app.modules.operations.models import Job, Outbox
-from platform_app.modules.market.models import Watch
+from platform_app.modules.operations.models import Job, Notification, Outbox
+from platform_app.modules.market.models import SavedView, Watch
 from platform_app.modules.portfolio.models import (
-    Account, CashEntry, CustodyTransfer, Execution, ExecutionCommand, ExecutionCorrection, ExecutionImport,
-    ExecutionPlan, LotConsumption, OpeningLot, PlanEvent, PositionLot,
+    Account,
+    CashEntry,
+    CorporateShareEvent,
+    CustodyTransfer,
+    Execution,
+    ExecutionCommand,
+    ExecutionCorrection,
+    ExecutionImport,
+    ExecutionPlan,
+    LotConsumption,
+    OpeningLot,
+    PlanEvent,
+    PositionLot,
 )
 from platform_app.modules.research.models import Assessment, Evidence
 
@@ -40,6 +51,11 @@ else:
         db.execute(delete(LotConsumption).where(
             LotConsumption.sell_execution_id.in_(execution_ids)))
         db.execute(delete(PositionLot).where(PositionLot.account_id.in_(account_ids)))
+        db.execute(
+            delete(CorporateShareEvent).where(
+                CorporateShareEvent.account_id.in_(account_ids)
+            )
+        )
         db.execute(delete(CustodyTransfer).where(CustodyTransfer.account_id.in_(account_ids)))
         db.execute(delete(OpeningLot).where(OpeningLot.account_id.in_(account_ids)))
         db.execute(delete(ExecutionCommand).where(ExecutionCommand.account_id.in_(account_ids)))
@@ -50,8 +66,10 @@ else:
         db.execute(delete(PlanEvent).where(PlanEvent.account_id.in_(account_ids)))
         db.execute(delete(ExecutionPlan).where(ExecutionPlan.account_id.in_(account_ids)))
         db.execute(delete(Account).where(Account.owner_id == user.id))
+        db.execute(delete(Notification).where(Notification.owner_id == user.id))
         db.execute(delete(Outbox).where(Outbox.owner_id == user.id))
         db.execute(delete(Watch).where(Watch.owner_id == user.id))
+        db.execute(delete(SavedView).where(SavedView.owner_id == user.id))
         db.execute(delete(Assessment).where(Assessment.owner_id == user.id))
         db.execute(delete(Evidence).where(Evidence.owner_id == user.id))
         db.execute(delete(Job).where(Job.owner_id == user.id))
