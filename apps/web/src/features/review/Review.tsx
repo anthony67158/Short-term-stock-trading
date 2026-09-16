@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarSearch, RefreshCw } from "lucide-react";
+import { CalendarSearch, FlaskConical, RefreshCw } from "lucide-react";
 import { useSearchParams } from "react-router";
 import type { components } from "../../../../../packages/api-client/schema";
 import { Button, Empty } from "../../components/Controls";
@@ -40,7 +40,17 @@ function metricValue(metric: ReviewMetric) {
   return `${(Number(metric.value) * 100).toFixed(2)}%`;
 }
 
-function Report({ report }: { report: ReviewReport }) {
+function Report({
+  report,
+  canCompile,
+  compilingId,
+  onCompile,
+}: {
+  report: ReviewReport;
+  canCompile: boolean;
+  compilingId?: string;
+  onCompile: (proposalId: string) => void;
+}) {
   const metrics = new Map(
     report.metricSnapshot.metrics.map((metric) => [
       metric.metricId,
@@ -170,6 +180,17 @@ function Report({ report }: { report: ReviewReport }) {
                     .map((id) => id.slice(0, 8))
                     .join("、")}
                 </p>
+                {proposal.status === "DRAFT" && (
+                  <Button
+                    disabled={!canCompile || compilingId === proposal.id}
+                    onClick={() => onCompile(proposal.id)}
+                  >
+                    <FlaskConical size={16} />
+                    {compilingId === proposal.id
+                      ? "编译中"
+                      : "编译实验草案"}
+                  </Button>
+                )}
               </article>
             ))
           )}
@@ -182,6 +203,7 @@ function Report({ report }: { report: ReviewReport }) {
 export function Review() {
   const cache = useQueryClient();
   const command = useRef({ date: "", key: "" });
+  const compilationCommands = useRef(new Map<string, string>());
   const [reviewDate, setReviewDate] = useState(shanghaiDate);
   const [selectedId, setSelectedId] = useState("");
   const [searchParams, setSearchParams] = useSearchParams();
@@ -224,6 +246,7 @@ export function Review() {
   useEffect(() => {
     if (job.data?.status === "SUCCEEDED") {
       void cache.invalidateQueries({ queryKey: ["reviews"] });
+      void cache.invalidateQueries({ queryKey: ["strategy-versions"] });
     }
   }, [cache, job.data?.status]);
   const run = useMutation({
@@ -249,11 +272,36 @@ export function Review() {
       );
     },
   });
+  const compile = useMutation({
+    mutationFn: async (proposalId: string) => {
+      let key = compilationCommands.current.get(proposalId);
+      if (!key) {
+        key = crypto.randomUUID();
+        compilationCommands.current.set(proposalId, key);
+      }
+      const result = await api.POST(
+        "/api/v1/improvement-proposals/{proposal_id}/compilations",
+        {
+          params: {
+            path: { proposal_id: proposalId },
+            header: { "Idempotency-Key": key },
+          },
+          body: {},
+        },
+      );
+      if (!result.data) throw new Error(errorMessage(result.error));
+      setSearchParams(
+        { reviewJob: result.data.data.id },
+        { replace: true },
+      );
+      return proposalId;
+    },
+  });
   const selected =
     reports.data?.find((report) => report.id === selectedId)
     ?? reports.data?.[0];
   const running = ["QUEUED", "RUNNING"].includes(job.data?.status ?? "");
-  const error = reports.error ?? run.error ?? job.error;
+  const error = reports.error ?? run.error ?? compile.error ?? job.error;
   return (
     <>
       <header className="workspace-header">
@@ -328,7 +376,16 @@ export function Review() {
                 </select>
               </label>
             )}
-            <Report report={selected} />
+            <Report
+              report={selected}
+              canCompile={
+                (capability.data?.available ?? false) && !running
+              }
+              compilingId={
+                compile.isPending ? compile.variables : undefined
+              }
+              onCompile={(proposalId) => compile.mutate(proposalId)}
+            />
           </>
         ) : (
           <Empty title="尚无复盘记录">
