@@ -11,6 +11,9 @@ dependencies = [
   "pydantic-settings>=2.8,<3",
   "httpx>=0.28,<1",
   "argon2-cffi>=23.1",
+  "numpy>=2.2,<3",
+  "scikit-learn>=1.9,<1.10",
+  "joblib>=1.5,<2",
 ]
 
 [dependency-groups]
