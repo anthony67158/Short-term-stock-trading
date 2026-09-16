@@ -55,6 +55,7 @@ def main():
             "evaluate-quant-backtest",
             "evaluate-account-backtest",
             "build-joint-candidate",
+            "build-position-action-dataset",
         ],
     )
     parser.add_argument("--username")
@@ -67,6 +68,7 @@ def main():
     parser.add_argument("--source-dataset-root", type=Path)
     parser.add_argument("--episode-root", type=Path)
     parser.add_argument("--label-root", type=Path)
+    parser.add_argument("--position-root", type=Path)
     parser.add_argument("--ranking-root", type=Path)
     parser.add_argument("--ranking-model-root", type=Path)
     parser.add_argument("--model-root", type=Path)
@@ -74,6 +76,7 @@ def main():
     parser.add_argument("--dataset-id")
     parser.add_argument("--episode-dataset-id")
     parser.add_argument("--label-dataset-id")
+    parser.add_argument("--position-dataset-id")
     parser.add_argument("--ranking-dataset-id")
     parser.add_argument("--model-bundle-id")
     parser.add_argument("--joint-bundle-id")
@@ -628,6 +631,54 @@ def main():
                 print(json.dumps(dataset.seal(), ensure_ascii=False))
             else:
                 for result in dataset.build(max_instruments=args.max_windows):
+                    print(json.dumps(result, ensure_ascii=False), flush=True)
+    elif args.command == "build-position-action-dataset":
+        from platform_app.modules.experiments.position_action_dataset import (
+            PositionActionDataset,
+        )
+
+        if not all(
+            (
+                args.dataset_root,
+                args.episode_root,
+                args.label_root,
+                args.position_root,
+                args.position_dataset_id,
+                args.stage,
+            )
+        ):
+            parser.error(
+                "dataset-root, episode-root, label-root, position-root, "
+                "position-dataset-id and stage are required"
+            )
+        if args.stage not in {"labels", "seal"}:
+            parser.error("position action stage must be labels or seal")
+        if args.stage == "labels" and (
+            not args.start_date
+            or not args.end_date
+            or not re.fullmatch(r"\d{8}", args.start_date)
+            or not re.fullmatch(r"\d{8}", args.end_date)
+            or args.start_date > args.end_date
+        ):
+            parser.error("labels stage requires ordered YYYYMMDD date values")
+        try:
+            market_root = external_dataset_root(args.dataset_root)
+            episode_root = external_dataset_root(args.episode_root)
+            label_root = external_dataset_root(args.label_root)
+            position_root = external_dataset_root(args.position_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        with PositionActionDataset(
+            position_root,
+            dataset_id=args.position_dataset_id,
+            episode_dataset_root=episode_root,
+            label_dataset_root=label_root,
+            market_dataset_root=market_root,
+        ) as dataset:
+            if args.stage == "seal":
+                print(json.dumps(dataset.seal(), ensure_ascii=False))
+            else:
+                for result in dataset.build_range(args.start_date, args.end_date):
                     print(json.dumps(result, ensure_ascii=False), flush=True)
     elif args.command == "build-selected-backtest-dataset":
         from platform_app.modules.experiments.episode_dataset import EpisodeDataset
