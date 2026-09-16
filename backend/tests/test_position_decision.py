@@ -25,6 +25,7 @@ from platform_app.modules.research.contracts import Claim
 
 
 def action_value(action, target, expected, q10, q50, q90, *, hazard=0.2):
+    is_trade = action != "HOLD"
     return ActionValueEstimate(
         action=action,
         target_quantity_shares=target,
@@ -34,6 +35,12 @@ def action_value(action, target, expected, q10, q50, q90, *, hazard=0.2):
         q90_delta_return_vs_hold=q90,
         stop_hazard=hazard,
         support=0.8,
+        execution_path="LIMIT_BAND" if is_trade else None,
+        price_lower="9.80" if is_trade else None,
+        price_upper="10.20" if is_trade else None,
+        price_basis="SNAPSHOT_PRICE" if is_trade else None,
+        trigger_conditions=["价格处于注册区间"] if is_trade else [],
+        estimated_costs="5.00" if is_trade else "0",
     )
 
 
@@ -148,6 +155,12 @@ def decision_request(
             valid_until=now + timedelta(minutes=1),
             hard_stop_triggered=hard_stop,
             reason_codes=["STOP_PRICE_BREACHED"] if hard_stop else [],
+            execution_path="MARKETABLE_LIMIT" if hard_stop else None,
+            price_lower="9.50" if hard_stop else None,
+            price_upper="9.80" if hard_stop else None,
+            price_basis="LIMIT_BAND_AT_RISK_SNAPSHOT" if hard_stop else None,
+            trigger_conditions=["硬止损价格已触发"] if hard_stop else [],
+            estimated_costs="8.00" if hard_stop else "0",
         ),
         quant=value_reference(now),
         agent=position_assessment(now, thesis_status=thesis_status),
@@ -201,6 +214,8 @@ def test_hard_stop_preempts_unavailable_joint_bundle_and_uses_sellable_quantity(
     assert decision.delta_quantity_shares == -600
     assert decision.model_prediction_ref is None
     assert decision.agent_contribution_ref is None
+    assert decision.execution_path == "MARKETABLE_LIMIT"
+    assert decision.valid_until == request.hard_risk.valid_until
 
 
 def test_hard_stop_without_sellable_shares_preserves_unavailable_state():
@@ -218,6 +233,12 @@ def test_ready_joint_decision_selects_feasible_quant_value_with_agent_gate():
     assert decision.action == "ADD"
     assert decision.target_quantity_shares == 1200
     assert decision.expected_delta_return_vs_hold == 0.03
+    assert decision.q10_delta_return_vs_hold == -0.02
+    assert decision.q90_delta_return_vs_hold == 0.08
+    assert decision.stop_hazard == 0.2
+    assert decision.quant_trend == "BULLISH"
+    assert decision.agent_thesis_status == "SUPPORTED"
+    assert decision.execution_path == "LIMIT_BAND"
     assert decision.assessment_ids == ["assessment-1"]
     assert decision.evidence_ids == ["evidence-1"]
 
@@ -237,12 +258,8 @@ def test_future_available_agent_signal_fails_closed():
     raw["signals"][0]["published_at"] = request.as_of + timedelta(seconds=1)
     raw["signals"][0]["first_seen_at"] = request.as_of + timedelta(seconds=2)
     raw["signals"][0]["available_at"] = request.as_of + timedelta(seconds=3)
-    request = request.model_copy(
-        update={"agent": PositionAssessment.model_validate(raw)}
-    )
-    decision = arbitrate_position(request)
-    assert decision.status == "UNAVAILABLE"
-    assert decision.reason_codes == ["JOINT_INPUT_NOT_CAUSAL_OR_EXPIRED"]
+    with pytest.raises(ValidationError, match="评估时点后"):
+        PositionAssessment.model_validate(raw)
 
 
 def test_joint_bundle_binds_runtime_position_release(tmp_path):

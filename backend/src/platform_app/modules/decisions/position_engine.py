@@ -60,7 +60,10 @@ def _risk_override(request: PositionDecisionRequest) -> PositionDecision:
     target = constraints.current_quantity_shares - sellable
     action = "EXIT" if target == 0 else "REDUCE"
     return PositionDecision(
-        **_base(request),
+        **{
+            **_base(request),
+            "valid_until": min(request.valid_until, request.hard_risk.valid_until),
+        },
         assessment_ids=[],
         status="READY",
         action=action,
@@ -72,6 +75,12 @@ def _risk_override(request: PositionDecisionRequest) -> PositionDecision:
         current_quantity_shares=constraints.current_quantity_shares,
         target_quantity_shares=target,
         delta_quantity_shares=-sellable,
+        execution_path=request.hard_risk.execution_path,
+        price_lower=request.hard_risk.price_lower,
+        price_upper=request.hard_risk.price_upper,
+        price_basis=request.hard_risk.price_basis,
+        trigger_conditions=request.hard_risk.trigger_conditions,
+        estimated_costs=request.hard_risk.estimated_costs,
         decision_reason="硬风险策略优先于模型与Agent，按当前可卖数量降低风险。",
     )
 
@@ -222,6 +231,27 @@ def arbitrate_position(request: PositionDecisionRequest) -> PositionDecision:
         target_quantity_shares=selected.target_quantity_shares,
         delta_quantity_shares=selected.target_quantity_shares - current,
         expected_delta_return_vs_hold=selected.expected_delta_return_vs_hold,
+        q10_delta_return_vs_hold=selected.q10_delta_return_vs_hold,
+        q50_delta_return_vs_hold=selected.q50_delta_return_vs_hold,
+        q90_delta_return_vs_hold=selected.q90_delta_return_vs_hold,
+        stop_hazard=selected.stop_hazard,
+        support=selected.support,
+        quant_trend=request.quant.trend,
+        agent_thesis_status=request.agent.thesis_status,
+        agent_uncertainties=request.agent.uncertainties,
+        counter_evidence_ids=list(
+            dict.fromkeys(
+                evidence_id
+                for claim in request.agent.counter_claims
+                for evidence_id in claim.evidence_ids
+            )
+        ),
+        execution_path=selected.execution_path,
+        price_lower=selected.price_lower,
+        price_upper=selected.price_upper,
+        price_basis=selected.price_basis,
+        trigger_conditions=selected.trigger_conditions,
+        estimated_costs=selected.estimated_costs,
         model_prediction_ref=(
             f"{request.quant.model_bundle_id}:"
             f"{request.quant.model_artifact_sha256}"

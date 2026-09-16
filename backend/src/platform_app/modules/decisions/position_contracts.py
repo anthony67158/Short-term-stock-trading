@@ -8,6 +8,8 @@ from pydantic import AwareDatetime, Field, model_validator
 from platform_app.contracts.base import (
     Contract,
     InstrumentId,
+    Money,
+    Price,
     Quantity,
 )
 from platform_app.modules.research.contracts import Claim
@@ -30,6 +32,12 @@ class ActionValueEstimate(Contract):
     q90_delta_return_vs_hold: ReturnValue
     stop_hazard: Probability
     support: Probability
+    execution_path: str | None = Field(default=None, min_length=1, max_length=160)
+    price_lower: Price | None = None
+    price_upper: Price | None = None
+    price_basis: str | None = Field(default=None, min_length=1, max_length=160)
+    trigger_conditions: list[str] = Field(default_factory=list, max_length=16)
+    estimated_costs: Money
 
     @model_validator(mode="after")
     def ordered_quantiles(self):
@@ -39,6 +47,25 @@ class ActionValueEstimate(Contract):
             <= self.q90_delta_return_vs_hold
         ):
             raise ValueError("动作价值分位数必须按Q10、Q50、Q90递增")
+        execution = (
+            self.execution_path,
+            self.price_lower,
+            self.price_upper,
+            self.price_basis,
+        )
+        if self.action == "HOLD":
+            if (
+                any(value is not None for value in execution)
+                or self.trigger_conditions
+                or self.estimated_costs != 0
+            ):
+                raise ValueError("HOLD不得构造虚假执行条件或成本")
+        elif (
+            any(value is None for value in execution)
+            or not self.trigger_conditions
+            or self.price_lower > self.price_upper
+        ):
+            raise ValueError("交易动作必须包含完整且有序的执行条件")
         return self
 
 
@@ -148,6 +175,8 @@ class PositionAssessment(Contract):
             raise ValueError("持仓研判有效期必须在评估时点后24小时内")
         if not self.as_of < self.review_after <= self.valid_until:
             raise ValueError("复核时间必须位于研判有效期内")
+        if any(signal.available_at > self.as_of for signal in self.signals):
+            raise ValueError("研判不得使用评估时点后才可用的证据")
         signal_ids = {signal.evidence_id for signal in self.signals}
         referenced = {
             evidence_id
@@ -156,6 +185,13 @@ class PositionAssessment(Contract):
         }
         if not referenced <= signal_ids:
             raise ValueError("研判只能引用当前来源快照内的证据")
+        signals = {signal.evidence_id: signal for signal in self.signals}
+        for claim in (*self.claims, *self.counter_claims):
+            if claim.kind == "OBSERVED" and not any(
+                claim.statement == signals[evidence_id].statement
+                for evidence_id in claim.evidence_ids
+            ):
+                raise ValueError("OBSERVED必须逐字引用来源信号")
         return self
 
 
@@ -214,6 +250,12 @@ class HardRiskState(Contract):
     valid_until: AwareDatetime
     hard_stop_triggered: bool
     reason_codes: list[str] = Field(max_length=16)
+    execution_path: str | None = Field(default=None, min_length=1, max_length=160)
+    price_lower: Price | None = None
+    price_upper: Price | None = None
+    price_basis: str | None = Field(default=None, min_length=1, max_length=160)
+    trigger_conditions: list[str] = Field(default_factory=list, max_length=16)
+    estimated_costs: Money
 
     @model_validator(mode="after")
     def valid_risk_state(self):
@@ -221,6 +263,24 @@ class HardRiskState(Contract):
             raise ValueError("风险状态有效期必须晚于计算时点")
         if self.hard_stop_triggered and not self.reason_codes:
             raise ValueError("硬止损必须包含原因")
+        execution = (
+            self.execution_path,
+            self.price_lower,
+            self.price_upper,
+            self.price_basis,
+        )
+        if self.hard_stop_triggered and (
+            any(value is None for value in execution)
+            or not self.trigger_conditions
+            or self.price_lower > self.price_upper
+        ):
+            raise ValueError("硬止损必须包含可审计的执行条件")
+        if not self.hard_stop_triggered and (
+            any(value is not None for value in execution)
+            or self.trigger_conditions
+            or self.estimated_costs != 0
+        ):
+            raise ValueError("未触发硬止损时不得构造执行条件或成本")
         return self
 
 
@@ -261,6 +321,23 @@ class PositionDecision(Contract):
     target_quantity_shares: Quantity | None = None
     delta_quantity_shares: int | None = Field(default=None, ge=-1_000_000_000, le=1_000_000_000)
     expected_delta_return_vs_hold: ReturnValue | None = None
+    q10_delta_return_vs_hold: ReturnValue | None = None
+    q50_delta_return_vs_hold: ReturnValue | None = None
+    q90_delta_return_vs_hold: ReturnValue | None = None
+    stop_hazard: Probability | None = None
+    support: Probability | None = None
+    quant_trend: Literal["BULLISH", "NEUTRAL", "BEARISH", "UNCERTAIN"] | None = None
+    agent_thesis_status: Literal[
+        "SUPPORTED", "WEAKENED", "INVALIDATED", "UNCERTAIN"
+    ] | None = None
+    agent_uncertainties: list[str] = Field(default_factory=list, max_length=16)
+    counter_evidence_ids: list[str] = Field(default_factory=list, max_length=32)
+    execution_path: str | None = None
+    price_lower: Price | None = None
+    price_upper: Price | None = None
+    price_basis: str | None = None
+    trigger_conditions: list[str] = Field(default_factory=list, max_length=16)
+    estimated_costs: Money | None = None
     risk_policy_version: str
     quantity_rule_version: str
     fee_policy_version: str
@@ -300,4 +377,15 @@ class PositionDecision(Contract):
             raise ValueError("REDUCE/EXIT必须减少数量")
         if self.action == "EXIT" and self.target_quantity_shares != 0:
             raise ValueError("EXIT目标数量必须为零")
+        if self.action in ("ADD", "REDUCE", "EXIT") and any(
+            value is None
+            for value in (
+                self.execution_path,
+                self.price_lower,
+                self.price_upper,
+                self.price_basis,
+                self.estimated_costs,
+            )
+        ):
+            raise ValueError("READY交易动作必须包含完整执行合同")
         return self
