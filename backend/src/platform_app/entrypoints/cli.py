@@ -49,6 +49,7 @@ def main():
             "build-label-dataset",
             "build-ranking-dataset",
             "train-quant-model",
+            "train-ranking-model",
         ],
     )
     parser.add_argument("--username")
@@ -292,6 +293,38 @@ def main():
                                 ),
                                 flush=True,
                             )
+    elif args.command == "train-ranking-model":
+        from platform_app.modules.experiments.ranking_model_trainer import (
+            load_ranking_training_data,
+            write_ranking_bundle,
+        )
+
+        if not all(
+            (
+                args.ranking_root,
+                args.model_root,
+                args.model_bundle_id,
+            )
+        ):
+            parser.error("ranking-root, model-root and model-bundle-id are required")
+        try:
+            ranking_root = external_dataset_root(args.ranking_root)
+            model_root = external_dataset_root(args.model_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        data, ranking_manifest = load_ranking_training_data(ranking_root)
+        print(
+            json.dumps(
+                write_ranking_bundle(
+                    output_root=model_root,
+                    bundle_id=args.model_bundle_id,
+                    data=data,
+                    ranking_manifest=ranking_manifest,
+                    max_iter=args.max_iterations,
+                ),
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "train-quant-model":
         from platform_app.modules.experiments.quant_model_trainer import (
             load_training_data,
