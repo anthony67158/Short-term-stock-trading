@@ -1,0 +1,83 @@
+name: stock-platform-local
+
+x-app: &app
+  build:
+    context: ../..
+    dockerfile: infra/containers/Dockerfile
+  restart: unless-stopped
+  env_file:
+    - path: ${PLATFORM_CONFIG_FILE:-../../.env.local}
+      required: false
+  environment:
+    PLATFORM_DATABASE_URL: postgresql+psycopg://platform:local_only@postgres:5432/platform
+    PLATFORM_ENVIRONMENT: local
+    PLATFORM_ORIGIN: http://localhost:8080
+    PLATFORM_COOKIE_SECURE: "false"
+    PLATFORM_DEPLOYMENT_REVISION: ${PLATFORM_DEPLOYMENT_REVISION:-local}
+    PLATFORM_WEB_DIST_ROOT: /app/web
+    PLATFORM_JOINT_BUNDLE_ROOT: /data/joint-releases/active-shadow.json
+  volumes:
+    - ${HOME}/.local/share/stock-platform:/data:ro
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:17.6-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: platform
+      POSTGRES_USER: platform
+      POSTGRES_PASSWORD: local_only
+    volumes:
+      - platform-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U platform -d platform"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *app
+    restart: "no"
+    command: ["alembic", "upgrade", "head"]
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  research-worker:
+    <<: *app
+    command: ["python", "-m", "platform_app.modules.research.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  decision-worker:
+    <<: *app
+    command: ["python", "-m", "platform_app.modules.decisions.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  review-worker:
+    <<: *app
+    command: ["python", "-m", "platform_app.modules.review.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  portfolio-worker:
+    <<: *app
+    command: ["python", "-m", "platform_app.modules.portfolio.worker"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  platform-postgres:

@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, "rebuild/**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.6-bookworm
+        env:
+          POSTGRES_DB: platform
+          POSTGRES_USER: platform
+          POSTGRES_PASSWORD: ci_ephemeral_only
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U platform -d platform"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PLATFORM_ENVIRONMENT: test
+      PLATFORM_DATABASE_URL: postgresql+psycopg://platform:ci_ephemeral_only@127.0.0.1:55432/platform
+      PLATFORM_ORIGIN: http://localhost:5173
+      PLATFORM_COOKIE_SECURE: "false"
+      PLATFORM_AGENT_ENABLED: "false"
+      PLATFORM_SEARCH_ENABLED: "false"
+      PLATFORM_MARKET_DATA_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.17.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+          cache: pnpm
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: 0.11.17
+          enable-cache: true
+
+      - name: Install Web dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python dependencies
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: Apply database migrations
+        working-directory: backend
+        run: uv run alembic upgrade head
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test backend
+        run: pnpm test:backend
+
+      - name: Verify generated contracts
+        run: |
+          pnpm contracts
+          git diff --exit-code -- contracts/openapi.json packages/api-client/schema.d.ts
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Build Web
+        run: pnpm build
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level high
