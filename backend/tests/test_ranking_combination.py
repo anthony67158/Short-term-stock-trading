@@ -4,9 +4,11 @@ import numpy as np
 import pytest
 
 from platform_app.modules.experiments.ranking_combination import (
+    combination_scores,
     daily_percentiles,
     temporal_fusion_weights,
 )
+from platform_app.modules.experiments.ranking_window_runner import recent_session_mask
 from platform_app.modules.experiments.ranking_walk_forward import expanding_walk_forward_splits
 
 
@@ -47,3 +49,27 @@ def test_split_labels_mature_before_fusion_and_test():
         train, fusion, test = fold.masks(dates)
         assert dates[train].max() + 5 < dates[fusion].min()
         assert dates[fusion].max() + 5 < dates[test].min()
+
+
+def test_combination_scores_supports_explicit_window_candidates():
+    predictions = np.array([[0.1, 0.3, 0.8], [0.6, 0.5, 0.4]])
+    weights = np.array([0.2, 0.3, 0.5])
+    scores = combination_scores(
+        predictions,
+        weights,
+        candidate_names=("long", "short252", "short504"),
+    )
+    np.testing.assert_allclose(scores["temporal"], predictions @ weights)
+    np.testing.assert_allclose(
+        scores["equal_without_short252"],
+        predictions[:, [0, 2]].mean(axis=1),
+    )
+
+
+def test_recent_session_mask_uses_only_latest_complete_training_sessions():
+    dates = np.repeat(np.arange(10, 20), 2)
+    train = dates < 18
+    selected = recent_session_mask(dates, train, 3)
+    np.testing.assert_array_equal(np.unique(dates[selected]), [15, 16, 17])
+    with pytest.raises(ValueError, match="WINDOW_SUPPORT"):
+        recent_session_mask(dates, train, 9)

@@ -78,15 +78,25 @@ def temporal_fusion_weights(
 
 
 def combination_scores(
-    normalized_predictions: np.ndarray, weights: np.ndarray
+    normalized_predictions: np.ndarray,
+    weights: np.ndarray,
+    *,
+    candidate_names: tuple[str, ...] = CANDIDATES,
 ) -> dict[str, np.ndarray]:
+    if (
+        normalized_predictions.ndim != 2
+        or normalized_predictions.shape[1] != len(candidate_names)
+        or weights.shape != (len(candidate_names),)
+        or len(set(candidate_names)) != len(candidate_names)
+    ):
+        raise QuantModelError("COMBINATION_CANDIDATES_INVALID")
     scores = {
         name: normalized_predictions[:, index]
-        for index, name in enumerate(CANDIDATES)
+        for index, name in enumerate(candidate_names)
     }
     scores["equal"] = normalized_predictions.mean(axis=1)
     scores["temporal"] = normalized_predictions @ weights
-    for index, name in enumerate(CANDIDATES):
+    for index, name in enumerate(candidate_names):
         scores[f"equal_without_{name}"] = np.delete(
             normalized_predictions, index, axis=1
         ).mean(axis=1)
