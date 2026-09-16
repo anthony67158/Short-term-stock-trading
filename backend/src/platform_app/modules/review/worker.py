@@ -17,10 +17,21 @@ from platform_app.modules.review.models import (
     ImprovementProposal,
     ReviewReport,
 )
+from platform_app.modules.review.strategy_agent import (
+    StrategyAgentFailure,
+    run_strategy_agent,
+)
+from platform_app.modules.review.strategy_compiler import (
+    StrategyCompilationError,
+    compile_strategy_proposal,
+)
 
 
 def process_one() -> bool:
-    job = jobs.claim(["DAILY_REVIEW"], lease_seconds=330)
+    job = jobs.claim(
+        ["DAILY_REVIEW", "STRATEGY_PROPOSAL"],
+        lease_seconds=330,
+    )
     if not job:
         return False
     if datetime.fromisoformat(job.payload["deadline"]) <= utcnow():
@@ -28,6 +39,21 @@ def process_one() -> bool:
         return True
     if not jobs.mark_external(job):
         jobs.finish(job)
+        return True
+    if job.kind == "STRATEGY_PROPOSAL":
+        try:
+            output = run_strategy_agent(job.payload)
+        except StrategyAgentFailure as exc:
+            jobs.finish(job, error=str(exc))
+            return True
+
+        def publish_strategy(db, current):
+            return compile_strategy_proposal(db, current, output)
+
+        try:
+            jobs.finish(job, publish=publish_strategy)
+        except StrategyCompilationError as exc:
+            jobs.finish(job, error=str(exc))
         return True
     try:
         output = run_review_agent(job.payload)

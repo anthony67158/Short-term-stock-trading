@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Literal
 
-from pydantic import AwareDatetime, Field
+from pydantic import AwareDatetime, Field, JsonValue, model_validator
 
 from platform_app.contracts.base import Contract
 
@@ -103,3 +103,31 @@ class ReviewCapability(Contract):
     available: bool
     model: str
     reason: str | None
+
+
+class StrategyCompilationInput(Contract):
+    base_strategy_version_id: str | None = Field(
+        default=None,
+        min_length=32,
+        max_length=32,
+    )
+
+
+class StrategyAgentOutput(Contract):
+    status: Literal["PROPOSED", "REJECTED"]
+    rationale: str = Field(min_length=1, max_length=1200)
+    parameter_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=120,
+    )
+    candidate_value: JsonValue | None = None
+
+    @model_validator(mode="after")
+    def terminal_shape(self):
+        proposed = self.status == "PROPOSED"
+        if proposed != (self.parameter_id is not None):
+            raise ValueError("提案状态与参数不一致")
+        if proposed != (self.candidate_value is not None):
+            raise ValueError("提案状态与参数值不一致")
+        return self

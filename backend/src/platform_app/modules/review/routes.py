@@ -11,6 +11,7 @@ from platform_app.modules.review.contracts import (
     ReviewCapability,
     ReviewReportPage,
     ReviewRunInput,
+    StrategyCompilationInput,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["review"])
@@ -52,3 +53,26 @@ def list_reviews(
     limit: Annotated[int, Query(ge=1, le=100)] = 30,
 ):
     return Envelope(data=service.reports(user.id, limit))
+
+
+@router.post(
+    "/improvement-proposals/{proposal_id}/compilations",
+    response_model=Envelope[JobView],
+    status_code=202,
+)
+def compile_improvement_proposal(
+    proposal_id: str,
+    body: StrategyCompilationInput,
+    user: CurrentUser,
+    key: CommandKey,
+):
+    return Envelope(
+        data=job_view(
+            service.submit_strategy_compilation(
+                user.id,
+                proposal_id,
+                body,
+                key,
+            )
+        )
+    )

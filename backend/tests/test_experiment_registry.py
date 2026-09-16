@@ -183,6 +183,57 @@ def test_four_way_ablation_uses_same_outcomes_and_discloses_comparators():
     assert result.comparator_policy["FORMULA"] == "HOLD_EXISTING_POSITION_V1"
 
 
+def test_ablation_applies_compiled_add_gate_without_changing_outcomes():
+    strategy = StrategyVersion(
+        config={
+            "experimentParameters": {
+                "minimumExpectedDeltaForAdd": "0.010",
+            }
+        },
+        dataset={"dataset_id": "prospective-v1", "sha256": "a" * 64},
+        confirmation_set_id="confirmation-v1",
+        minimum_effective_samples=1,
+    )
+    sample = SimpleNamespace(
+        scenario={"selectedAction": "ADD"},
+        quant_prediction={
+            "values": [
+                {
+                    "action": "HOLD",
+                    "expectedDeltaReturnVsHold": "0",
+                },
+                {
+                    "action": "ADD",
+                    "expectedDeltaReturnVsHold": "0.005",
+                },
+            ]
+        },
+        agent_features={
+            "thesisStatus": "SUPPORTED",
+            "uncertaintyCount": 0,
+            "evidenceCount": 2,
+        },
+    )
+    outcome = SimpleNamespace(
+        simulation_outcome={
+            "actionNetReturns": {
+                "HOLD": "0.01",
+                "ADD": "-0.02",
+                "REDUCE": "0",
+                "EXIT": "-0.01",
+            }
+        }
+    )
+
+    result = service.evaluate_four_way_ablation(
+        [(sample, outcome)],
+        strategy,
+    )
+
+    assert result.variants["JOINT"].mean_net_return == "0.01000000"
+    assert result.variants["NO_AGENT"].mean_net_return == "-0.02000000"
+
+
 def test_candidate_registration_keeps_release_history(
     owner,
     tmp_path,

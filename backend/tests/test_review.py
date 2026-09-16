@@ -4,10 +4,11 @@ from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from platform_app.adapters.database import sessions
 from platform_app.contracts.base import new_id, utcnow
+from platform_app.modules.experiments.models import StrategyVersion
 from platform_app.modules.identity.models import User
 from platform_app.modules.operations.models import Job, Outbox
 from platform_app.modules.review import service, worker
@@ -15,10 +16,20 @@ from platform_app.modules.review.agent import (
     ReviewAgentFailure,
     validate_output,
 )
-from platform_app.modules.review.contracts import ReviewAgentOutput
+from platform_app.modules.review.contracts import (
+    ReviewAgentOutput,
+    StrategyAgentOutput,
+)
 from platform_app.modules.review.models import (
     ImprovementProposal,
     ReviewReport,
+)
+from platform_app.modules.review.strategy_agent import (
+    StrategyAgentFailure,
+    validate_output as validate_strategy_output,
+)
+from platform_app.modules.review.strategy_compiler import (
+    compile_strategy_proposal,
 )
 
 
@@ -182,6 +193,37 @@ def test_review_agent_rejects_unsourced_references_and_numbers():
         )
 
 
+def test_strategy_agent_rejects_unregistered_parameter_values():
+    payload = {
+        "allowedParameters": {
+            "minimumExpectedDeltaForAdd": {
+                "allowedValues": ["0.005", "0.010"],
+            }
+        }
+    }
+    valid = {
+        "status": "PROPOSED",
+        "rationale": "提高加仓收益要求并在确认集验证。",
+        "parameter_id": "minimumExpectedDeltaForAdd",
+        "candidate_value": "0.010",
+    }
+    assert validate_strategy_output(
+        json.dumps(valid, ensure_ascii=False),
+        payload,
+    ).candidate_value == "0.010"
+    with pytest.raises(
+        StrategyAgentFailure,
+        match="STRATEGY_PARAMETER_NOT_ALLOWED",
+    ):
+        validate_strategy_output(
+            json.dumps(
+                {**valid, "candidate_value": "DROP TABLE"},
+                ensure_ascii=False,
+            ),
+            payload,
+        )
+
+
 def test_review_worker_publishes_report_and_linked_proposal(monkeypatch):
     owner_id = new_id()
     job_id = new_id()
@@ -280,6 +322,107 @@ def test_review_worker_publishes_report_and_linked_proposal(monkeypatch):
     assert report.proposals[0].source_sample_ids == [sample_id]
     assert report.proposals[0].status == "DRAFT"
 
+    now = utcnow()
+    strategy_id = new_id()
+    strategy_job_id = new_id()
+    with sessions().begin() as db:
+        db.add(
+            StrategyVersion(
+                id=strategy_id,
+                owner_id=owner_id,
+                strategy_key="joint-review-test",
+                version=1,
+                status="EVALUATED",
+                name="联合策略基线",
+                hypothesis="量化与Agent联合改善费后收益",
+                scope={
+                    "market": "ALL_A_SHARES",
+                    "horizon": "5_SESSIONS",
+                },
+                config={"decisionPolicyVersion": "position-decision.v1"},
+                dataset={
+                    "dataset_id": "market-v1",
+                    "sha256": "b" * 64,
+                },
+                split={
+                    "train_end": "20230109",
+                    "calibration_start": "20230117",
+                    "calibration_end": "20240805",
+                    "confirmation_start": "20240813",
+                    "confirmation_end": "20260908",
+                    "embargo_sessions": 5,
+                },
+                release_policy={"minimumEffectiveSamples": 1},
+                fee_policy_version="fees-v1",
+                risk_policy_version="risk-v1",
+                simulation_policy_version="position-outcome.v1",
+                confirmation_set_id="confirmation-v1",
+                minimum_effective_samples=1,
+                config_hash="c" * 64,
+                request_key=new_id(),
+                request_hash="c" * 64,
+                revision=2,
+                frozen_at=now,
+                evaluated_at=now,
+            )
+        )
+        proposal = db.scalar(
+            select(ImprovementProposal).where(
+                ImprovementProposal.owner_id == owner_id
+            )
+        )
+        strategy_payload = {
+            "proposal": {
+                "proposalId": proposal.id,
+                "changeType": proposal.change_type,
+                "direction": proposal.direction,
+            },
+            "baseStrategy": {"id": strategy_id},
+            "allowedParameters": {
+                "minimumExpectedDeltaForAdd": {
+                    "allowedValues": ["0.005", "0.010"],
+                }
+            },
+        }
+        db.add(
+            Job(
+                id=strategy_job_id,
+                owner_id=owner_id,
+                kind="STRATEGY_PROPOSAL",
+                business_key=new_id(),
+                input_hash="d" * 64,
+                payload=strategy_payload,
+            )
+        )
+    strategy_output = StrategyAgentOutput(
+        status="PROPOSED",
+        rationale="提高加仓收益要求后再进行确认集检验。",
+        parameter_id="minimumExpectedDeltaForAdd",
+        candidate_value="0.010",
+    )
+    with sessions().begin() as db:
+        result = compile_strategy_proposal(
+            db,
+            db.get(Job, strategy_job_id),
+            strategy_output,
+        )
+    assert result["status"] == "COMPILED"
+    with sessions()() as db:
+        proposal = db.scalar(
+            select(ImprovementProposal).where(
+                ImprovementProposal.owner_id == owner_id
+            )
+        )
+        strategy = db.get(
+            StrategyVersion,
+            proposal.compiled_strategy_version_id,
+        )
+        assert proposal.status == "COMPILED"
+        assert strategy.status == "DRAFT"
+        assert strategy.config["experimentParameters"] == {
+            "minimumExpectedDeltaForAdd": "0.010"
+        }
+
     with sessions().begin() as db:
         db.execute(
             delete(ImprovementProposal).where(
@@ -289,6 +432,11 @@ def test_review_worker_publishes_report_and_linked_proposal(monkeypatch):
         db.execute(
             delete(ReviewReport).where(
                 ReviewReport.owner_id == owner_id
+            )
+        )
+        db.execute(
+            delete(StrategyVersion).where(
+                StrategyVersion.owner_id == owner_id
             )
         )
         db.execute(delete(Outbox).where(Outbox.owner_id == owner_id))

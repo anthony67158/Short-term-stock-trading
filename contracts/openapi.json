@@ -3411,6 +3411,69 @@
         }
       }
     },
+    "/api/v1/improvement-proposals/{proposal_id}/compilations": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Compile Improvement Proposal",
+        "operationId": "compile_improvement_proposal_api_v1_improvement_proposals__proposal_id__compilations_post",
+        "parameters": [
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Proposal Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyCompilationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope_JobView_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -9135,6 +9198,26 @@
           "embargoSessions"
         ],
         "title": "SplitContract"
+      },
+      "StrategyCompilationInput": {
+        "properties": {
+          "baseStrategyVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 32
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Basestrategyversionid"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "StrategyCompilationInput"
       },
       "StrategyVersionInput": {
         "properties": {

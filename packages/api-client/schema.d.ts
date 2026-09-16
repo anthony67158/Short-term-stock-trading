@@ -933,6 +933,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/improvement-proposals/{proposal_id}/compilations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Compile Improvement Proposal */
+        post: operations["compile_improvement_proposal_api_v1_improvement_proposals__proposal_id__compilations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -2895,6 +2912,11 @@ export interface components {
             confirmationEnd: string;
             /** Embargosessions */
             embargoSessions: number;
+        };
+        /** StrategyCompilationInput */
+        StrategyCompilationInput: {
+            /** Basestrategyversionid */
+            baseStrategyVersionId?: string | null;
         };
         /** StrategyVersionInput */
         StrategyVersionInput: {
@@ -5215,6 +5237,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Envelope_ReviewReportPage_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compile_improvement_proposal_api_v1_improvement_proposals__proposal_id__compilations_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                proposal_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyCompilationInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Envelope_JobView_"];
                 };
             };
             /** @description Validation Error */

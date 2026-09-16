@@ -9,6 +9,7 @@ from platform_app.adapters.database import sessions
 from platform_app.config import settings
 from platform_app.contracts.base import utcnow
 from platform_app.modules.identity.models import User
+from platform_app.modules.experiments.models import StrategyVersion
 from platform_app.modules.learning.models import (
     ProspectiveOutcome,
     ProspectiveSample,
@@ -24,11 +25,13 @@ from platform_app.modules.review.contracts import (
     ReviewReportPage,
     ReviewReportView,
     ReviewRunInput,
+    StrategyCompilationInput,
 )
 from platform_app.modules.review.models import (
     ImprovementProposal,
     ReviewReport,
 )
+from platform_app.modules.review.strategy_agent import allowed_parameters
 
 
 class ReviewError(ValueError):
@@ -510,3 +513,144 @@ def reports(owner_id: str, limit: int) -> ReviewReportPage:
         return ReviewReportPage(
             reports=[_report_view(db, row) for row in rows]
         )
+
+
+def submit_strategy_compilation(
+    owner_id: str,
+    proposal_id: str,
+    body: StrategyCompilationInput,
+    key: str,
+) -> Job:
+    config = settings()
+    now = utcnow()
+    if not capability().available:
+        raise ReviewError(
+            "AGENT_UNAVAILABLE",
+            "策略推理服务尚未启用",
+            503,
+        )
+    request_hash = hashlib.sha256(
+        (
+            proposal_id
+            + "\0"
+            + body.model_dump_json(exclude_none=True)
+        ).encode()
+    ).hexdigest()
+    with sessions().begin() as db:
+        db.execute(select(func.pg_advisory_xact_lock(618051020)))
+        db.scalar(select(User).where(User.id == owner_id).with_for_update())
+        existing = db.scalar(
+            select(Job).where(
+                Job.owner_id == owner_id,
+                Job.kind == "STRATEGY_PROPOSAL",
+                Job.business_key == key,
+            )
+        )
+        if existing:
+            if existing.input_hash != request_hash:
+                raise ReviewError(
+                    "IDEMPOTENCY_CONFLICT",
+                    "同一请求编号对应不同实验提案",
+                    409,
+                )
+            return existing
+        proposal = db.scalar(
+            select(ImprovementProposal)
+            .where(
+                ImprovementProposal.id == proposal_id,
+                ImprovementProposal.owner_id == owner_id,
+            )
+            .with_for_update()
+        )
+        if proposal is None:
+            raise ReviewError(
+                "IMPROVEMENT_PROPOSAL_NOT_FOUND",
+                "改进提案不存在或无权访问",
+                404,
+            )
+        if proposal.status != "DRAFT":
+            raise ReviewError(
+                "IMPROVEMENT_PROPOSAL_TERMINAL",
+                "改进提案已经编译或拒绝",
+                409,
+            )
+        strategy_query = select(StrategyVersion).where(
+            StrategyVersion.owner_id == owner_id,
+            StrategyVersion.status.in_(["FROZEN", "EVALUATED"]),
+        )
+        if body.base_strategy_version_id:
+            strategy_query = strategy_query.where(
+                StrategyVersion.id
+                == body.base_strategy_version_id
+            )
+        strategy = db.scalar(
+            strategy_query.order_by(
+                StrategyVersion.version.desc(),
+                StrategyVersion.id.desc(),
+            ).limit(1)
+        )
+        if strategy is None:
+            raise ReviewError(
+                "BASE_STRATEGY_NOT_FOUND",
+                "没有可用于实验的冻结基线策略",
+                409,
+            )
+        allowed = allowed_parameters(
+            proposal.change_type,
+            proposal.direction,
+        )
+        if not allowed:
+            raise ReviewError(
+                "PROPOSAL_PARAMETER_UNSUPPORTED",
+                "当前提案方向没有已注册的安全实验参数",
+                422,
+            )
+        recent = db.scalar(
+            select(func.count())
+            .select_from(Job)
+            .where(
+                Job.owner_id == owner_id,
+                Job.kind.in_(
+                    ["RESEARCH", "DAILY_REVIEW", "STRATEGY_PROPOSAL"]
+                ),
+                Job.created_at >= now - timedelta(hours=24),
+            )
+        )
+        if recent >= config.agent_daily_call_limit:
+            raise ReviewError(
+                "STRATEGY_AGENT_BUDGET_EXCEEDED",
+                "已达到24小时Agent调用上限",
+                429,
+            )
+        payload = {
+            "proposal": {
+                "proposalId": proposal.id,
+                "title": proposal.title,
+                "hypothesis": proposal.hypothesis,
+                "changeType": proposal.change_type,
+                "direction": proposal.direction,
+                "sourceSampleIds": proposal.source_sample_ids,
+            },
+            "baseStrategy": {
+                "id": strategy.id,
+                "strategyKey": strategy.strategy_key,
+                "version": strategy.version,
+                "config": strategy.config,
+            },
+            "allowedParameters": allowed,
+            "protocolVersion": "strategy-agent.v1",
+            "model": config.agent_model,
+            "asOf": now.isoformat(),
+            "deadline": (now + timedelta(minutes=5)).isoformat(),
+        }
+        job = Job(
+            owner_id=owner_id,
+            kind="STRATEGY_PROPOSAL",
+            business_key=key,
+            input_hash=request_hash,
+            priority=20,
+            payload=payload,
+        )
+        db.add(job)
+        db.flush()
+        return job

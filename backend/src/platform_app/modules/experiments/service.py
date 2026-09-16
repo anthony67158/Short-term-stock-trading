@@ -25,6 +25,9 @@ from platform_app.modules.learning.models import (
     ProspectiveSample,
 )
 from platform_app.modules.operations.models import Outbox
+from platform_app.modules.review.strategy_agent import (
+    EXPERIMENT_PARAMETER_REGISTRY,
+)
 
 VARIANTS = ("JOINT", "NO_AGENT", "NO_QUANT", "FORMULA")
 NO_QUANT_ACTIONS = {
@@ -220,8 +223,110 @@ def _quant_action(sample: ProspectiveSample) -> str | None:
     return max(candidates)[2] if candidates else None
 
 
-def _sample_actions(sample: ProspectiveSample) -> dict[str, str] | None:
+def _value_field(
+    sample: ProspectiveSample,
+    action: str,
+    snake_name: str,
+    camel_name: str,
+) -> object:
+    values = sample.quant_prediction.get("values")
+    if not isinstance(values, list):
+        return None
+    for value in values:
+        if isinstance(value, dict) and value.get("action") == action:
+            return value.get(snake_name, value.get(camel_name))
+    return None
+
+
+def _candidate_joint_action(
+    sample: ProspectiveSample,
+    strategy: StrategyVersion,
+) -> str | None:
     joint = _action_name(sample.scenario.get("selectedAction"))
+    if joint != "ADD":
+        return joint
+    parameters = (getattr(strategy, "config", None) or {}).get(
+        "experimentParameters",
+        {},
+    )
+    if not isinstance(parameters, dict) or any(
+        key not in EXPERIMENT_PARAMETER_REGISTRY
+        or value
+        not in EXPERIMENT_PARAMETER_REGISTRY[key]["allowedValues"]
+        for key, value in parameters.items()
+    ):
+        return None
+    try:
+        expected = Decimal(
+            str(
+                _value_field(
+                    sample,
+                    "ADD",
+                    "expected_delta_return_vs_hold",
+                    "expectedDeltaReturnVsHold",
+                )
+            )
+        )
+        uncertainty_count = int(
+            sample.agent_features.get("uncertaintyCount", 0)
+        )
+        evidence_count = int(
+            sample.agent_features.get("evidenceCount", 0)
+        )
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if not expected.is_finite():
+        return None
+    if "minimumExpectedDeltaForAdd" in parameters and expected < Decimal(
+        parameters["minimumExpectedDeltaForAdd"]
+    ):
+        return "HOLD"
+    if (
+        "maximumAgentUncertaintyCountForAdd" in parameters
+        and uncertainty_count
+        > parameters["maximumAgentUncertaintyCountForAdd"]
+    ):
+        return "HOLD"
+    if (
+        "minimumAgentEvidenceCountForAdd" in parameters
+        and evidence_count < parameters["minimumAgentEvidenceCountForAdd"]
+    ):
+        return "HOLD"
+    for parameter_id, snake_name, camel_name in (
+        ("maximumStopHazardForAdd", "stop_hazard", "stopHazard"),
+        ("minimumExecutionSupportForAdd", "support", "support"),
+    ):
+        if parameter_id not in parameters:
+            continue
+        raw = _value_field(
+            sample,
+            "ADD",
+            snake_name,
+            camel_name,
+        )
+        try:
+            value = Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            return "HOLD"
+        if not value.is_finite():
+            return "HOLD"
+        threshold = Decimal(parameters[parameter_id])
+        if (
+            parameter_id == "maximumStopHazardForAdd"
+            and value > threshold
+        ) or (
+            parameter_id == "minimumExecutionSupportForAdd"
+            and value < threshold
+        ):
+            return "HOLD"
+    return joint
+
+
+def _sample_actions(
+    sample: ProspectiveSample,
+    strategy: StrategyVersion,
+) -> dict[str, str] | None:
+    joint = _candidate_joint_action(sample, strategy)
     no_agent = _quant_action(sample)
     thesis = sample.agent_features.get("thesisStatus")
     no_quant = NO_QUANT_ACTIONS.get(thesis)
@@ -301,7 +406,7 @@ def evaluate_four_way_ablation(
     formula_values: list[Decimal] = []
     exclusions = Counter()
     for sample, outcome in rows:
-        actions = _sample_actions(sample)
+        actions = _sample_actions(sample, strategy)
         if actions is None:
             exclusions["INPUT_CONTRACT_INCOMPLETE"] += 1
             continue
