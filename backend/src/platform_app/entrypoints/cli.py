@@ -48,6 +48,7 @@ def main():
             "build-episode-dataset",
             "build-label-dataset",
             "build-ranking-dataset",
+            "train-quant-model",
         ],
     )
     parser.add_argument("--username")
@@ -59,10 +60,12 @@ def main():
     parser.add_argument("--episode-root", type=Path)
     parser.add_argument("--label-root", type=Path)
     parser.add_argument("--ranking-root", type=Path)
+    parser.add_argument("--model-root", type=Path)
     parser.add_argument("--dataset-id")
     parser.add_argument("--episode-dataset-id")
     parser.add_argument("--label-dataset-id")
     parser.add_argument("--ranking-dataset-id")
+    parser.add_argument("--model-bundle-id")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
     parser.add_argument(
@@ -88,6 +91,7 @@ def main():
     parser.add_argument("--resolution-note")
     parser.add_argument("--max-windows", type=positive_int)
     parser.add_argument("--max-sessions", type=positive_int, default=120)
+    parser.add_argument("--max-iterations", type=positive_int, default=120)
     parser.add_argument("--sample", action="append", type=cross_source_sample)
     args = parser.parse_args()
     if args.command == "export-contracts":
@@ -288,6 +292,45 @@ def main():
                                 ),
                                 flush=True,
                             )
+    elif args.command == "train-quant-model":
+        from platform_app.modules.experiments.quant_model_trainer import (
+            load_training_data,
+            write_quant_bundle,
+        )
+
+        if not all(
+            (
+                args.episode_root,
+                args.label_root,
+                args.model_root,
+                args.model_bundle_id,
+            )
+        ):
+            parser.error(
+                "episode-root, label-root, model-root and model-bundle-id are required"
+            )
+        try:
+            episode_root = external_dataset_root(args.episode_root)
+            label_root = external_dataset_root(args.label_root)
+            model_root = external_dataset_root(args.model_root)
+        except ValueError as exc:
+            parser.error(str(exc))
+        data, lineage = load_training_data(
+            episode_dataset_root=episode_root,
+            label_dataset_root=label_root,
+        )
+        print(
+            json.dumps(
+                write_quant_bundle(
+                    output_root=model_root,
+                    bundle_id=args.model_bundle_id,
+                    data=data,
+                    lineage=lineage,
+                    max_iter=args.max_iterations,
+                ),
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "build-ranking-dataset":
         from platform_app.modules.experiments.ranking_dataset import RankingDataset
 
