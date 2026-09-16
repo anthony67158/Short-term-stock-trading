@@ -75,14 +75,47 @@ class MinuteRequirementFetcher:
             f"{instrument_filter}{reason_filter} ORDER BY instrument_id, trade_date",
             parameters,
         ).fetchall()
-        by_instrument: dict[str, list[str]] = defaultdict(list)
+        canonical_codes = {
+            row["instrument_id"]: row["source_code"]
+            for row in self.market.execute(
+                "SELECT instrument_id, source_code FROM instruments"
+            )
+        }
+        aliases: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for row in self.market.execute(
+            "SELECT instrument_id, source_code, effective_from, effective_to "
+            "FROM instrument_aliases ORDER BY instrument_id, effective_from"
+        ):
+            aliases[row["instrument_id"]].append(row)
+
+        by_instrument_source: dict[tuple[str, str], list[str]] = defaultdict(list)
         for row in pending:
             if row["trade_date"] not in date_indexes:
                 raise ValueError("MINUTE_REQUIREMENT_DATE_NOT_OPEN")
-            by_instrument[row["instrument_id"]].append(row["trade_date"])
+            if row["instrument_id"] not in canonical_codes:
+                raise ValueError("UNKNOWN_INSTRUMENT")
+            matching_aliases = [
+                alias["source_code"]
+                for alias in aliases[row["instrument_id"]]
+                if alias["effective_from"] <= row["trade_date"]
+                and (
+                    alias["effective_to"] is None
+                    or row["trade_date"] <= alias["effective_to"]
+                )
+            ]
+            if len(matching_aliases) > 1:
+                raise ValueError("MINUTE_SOURCE_ALIAS_AMBIGUOUS")
+            source_code = (
+                matching_aliases[0]
+                if matching_aliases
+                else canonical_codes[row["instrument_id"]]
+            )
+            by_instrument_source[(row["instrument_id"], source_code)].append(
+                row["trade_date"]
+            )
 
         windows = []
-        for instrument_id, dates in by_instrument.items():
+        for (instrument_id, source_code), dates in by_instrument_source.items():
             remaining = dates
             while remaining:
                 first_index = date_indexes[remaining[0]]
@@ -92,6 +125,7 @@ class MinuteRequirementFetcher:
                 windows.append(
                     {
                         "instrumentId": instrument_id,
+                        "sourceCode": source_code,
                         "startDate": open_dates[first_index],
                         "endDate": window_end,
                         "requiredDates": required_dates,
@@ -117,13 +151,7 @@ class MinuteRequirementFetcher:
 
     def fetch_window(self, window: dict) -> dict:
         instrument_id = window["instrumentId"]
-        source_code = self.market.execute(
-            "SELECT source_code FROM instruments WHERE instrument_id = ?",
-            (instrument_id,),
-        ).fetchone()
-        if not source_code:
-            raise ValueError("UNKNOWN_INSTRUMENT")
-        source_code = source_code["source_code"]
+        source_code = window["sourceCode"]
         start = self._api_time(window["startDate"], "09:30:00")
         end = self._api_time(window["endDate"], "15:00:00")
         params = {"ts_code": source_code, "freq": "5min", "start_date": start, "end_date": end}

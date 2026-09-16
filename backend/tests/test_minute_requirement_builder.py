@@ -26,7 +26,7 @@ from platform_app.modules.experiments.minute_requirement_fetcher import (
 from platform_app.modules.experiments.short_horizon_policy import SHORT_HORIZON_POLICY
 
 
-def _sealed_market(tmp_path):
+def _sealed_market(tmp_path, *, aliases=None):
     root = tmp_path / "market"
     dates = [f"2026010{day}" for day in range(1, 8)]
     with MarketDataset(
@@ -48,6 +48,8 @@ def _sealed_market(tmp_path):
         }
         instrument["sourceRowSha256"] = canonical_sha256(instrument)
         market.write_instruments([instrument])
+        if aliases:
+            market.write_aliases(aliases)
         market.write_facts(
             "trade_calendar",
             [
@@ -613,6 +615,38 @@ def test_fetcher_can_retry_only_selected_rejection_reasons(tmp_path):
             (dates[1], "COMPLETED", None),
             (dates[2], "PENDING", "KEEP_PENDING"),
         ]
+
+
+def test_fetcher_splits_windows_at_historical_source_alias(tmp_path):
+    dates = [f"2026010{day}" for day in range(1, 8)]
+    alias = {
+        "sourceCode": "000002.SZ",
+        "instrumentId": "SZ.000001",
+        "effectiveFrom": dates[1],
+        "effectiveTo": dates[1],
+        "reason": "TEST_CODE_MIGRATION",
+        "source": "TEST",
+        "sourceUrlsJson": "[]",
+        "availableAt": "2026-01-01T16:30:00+08:00",
+        "sourceRowSha256": canonical_sha256({"alias": "000002.SZ"}),
+    }
+    market_root, dates = _sealed_market(tmp_path, aliases=[alias])
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        with MinuteRequirementFetcher(_MinuteClient([]), dataset) as fetcher:
+            windows = fetcher.pending_windows(dates[1], dates[2])
+
+    assert [(row["sourceCode"], row["requiredDates"]) for row in windows] == [
+        ("000002.SZ", [dates[1]]),
+        ("000001.SZ", [dates[2]]),
+    ]
 
 
 def test_fetcher_records_upstream_failure_and_can_resume(tmp_path):
