@@ -182,6 +182,11 @@ def test_builder_syncs_paginated_name_changes_with_historical_availability(tmp_p
             "start_date": "20260916",
             "ann_date": "20260915",
         },
+        {
+            **current,
+            "ts_code": "X19363.SH",
+            "name": "Non A Share",
+        },
     ]
 
     with MarketDataset(
@@ -194,6 +199,7 @@ def test_builder_syncs_paginated_name_changes_with_historical_availability(tmp_p
             "status": "COMPLETED",
             "nameChanges": 1,
             "discardedExactDuplicates": 1,
+            "discardedUnknownInstruments": 1,
             "discardedAliasDuplicates": 0,
         }
         assert builder.sync_name_changes("20160101", "20260915") == {"status": "SKIPPED"}

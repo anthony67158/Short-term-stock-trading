@@ -425,8 +425,17 @@ class MarketDatasetBuilder:
             row["instrument_id"]
             for row in self.dataset.db.execute("SELECT instrument_id FROM instruments")
         }
+        known_source_codes = {
+            row["source_code"]
+            for row in self.dataset.db.execute("SELECT source_code FROM instruments")
+        }
         normalized = []
+        unknown_instruments = []
         for row in raw_rows:
+            source_code = str(row.get("ts_code") or "").upper()
+            if source_code not in known_source_codes and source_code not in aliases:
+                unknown_instruments.append(row)
+                continue
             effective_date = max(
                 str(row.get("start_date") or ""),
                 str(row.get("ann_date") or ""),
@@ -463,6 +472,7 @@ class MarketDatasetBuilder:
             details={
                 "rawRows": len(raw_rows) + len(exact_duplicates),
                 "discardedExactDuplicates": _discard_audit(exact_duplicates),
+                "discardedUnknownInstruments": _discard_audit(unknown_instruments),
                 "discardedAliasDuplicates": _discard_audit(alias_duplicates),
             },
         )
@@ -470,6 +480,7 @@ class MarketDatasetBuilder:
             "status": "COMPLETED",
             "nameChanges": len(normalized),
             "discardedExactDuplicates": len(exact_duplicates),
+            "discardedUnknownInstruments": len(unknown_instruments),
             "discardedAliasDuplicates": len(alias_duplicates),
         }
 
