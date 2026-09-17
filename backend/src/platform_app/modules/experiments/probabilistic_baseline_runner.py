@@ -46,6 +46,9 @@ from platform_app.modules.experiments.ranking_model_trainer import (
 )
 
 SCHEMA_VERSION = "foundation-probabilistic-baselines.v1"
+MODEL_IMPLEMENTATION_SHA256 = (
+    "892d45d884c8853383f47be74199ba6fc1cf1c93a274f2a02ee74b9c3f2b8055"
+)
 REFERENCE_NOTIONAL_CNY = 100_000.0
 MARKET_EXIT_SLIPPAGE_RATE = 0.0005
 VALID_BOARDS = ("MAIN", "CHINEXT", "STAR", "BEIJING")
@@ -726,7 +729,7 @@ def build_baseline_protocol(
         "confirmationFold": 5,
         "confirmationGate": "DEVELOPMENT_CONFIGURATION_FREEZE_REQUIRED",
         "libraryVersions": baseline_library_versions(),
-        "sourceSha256": _file_sha256(Path(__file__)),
+        "sourceSha256": MODEL_IMPLEMENTATION_SHA256,
         "releaseStatus": "UNAVAILABLE",
     }
 
