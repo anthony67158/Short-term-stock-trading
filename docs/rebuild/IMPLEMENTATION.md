@@ -1472,3 +1472,11 @@ GitHub Actions 自动运行验收（2026-09-17 22:21）：
   `2454/2454`、Python 学习管道 `4/4`、Vite 生产构建和 FC 打包通过。本机 Chrome
   真实渲染验证 529/768/1440 视口无横向溢出，模型筛选和详情展开正常，控制台
   error/warning 为 0。
+- PR #6 已以 squash commit `3877c63` 合并到 `main`，Vercel 与 FC 已从同一源码
+  重新部署。FC 直连 `/api/model_training?limit=20` 返回
+  `model-training-center.v1`：4 个有运行记录的模型、20 条限量运行，
+  `dailyLearning`、`legacyReports`、`productionStatus` 三类来源均成功且无告警。
+- 生产授权浏览器只读验收通过：“模型设置 → 训练中心”显示 5 个模型、54 次完整
+  运行，最新记录默认展开，训练合同、指标、门禁、报告路径和哈希均可读取；
+  529px 视口横向溢出为 0，浏览器控制台 error/warning 为 0。主域普通未授权 HTTP
+  请求仍按现有入口保护返回 401，不影响已授权工作台从 FC 读取训练数据。
