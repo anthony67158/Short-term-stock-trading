@@ -2,9 +2,23 @@
 // 职责：把 LLM 在候选池内的精选结果规范化并逐项复校——只能选输入候选的 code，
 // 不得新增股票、不得改排序模型分。买入策略/时机为 Agent 的研判文本，价格边界只能
 // 引用候选自身 quote，不允许 Agent 编造执行价。不选时上层展示 Top 候选供参考。
+import {
+  STOCK_PICK_MODE,
+  normalizeStockPickMode,
+} from './stockPickModes.js'
 
-export const STOCK_PICK_AGENT_SCHEMA = 'stock-pick-agent.v1'
+export const STOCK_PICK_AGENT_SCHEMA = 'stock-pick-agent.v2'
 export const STOCK_PICK_AGENT_MAX = 3
+
+export const STOCK_PICK_DECISION = Object.freeze({
+  BUY_NOW: 'BUY_NOW',
+  WAIT_TRIGGER: 'WAIT_TRIGGER',
+  LAYOUT_SMALL: 'LAYOUT_SMALL',
+  WATCH_NEXT_DAY: 'WATCH_NEXT_DAY',
+  REJECT: 'REJECT',
+})
+
+const DECISION_SET = new Set(Object.values(STOCK_PICK_DECISION))
 
 function clampText(value, maximum = 200) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, maximum)
@@ -35,8 +49,12 @@ export function normalizeStockPickAgentSelection(raw = {}, {
   candidateSet = [],
   agentModel = '',
   agentRunId = '',
+  mode = STOCK_PICK_MODE.INTRADAY,
+  trigger = 'MANUAL',
+  toolTrace = [],
   now = Date.now(),
 } = {}) {
+  const normalizedMode = normalizeStockPickMode(mode)
   const byCode = new Map(
     (Array.isArray(candidateSet) ? candidateSet : [])
       .filter((item) => /^\d{6}$/.test(String(item?.code || '')))
@@ -61,11 +79,21 @@ export function normalizeStockPickAgentSelection(raw = {}, {
         && buyPrice >= bandLow * 0.97 && buyPrice <= bandHigh * 1.03
       ) ? buyPrice : (price ?? null)
       if (!clampText(sel?.rationale)) return null
+      let decision = DECISION_SET.has(sel?.decision)
+        ? sel.decision
+        : STOCK_PICK_DECISION.WAIT_TRIGGER
+      if (
+        normalizedMode === STOCK_PICK_MODE.NEXT_DAY
+        && trigger === 'INITIAL'
+      ) {
+        decision = STOCK_PICK_DECISION.WATCH_NEXT_DAY
+      }
       seen.add(code)
       return {
         code,
         name: candidate.name,
         rank: 0,
+        decision,
         rationale: clampText(sel?.rationale, 200),
         // 买入策略：价格区间 + 仓位上限 + 分批说明（研判文本，不生成成交）。
         buyStrategy: {
@@ -84,6 +112,22 @@ export function normalizeStockPickAgentSelection(raw = {}, {
         },
         counterCase: clampText(sel?.counterCase, 160),
         invalidation: clampText(sel?.invalidation, 160),
+        evidence: (Array.isArray(sel?.evidence) ? sel.evidence : [])
+          .map((item) => ({
+            tool: clampText(item?.tool, 60),
+            summary: clampText(item?.summary, 160),
+          }))
+          .filter((item) => item.tool && item.summary)
+          .slice(0, 6),
+        // T+1 是服务端固定约束，不接受模型覆盖。
+        t1Plan: {
+          earliestSell: 'NEXT_TRADING_DAY',
+          rule: 'A股普通股票买入当日不可卖出',
+          overnightRisk: clampText(sel?.t1Plan?.overnightRisk, 160)
+            || '需承担买入日至下一交易日可卖前的隔夜风险',
+          nextDayAction: clampText(sel?.t1Plan?.nextDayAction, 160)
+            || clampText(sel?.timing?.nextSession, 160),
+        },
       }
     })
     .filter(Boolean)
@@ -93,13 +137,25 @@ export function normalizeStockPickAgentSelection(raw = {}, {
   return {
     schemaVersion: STOCK_PICK_AGENT_SCHEMA,
     availability: 'READY',
+    mode: normalizedMode,
+    trigger: clampText(trigger, 40) || 'MANUAL',
     conclusion: selections.length ? conclusion : 'NO_SELECTION',
     overallReason: clampText(raw?.overallReason, 200),
+    stageAssessment: clampText(raw?.stageAssessment, 240),
     selections,
     limitations: (Array.isArray(raw?.limitations) ? raw.limitations : [])
       .map((item) => clampText(item, 120)).filter(Boolean).slice(0, 4),
     agentModel: clampText(agentModel, 120),
     agentRunId: clampText(agentRunId, 80),
+    toolTrace: (Array.isArray(toolTrace) ? toolTrace : [])
+      .map((item) => ({
+        tool: clampText(item?.tool, 60),
+        code: clampText(item?.code, 12),
+        ok: item?.ok === true,
+        summary: clampText(item?.summary, 160),
+      }))
+      .filter((item) => item.tool)
+      .slice(0, 24),
     generatedAt: finite(now) || Date.now(),
   }
 }
@@ -107,15 +163,31 @@ export function normalizeStockPickAgentSelection(raw = {}, {
 export function unavailableStockPickAgentSelection({
   reasonCode = 'AGENT_UNAVAILABLE',
   reason = '选股 Agent 暂时不可用',
+  mode = STOCK_PICK_MODE.INTRADAY,
+  trigger = 'MANUAL',
+  agentRunId = '',
+  toolTrace = [],
   now = Date.now(),
 } = {}) {
   return {
     schemaVersion: STOCK_PICK_AGENT_SCHEMA,
     availability: 'UNAVAILABLE',
+    mode: normalizeStockPickMode(mode),
+    trigger: clampText(trigger, 40) || 'MANUAL',
     conclusion: 'NO_SELECTION',
     reasonCode: clampText(reasonCode, 60),
     reason: clampText(reason, 200),
     selections: [],
+    agentRunId: clampText(agentRunId, 80),
+    toolTrace: (Array.isArray(toolTrace) ? toolTrace : [])
+      .map((item) => ({
+        tool: clampText(item?.tool, 60),
+        code: clampText(item?.code, 12),
+        ok: item?.ok === true,
+        summary: clampText(item?.summary, 160),
+      }))
+      .filter((item) => item.tool)
+      .slice(0, 24),
     generatedAt: finite(now) || Date.now(),
   }
 }

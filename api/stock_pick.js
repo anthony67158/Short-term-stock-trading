@@ -23,9 +23,20 @@ import {
   topStockPickReferences,
   unavailableStockPickAgentSelection,
 } from '../shared/stockPickAgent.js'
+import {
+  STOCK_PICK_MODE,
+  STOCK_PICK_MODES,
+  appendStockPickTrace,
+  createStockPickTrace,
+  firstQuoteRecalculationCodes,
+  normalizeNextDaySelection,
+  normalizeStockPickMode,
+} from '../shared/stockPickModes.js'
+import { fetchQuotes } from './quote.js'
 import { randomUUID } from 'node:crypto'
 
 const runFlights = new Map()
+const modeIds = STOCK_PICK_MODES.map((item) => item.id)
 
 function reply(res, status, body) {
   res.status(status)
@@ -109,28 +120,207 @@ export async function handleStockPickAgent({
   store = stockPickStore,
   generate = generateStockPickAgentSelection,
   now = Date.now,
+  mode = STOCK_PICK_MODE.INTRADAY,
+  codes = [],
+  trigger = 'INITIAL',
+  scope = '',
 } = {}) {
+  const normalizedMode = normalizeStockPickMode(mode)
   const snapshot = await store.readLatest()
   if (!snapshot || snapshot.availability !== 'READY' || !snapshot.candidates?.length) {
     const selection = unavailableStockPickAgentSelection({
       reasonCode: 'NO_RECALL_SNAPSHOT',
       reason: '请先运行全市场召回',
+      mode: normalizedMode,
+      trigger,
       now: Number(now()) || Date.now(),
     })
-    await store.saveAgent(selection)
+    await store.saveAgent(selection, normalizedMode, scope)
     return { ok: true, selection, references: [] }
   }
-  const selection = await generate({
+  const startedAt = Number(now()) || Date.now()
+  const agentRunId = randomUUID()
+  const flightKey = `${scope || 'global'}:${normalizedMode}`
+  if (runFlights.has(flightKey)) return runFlights.get(flightKey)
+  const promise = (async () => {
+    const claim = await store.claimAgentRun({
+      mode: normalizedMode,
+      scope,
+      runKey: agentRunId,
+      now: startedAt,
+    })
+    if (!claim.acquired) {
+      return {
+        ok: true,
+        running: true,
+        selection: await store.readAgent(normalizedMode, scope),
+        progress: await store.readAgentProgress(normalizedMode, scope),
+        references: [],
+      }
+    }
+    let trace = createStockPickTrace({
+      mode: normalizedMode,
+      runId: agentRunId,
+      trigger,
+      now: startedAt,
+    })
+    await store.saveAgentProgress(trace, normalizedMode, scope)
+    const onTrace = async (event) => {
+      trace = appendStockPickTrace(
+        trace,
+        event,
+        Number(now()) || Date.now(),
+      )
+      await store.saveAgentProgress(trace, normalizedMode, scope)
+    }
+    try {
+      const selection = await generate({
+        snapshot,
+        mode: normalizedMode,
+        codes,
+        trigger,
+        agentRunId,
+        now: startedAt,
+        onTrace,
+      })
+      await store.saveAgent(selection, normalizedMode, scope)
+      if (trace.status === 'RUNNING') {
+        await onTrace({
+          type: selection.availability === 'READY' ? 'result' : 'error',
+          status: selection.availability === 'READY' ? 'done' : 'error',
+          stage: selection.availability === 'READY' ? 'DONE' : 'FAILED',
+          percent: 100,
+          runStatus: selection.availability === 'READY' ? 'DONE' : 'FAILED',
+          label: selection.availability === 'READY'
+            ? '选股研判完成'
+            : '选股研判不可用',
+          detail: selection.reason
+            || selection.stageAssessment
+            || selection.overallReason,
+        })
+      }
+      const references = (
+        selection.conclusion === 'SELECT'
+        && selection.selections.length
+      ) ? [] : topStockPickReferences(snapshot)
+      return { ok: true, selection, progress: trace, references }
+    } catch (error) {
+      const selection = unavailableStockPickAgentSelection({
+        reasonCode: 'AGENT_FAILED',
+        reason: String(error?.message || '选股 Agent 执行失败'),
+        mode: normalizedMode,
+        trigger,
+        agentRunId,
+        now: Number(now()) || Date.now(),
+      })
+      await store.saveAgent(selection, normalizedMode, scope)
+      await onTrace({
+        type: 'error',
+        status: 'error',
+        stage: 'FAILED',
+        percent: 100,
+        runStatus: 'FAILED',
+        label: '选股研判失败',
+        detail: selection.reason,
+      })
+      return { ok: true, selection, progress: trace, references: [] }
+    } finally {
+      await store.releaseAgentRun(normalizedMode, scope)
+    }
+  })().finally(() => {
+    if (runFlights.get(flightKey) === promise) runFlights.delete(flightKey)
+  })
+  runFlights.set(flightKey, promise)
+  return promise
+}
+
+export async function handleNextDaySelection({
+  store = stockPickStore,
+  codes = [],
+  scope = '',
+  now = Date.now,
+} = {}) {
+  const snapshot = await store.readLatest()
+  if (!snapshot || snapshot.availability !== 'READY') {
+    return {
+      ok: false,
+      errorCode: 'NO_RECALL_SNAPSHOT',
+      error: '请先运行全市场召回',
+    }
+  }
+  const previous = await store.readNextDaySelection(scope)
+  const selection = normalizeNextDaySelection({
+    codes,
     snapshot,
-    agentRunId: randomUUID(),
+    previous,
     now: Number(now()) || Date.now(),
   })
-  await store.saveAgent(selection)
-  // Agent 未选/不可用时，附 Top 候选供人工参考（明确标注未经 Agent 精选）。
-  const references = selection.conclusion === 'SELECT' && selection.selections.length
-    ? []
-    : topStockPickReferences(snapshot)
-  return { ok: true, selection, references }
+  await store.saveNextDaySelection(selection, scope)
+  return { ok: true, nextDaySelection: selection }
+}
+
+export async function handleNextDayRecalculation({
+  store = stockPickStore,
+  generate = generateStockPickAgentSelection,
+  fetchQuoteList = fetchQuotes,
+  codes = [],
+  trigger = 'MANUAL_RECHECK',
+  scope = '',
+  now = Date.now,
+} = {}) {
+  const timestamp = Number(now()) || Date.now()
+  const saved = await store.readNextDaySelection(scope)
+  const savedCodes = (saved?.items || []).map((item) => item.code)
+  let targetCodes = []
+  let quoteTradeDate = ''
+  if (trigger === 'FIRST_QUOTE') {
+    const quotes = await fetchQuoteList(savedCodes, { now: timestamp })
+    targetCodes = firstQuoteRecalculationCodes(saved, quotes)
+    quoteTradeDate = String(
+      quotes.find((item) => targetCodes.includes(String(item?.code || '')))
+        ?.tradeDate || '',
+    )
+    if (!targetCodes.length) {
+      return {
+        ok: true,
+        skipped: true,
+        reasonCode: 'FIRST_QUOTE_NOT_READY',
+        nextDaySelection: saved || null,
+      }
+    }
+  } else {
+    const allowed = new Set(savedCodes)
+    targetCodes = (Array.isArray(codes) ? codes : [])
+      .map((code) => String(code || ''))
+      .filter((code) => allowed.has(code))
+    if (!targetCodes.length) {
+      return {
+        ok: false,
+        errorCode: 'NEXT_DAY_SELECTION_REQUIRED',
+        error: '请先人工勾选并保存次日关注股票',
+      }
+    }
+  }
+
+  const result = await handleStockPickAgent({
+    store,
+    generate,
+    now,
+    mode: STOCK_PICK_MODE.NEXT_DAY,
+    codes: targetCodes,
+    trigger,
+    scope,
+  })
+  if (trigger === 'FIRST_QUOTE' && quoteTradeDate) {
+    const nextSelection = {
+      ...saved,
+      autoRecalculatedTradeDate: quoteTradeDate,
+      autoRecalculatedAt: timestamp,
+    }
+    await store.saveNextDaySelection(nextSelection, scope)
+    result.nextDaySelection = nextSelection
+  }
+  return result
 }
 
 export default async function handler(req, res) {
@@ -140,11 +330,37 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
   if (req.method === 'GET') {
-    const [snapshot, progress, agent] = await Promise.all([
+    let authentication = { ok: false, account: null }
+    try {
+      authentication = await authenticateAccountRequest(req, {
+        includeAdviceRuntime: false,
+      })
+    } catch {
+      authentication = { ok: false, account: null }
+    }
+    const scope = authentication.ok
+      ? (authentication.account?.nick || 'trusted')
+      : ''
+    const [snapshot, progress, nextDaySelection, agentEntries] = await Promise.all([
       stockPickStore.readLatest(),
       stockPickStore.readProgress(),
-      stockPickStore.readAgent(),
+      scope ? stockPickStore.readNextDaySelection(scope) : null,
+      Promise.all(modeIds.map(async (mode) => [
+        mode,
+        await stockPickStore.readAgent(mode, scope),
+        await stockPickStore.readAgentProgress(mode, scope),
+      ])),
     ])
+    const agents = Object.fromEntries(
+      agentEntries.map(([mode, agent]) => [mode, agent || null]),
+    )
+    const agentProgress = Object.fromEntries(
+      agentEntries.map(([mode, , itemProgress]) => [
+        mode,
+        itemProgress || null,
+      ]),
+    )
+    const agent = agents[STOCK_PICK_MODE.INTRADAY]
     const references = agent
       && !(agent.conclusion === 'SELECT' && agent.selections?.length)
       && snapshot?.availability === 'READY'
@@ -155,6 +371,9 @@ export default async function handler(req, res) {
       snapshot: snapshot || null,
       progress: progress || null,
       agent: agent || null,
+      agents,
+      agentProgress,
+      nextDaySelection: nextDaySelection || null,
       references,
     })
   }
@@ -197,7 +416,12 @@ export default async function handler(req, res) {
     })
   }
 
-  if (!['run', 'agent'].includes(body.action)) {
+  if (![
+    'run',
+    'agent',
+    'save_next_day_selection',
+    'recalculate_next_day',
+  ].includes(body.action)) {
     return reply(res, 422, {
       ok: false,
       error: '选股操作无效',
@@ -206,9 +430,30 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = body.action === 'agent'
-      ? await handleStockPickAgent()
-      : await handleStockPickRun()
+    const scope = authentication.account?.nick || 'trusted'
+    let result
+    if (body.action === 'agent') {
+      result = await handleStockPickAgent({
+        mode: body.mode,
+        trigger: 'INITIAL',
+        scope,
+      })
+    } else if (body.action === 'save_next_day_selection') {
+      result = await handleNextDaySelection({
+        codes: body.codes,
+        scope,
+      })
+    } else if (body.action === 'recalculate_next_day') {
+      result = await handleNextDayRecalculation({
+        codes: body.codes,
+        trigger: body.trigger === 'FIRST_QUOTE'
+          ? 'FIRST_QUOTE'
+          : 'MANUAL_RECHECK',
+        scope,
+      })
+    } else {
+      result = await handleStockPickRun()
+    }
     return reply(res, 200, result)
   } catch (error) {
     console.error(

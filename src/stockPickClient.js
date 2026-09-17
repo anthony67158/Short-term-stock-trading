@@ -57,10 +57,32 @@ export function runStockPickRecall() {
   })
 }
 
-export function runStockPickAgent() {
+export function runStockPickAgent(mode = 'INTRADAY') {
   return call('/api/stock_pick', {
     method: 'POST',
-    body: { action: 'agent' },
+    body: { action: 'agent', mode },
+    timeoutMs: RUN_TIMEOUT_MS,
+  })
+}
+
+export function saveNextDayStockSelection(codes = []) {
+  return call('/api/stock_pick', {
+    method: 'POST',
+    body: { action: 'save_next_day_selection', codes },
+  })
+}
+
+export function recalculateNextDayStocks(
+  codes = [],
+  trigger = 'MANUAL_RECHECK',
+) {
+  return call('/api/stock_pick', {
+    method: 'POST',
+    body: {
+      action: 'recalculate_next_day',
+      codes,
+      trigger,
+    },
     timeoutMs: RUN_TIMEOUT_MS,
   })
 }
