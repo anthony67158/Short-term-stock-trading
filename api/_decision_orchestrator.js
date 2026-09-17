@@ -1,0 +1,945 @@
+import { fetchQuotes } from './quote.js'
+import { fetchResilientKline, fetchTrendsTx } from './stock_detail.js'
+import { fetchResilientStockFund } from './_stock_fund.js'
+import { fetchAlpha158Snapshot } from './_alpha158_snapshot.js'
+import { loadSectorOpportunity } from './_sector_opportunity.js'
+import {
+  fetchDecisionReviewScores,
+  fetchDecisionScores,
+} from './_action_value_client.js'
+import {
+  applyDecisionAgentGuidance,
+  generateDecisionAgentGuidance,
+} from './_decision_agent.js'
+import {
+  capturePositionPrediction,
+} from './_learning_capture.js'
+import { internalApiOrigin } from './_internal_origin.js'
+import { accountFrom, buildHoldPayload, computePortfolio } from './_portfolio.js'
+import { buildAccountRiskContext, accountRiskCodes } from '../shared/accountRiskBudget.js'
+import { buildAdaptivePricePlans } from '../shared/adaptivePricePlans.js'
+import {
+  A_SHARE_STANDARD_FEE_POLICY,
+  tradeFees,
+} from '../shared/ashareStrategyExecution.js'
+import { buildMarketOpportunityContext } from '../shared/marketOpportunityContext.js'
+import { scoreOpportunityPlaybooks } from '../shared/opportunityPlaybooks.js'
+import { buildOpportunityShadowFeatures } from '../shared/opportunityShadowFeatures.js'
+import {
+  buildOpportunityReviewFeatureInputV4,
+  OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
+} from '../shared/opportunityReviewFeatures.js'
+import {
+  alpha158SignalFromSnapshot,
+} from '../shared/alpha158SignalFeatures.js'
+import { buildOpportunityScoreInput, unavailableOpportunityScore } from '../shared/opportunityScoreContract.js'
+import { reviewPriceContract } from '../shared/reviewPriceContract.js'
+import { summarizeStrategyPatterns } from '../shared/strategyPatternFeatures.js'
+import {
+  resolveStrategyPatternCapabilities,
+  strategyPatternAnalysisEnabled,
+} from '../shared/strategyPatternCapabilities.js'
+import {
+  buildDecisionReplayPacket,
+  executeDecisionReplayPacket,
+} from '../shared/decisionReplayPacket.js'
+import { compileDecisionPlan, applyCompiledDecisionPlan } from '../shared/decisionPlan.js'
+import { compileExecutionPlan } from '../shared/executionPlan.js'
+import {
+  buildDecisionRationale,
+} from '../shared/decisionRationale.js'
+import { buildNextSessionPlan } from '../shared/nextSessionPlan.js'
+import { deriveMarketRegime } from '../shared/marketRegime.js'
+import { buildStockFundNote } from '../shared/retailFundFlow.js'
+import { beijingDayKey, beijingMinutes, isContinuousTrading } from '../shared/tradingCalendar.js'
+import { attachMonitoringPlan } from '../shared/monitoringPlan.js'
+import {
+  TRAILING_EXIT_VERSION,
+  trailingStopForHold,
+} from '../shared/trailingExit.js'
+import { isTriggeredReviewEvent } from '../shared/triggeredReviewDecision.js'
+import { allocationMarketFrom } from '../shared/targetPositionModel.js'
+
+async function bounded(promise, fallback, milliseconds = 7000) {
+  let timer
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((resolve) => { timer = setTimeout(() => resolve(fallback), milliseconds) }),
+    ])
+  } catch { return fallback }
+  finally { clearTimeout(timer) }
+}
+
+async function readMarket(req) {
+  const response = await fetch(`${internalApiOrigin(req)}/api/market`, {
+    signal: AbortSignal.timeout(6000),
+  })
+  if (!response.ok) return null
+  return response.json()
+}
+
+function beijingMinuteOfDay(value) {
+  const timestamp = Number(value)
+  if (!(timestamp > 0)) return null
+  const iso = new Date(timestamp + 8 * 60 * 60 * 1000).toISOString()
+  return Number(iso.slice(11, 13)) * 60 + Number(iso.slice(14, 16))
+}
+
+function trendMinuteOfDay(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/)
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null
+}
+
+function postTriggerRows(trends, triggeredAt) {
+  const minute = beijingMinuteOfDay(triggeredAt)
+  if (minute == null) return []
+  return trends.filter((item) => {
+    const current = trendMinuteOfDay(item?.time)
+    return current != null && current >= minute
+  }).slice(0, 12)
+}
+
+function finite(value) {
+  if (value == null || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+
+function reviewTradeContract(plan, code) {
+  const entryPrice = finite(plan?.entryPlan?.price)
+  const stopPrice = finite(plan?.exitPlan?.hardStopPrice)
+  if (!(entryPrice > stopPrice) || !(stopPrice > 0)) return null
+  const lotSize = /^68[89]/.test(String(code || '')) ? 200 : 100
+  const entryGross = entryPrice * lotSize
+  const exitGross = stopPrice * lotSize
+  let feeRateBps
+  try {
+    const totalFees = (
+      tradeFees('BUY', entryGross, A_SHARE_STANDARD_FEE_POLICY).total
+      + tradeFees('SELL', exitGross, A_SHARE_STANDARD_FEE_POLICY).total
+    )
+    feeRateBps = totalFees / entryGross * 10_000
+  } catch {
+    return null
+  }
+  return {
+    entryPrice,
+    stopPrice,
+    feeRateBps,
+    slippageBps: 5,
+    lotSize,
+    tPlusOne: true,
+    exitPolicyVersion:
+      plan?.exitPlan?.trailingStop?.schemaVersion
+      || TRAILING_EXIT_VERSION,
+    observationPolicyVersion:
+      OPPORTUNITY_REVIEW_OBSERVATION_POLICY_VERSION,
+  }
+}
+
+function normalizedTradeDate(value) {
+  const digits = String(value || '').replace(/\D/g, '')
+  return /^\d{8}$/.test(digits) ? digits : ''
+}
+
+function currentFundEvidence(fund, tradeDate) {
+  const expectedDate = normalizedTradeDate(tradeDate)
+  const actualDate = normalizedTradeDate(fund?.asOfDate)
+  const valuesPresent = (
+    fund?.mainNetYi != null
+    && fund?.retailNetYi != null
+  )
+  const current = (
+    valuesPresent
+    && (!expectedDate || actualDate === expectedDate)
+  )
+  return {
+    ...(fund || {}),
+    mainNetYi: current ? fund.mainNetYi : null,
+    retailNetYi: current ? fund.retailNetYi : null,
+    currentValuesValid: current,
+    expectedTradeDate: expectedDate || null,
+  }
+}
+
+function evidenceTrend(values) {
+  return (Array.isArray(values) ? values : [])
+    .slice(-5)
+    .map((value) => finite(value))
+}
+
+function buildDecisionEvidence({
+  now,
+  quote,
+  market,
+  sector,
+  fund,
+  shadowFeatures,
+  missingEvidence,
+  strategyPatternDisplayEnabled = false,
+}) {
+  const strategyPattern = strategyPatternDisplayEnabled
+    ? summarizeStrategyPatterns({
+        ...shadowFeatures,
+        ret5dPct: shadowFeatures.ret5dPct,
+      }).patterns.find((item) => item.matched) || null
+    : null
+  const availability = {
+    dailyTechnical: shadowFeatures.dailyTechnicalAvailable === 1,
+    intradayTechnical: shadowFeatures.intradayTechnicalAvailable === 1,
+    currentFund: shadowFeatures.fundCurrentAvailable === 1,
+    fundHistory: shadowFeatures.fundHistoryAvailable === 1,
+    completeFundHistory: shadowFeatures.fundHistoryComplete === 1,
+    sectorContext: shadowFeatures.sectorContextAvailable === 1,
+    marketBreadth: (
+      finite(market?.breadth?.up) != null
+      && finite(market?.breadth?.down) != null
+    ),
+  }
+  const knownGaps = [...(missingEvidence || [])]
+  if (!availability.completeFundHistory) {
+    knownGaps.push(
+      `资金逐日历史仅${Math.trunc(
+        finite(shadowFeatures.fundHistoryDayCount) || 0,
+      )}个交易日，不能判断完整5日连续性`,
+    )
+  }
+  if (!availability.sectorContext) {
+    knownGaps.push('未匹配到有效板块上下文')
+  }
+  if (quote?.live === true && !availability.intradayTechnical) {
+    knownGaps.push('当前分时均价线数据缺失')
+  }
+  const sectorValue = sector?.sector || {}
+  const completeHistory = availability.completeFundHistory
+  return {
+    schemaVersion: 'decision-evidence.v1',
+    asOf: now,
+    availability,
+    technical: {
+      quotePct: finite(quote?.pct),
+      ret2dPct: finite(shadowFeatures.ret2dPct),
+      ret5dPct: finite(shadowFeatures.ret5dPct),
+      atrPct: finite(shadowFeatures.atrPct),
+      vwapDistancePct: finite(shadowFeatures.vwapDistancePct),
+      intradayRangePct: finite(shadowFeatures.intradayRangePct),
+      strategyPattern,
+    },
+    funds: {
+      asOfDate: String(fund?.asOfDate || '').slice(0, 10) || null,
+      mainNetYi: availability.currentFund
+        ? finite(fund?.mainNetYi)
+        : null,
+      retailNetYi: availability.currentFund
+        ? finite(fund?.retailNetYi)
+        : null,
+      historyDayCount:
+        finite(shadowFeatures.fundHistoryDayCount) || 0,
+      historyComplete: completeHistory,
+      mainTrend5: evidenceTrend(fund?.mainTrend5 ?? fund?.trend5),
+      retailTrend5: evidenceTrend(fund?.retailTrend5),
+      main5dYi: finite(fund?.main5dYi)
+        ?? (completeHistory ? finite(shadowFeatures.main5dYi) : null),
+      retail5dYi: finite(fund?.retail5dYi)
+        ?? (completeHistory ? finite(shadowFeatures.retail5dYi) : null),
+      mainInflowDays5: availability.fundHistory
+        ? finite(shadowFeatures.mainInflowDays5)
+        : null,
+      retailInflowDays5: availability.fundHistory
+        ? finite(shadowFeatures.retailInflowDays5)
+        : null,
+      mainStreak5: availability.fundHistory
+        ? finite(shadowFeatures.mainStreak5)
+        : null,
+      retailStreak5: availability.fundHistory
+        ? finite(shadowFeatures.retailStreak5)
+        : null,
+    },
+    sector: {
+      matched: availability.sectorContext,
+      code: String(sectorValue.code || '').slice(0, 20) || null,
+      name: String(sectorValue.name || '').slice(0, 60) || null,
+      phase: String(sectorValue.phase || '').slice(0, 40) || null,
+      actionability:
+        String(sectorValue.actionability || '').slice(0, 40) || null,
+      rank: finite(sectorValue.rank),
+      mainNetYi: finite(
+        sectorValue.mainNetYi
+        ?? sectorValue.mainInflow,
+      ),
+      breadthPct: finite(
+        sectorValue.breadthPct
+        ?? sectorValue.breadth?.inflowPct
+        ?? sectorValue.breadth,
+      ),
+    },
+    market: {
+      up: finite(market?.breadth?.up),
+      down: finite(market?.breadth?.down),
+      flat: finite(market?.breadth?.flat),
+    },
+    knownGaps: [...new Set(knownGaps.filter(Boolean))],
+  }
+}
+
+export async function evaluateDecision({
+  code, book, quotes, detail, trends, fund, sector, market, now = Date.now(),
+  score = (inputs) => fetchDecisionScores(inputs, { timeoutMs: 8000 }),
+  reviewScore = (inputs) =>
+    fetchDecisionReviewScores(inputs, { timeoutMs: 8000 }),
+  reviewEvent = null,
+  alpha158Snapshot: suppliedAlpha158Snapshot,
+}) {
+  const quoteMap = Object.fromEntries(quotes.map((item) => [item.code, item]))
+  const rawQuote = quoteMap[code]
+  const quote = {
+    ...rawQuote,
+    volumeRatio: rawQuote?.volumeRatio ?? rawQuote?.volRatio,
+    preClose: rawQuote?.preClose ?? rawQuote?.prevClose,
+    live: rawQuote?.isLivePrice === true
+      && rawQuote?.tradeDate === beijingDayKey(now)
+      && isContinuousTrading(now),
+  }
+  if (!(Number(quote?.price) > 0)) throw new Error('行情不可用，未发布新决策')
+  const name = quote.name || code
+  const trendRows = Array.isArray(trends)
+    ? trends
+    : Array.isArray(trends?.trends) ? trends.trends : []
+  const holding = (book.holding || []).filter((item) => item.code === code)
+  const portfolio = computePortfolio(book.holding || [], quoteMap, book.account)
+  const accountRisk = buildAccountRiskContext(book, quoteMap, now)
+  const candles = (detail?.candles || []).filter((bar) =>
+    [bar.close, bar.high, bar.low].every((value) => Number.isFinite(Number(value)) && Number(value) > 0))
+  const currentSessionSnapshot = (
+    quote.tradeDate === beijingDayKey(now)
+    && ['LUNCH_CLOSE', 'CLOSE'].includes(quote.priceStatus)
+  )
+  const evidenceTradeDate = quote.live || currentSessionSnapshot
+    ? quote.tradeDate
+    : candles.at(-1)?.date || quote.tradeDate
+  const validatedFund = currentFundEvidence(
+    fund,
+    evidenceTradeDate,
+  )
+  const context = buildMarketOpportunityContext({ market: market || {} })
+  const strategyPatternCapabilities =
+    resolveStrategyPatternCapabilities(process.env)
+  const strategyPatternToolsEnabled =
+    strategyPatternAnalysisEnabled(strategyPatternCapabilities)
+  const shadowFeatures = buildOpportunityShadowFeatures({
+    quote,
+    candles,
+    trends: trendRows,
+    fund: validatedFund,
+    sectorOpportunity: sector || {},
+    mode: quote.live === true ? 'intraday' : 'close',
+  })
+  const strategyPattern = strategyPatternCapabilities.display
+    ? summarizeStrategyPatterns({
+        ...shadowFeatures,
+        ret5dPct: shadowFeatures.ret5dPct,
+      }).patterns.find((item) => item.matched) || null
+    : null
+  const candidate = {
+    code,
+    name,
+    quote,
+    fund: validatedFund,
+    sectorOpportunity: sector,
+    ...(strategyPatternToolsEnabled ? { shadowFeatures } : {}),
+    strategyPatternCapabilities,
+    strategyPatternPolicy: strategyPatternCapabilities.playbookBlend
+      ? 'ACTIVE'
+      : 'RESEARCH',
+  }
+  const playbook = scoreOpportunityPlaybooks(candidate, context).selected
+  let plans = buildAdaptivePricePlans({
+    candidate,
+    candles,
+    trends: trendRows,
+    marketContext: context,
+    now,
+  })
+  const holdPayload = holding.length ? buildHoldPayload(
+    book.holding, code, name, portfolio, book.account, book.closed, null, quote, now,
+  ) : { code, name, holdQty: 0 }
+  const pendingStockWeight = accountRisk.reservedExposures
+    .filter((item) => item.code === code)
+    .reduce((sum, item) => sum + item.positionPct, 0)
+  const industry = quote.industry || ''
+  const industryWeight = industry ? [...accountRisk.exposures, ...accountRisk.reservedExposures]
+    .filter((item) => item.sectorCode === industry)
+    .reduce((sum, item) => sum + item.positionPct, 0) : 0
+  const missingEvidence = [
+    candles.length < 20 ? '至少20根有效日线' : '',
+    !(market?.breadth?.up != null && market?.breadth?.down != null) ? '市场涨跌家数' : '',
+    validatedFund.currentValuesValid !== true ? '当日主力与小单资金' : '',
+    !holding.length && !accountRisk.complete ? '账户现金或持仓风险' : '',
+  ].filter(Boolean)
+  const payload = {
+    ...holdPayload,
+    account: {
+      ...accountFrom(portfolio, book.account), ...holdPayload.account,
+      pendingStockWeight,
+      maxStockWeight: Math.max(0, Math.min(20,
+        30 - industryWeight + (holdPayload.account?.stockWeight || 0) + pendingStockWeight)),
+    },
+    todayQuote: {
+      ...quote,
+      volumeRatio: quote.volumeRatio ?? quote.volRatio,
+      live: quote.isLivePrice === true && quote.tradeDate === beijingDayKey(now) && isContinuousTrading(now),
+    },
+    market: market || {},
+    marketEnv: deriveMarketRegime(market || {}),
+    sectorOpportunity: sector || {},
+    accountCircuitBreaker: accountRisk.breaker,
+    holdingStopPrice: Math.max(0, ...holding.map((item) => Number(item.sl) || 0)) || null,
+    stockFund: validatedFund,
+    reviewEvent,
+    allocationMarket: allocationMarketFrom(candles, quote),
+    reservedBuyLots: accountRisk.reservedExposures
+      .filter((item) => item.code === code)
+      .reduce((sum, item) => sum + (Number(item.lots) || 0), 0),
+    missingEvidence,
+    evidenceIncomplete: missingEvidence.length > 0,
+  }
+  if (holding.length && payload.holdingStopPrice > 0) {
+    plans = plans
+      .map((plan) => {
+        const hardStopPrice = Math.max(
+          Number(plan.exitPlan.hardStopPrice) || 0,
+          payload.holdingStopPrice,
+        )
+        return {
+        ...plan,
+        exitPlan: { ...plan.exitPlan, hardStopPrice },
+        riskReward: (plan.exitPlan.takeProfitPrice - plan.entryPlan.price)
+          / (plan.entryPlan.price - hardStopPrice),
+        }
+      })
+      .filter((plan) => plan.entryPlan.price > plan.exitPlan.hardStopPrice)
+  }
+  const decisionEvidence = buildDecisionEvidence({
+    now,
+    quote: payload.todayQuote,
+    market,
+    sector,
+    fund: validatedFund,
+    shadowFeatures,
+    missingEvidence,
+    strategyPatternDisplayEnabled:
+      strategyPatternCapabilities.display,
+  })
+  // One request per route prevents stock-code keyed clients from mixing three prices.
+  const scoreInputsByRoute = new Map()
+  const evaluated = await Promise.all(plans.map(async (plan) => {
+    const input = buildOpportunityScoreInput({
+      batch: {
+        mode: payload.todayQuote.live ? 'INTRADAY' : 'CLOSE',
+        slot: beijingMinutes(now),
+        marketGate: {
+          allowed: payload.marketEnv.allowRiskIncrease === true,
+          riskTier: payload.marketEnv.allowRiskIncrease !== true
+            ? 'BLOCKED' : payload.marketEnv.weak === true ? 'CAUTIOUS' : 'STANDARD',
+        },
+      },
+      event: {
+        code,
+        asOf: now,
+        quote: payload.todayQuote,
+        shadowFeatures,
+        strategyPatternModelFeatures:
+          strategyPatternCapabilities.modelFeatures === true,
+        decision: {
+          formulaId: 'UNKNOWN', priceContractValid: true,
+          playbookId: playbook?.key, playbookScore: playbook?.score,
+          marketOpportunityFactor: context.opportunityFactor,
+          route: plan.route, primaryPrice: plan.entryPlan.price,
+          priceType: plan.route === 'BREAKOUT' ? 'BREAKOUT_WATCH' : 'PULLBACK_WATCH',
+          stopPrice: plan.exitPlan.hardStopPrice, targetPrice: plan.exitPlan.takeProfitPrice,
+          riskReward: plan.riskReward,
+        },
+        sector: sector?.sector,
+      },
+    })
+    scoreInputsByRoute.set(plan.route, input)
+    const scores = await score([input]).catch(() => new Map())
+    return {
+      ...plan,
+      opportunityScore: {
+        ...(scores.get(code) || unavailableOpportunityScore(
+          input,
+          'MISSING_RESPONSE',
+        )),
+        serverVerified: true,
+        priceContract: {
+          entryPrice: plan.entryPlan.price,
+          stopPrice: plan.exitPlan.hardStopPrice,
+          targetPrice: plan.exitPlan.takeProfitPrice,
+          modelPriceRiskPerShare:
+            plan.entryPlan.price * input.factors.stopDistancePct / 100,
+        },
+      },
+    }
+  }))
+  // Budget every path on the same account snapshot before comparing them.
+  // These hypothetical compilations are never published as executable plans.
+  const attachTargetPosition = (plan) => {
+    const adding = holding.length > 0
+    const full = !adding || Number(plan.opportunityScore?.meanConfidenceLowerBound) > 0
+    const hypothetical = compileDecisionPlan({
+      mode: adding ? 'hold_advice' : 'buy_advice',
+      advice: {
+        action: adding ? '加仓' : '立即买入',
+        buyPrice: plan.entryPlan.price,
+        addPrice: plan.entryPlan.price,
+        stopPrice: plan.exitPlan.hardStopPrice,
+        targetPrice: plan.exitPlan.takeProfitPrice,
+      },
+      payload: { ...payload, opportunityScore: plan.opportunityScore, decisionPricePlan: plan },
+      now,
+      accountCircuitBreaker: accountRisk.breaker,
+      deterministicPolicy: {
+        quantityModelRequired: true,
+        effectiveAction: adding ? 'ADD' : 'BUY',
+        riskTier: full ? 'FULL' : 'PROBE',
+        executionOpen: false,
+        riskMultiplier: context.baseRiskPct / 0.6,
+        maxStockWeightPct: full ? 20 : 5,
+        maxPortfolioPositionPct: 85,
+      },
+    })
+    return {
+      ...plan,
+      targetPosition: hypothetical.targetPosition,
+    }
+  }
+  let decisionPlans = evaluated.map(attachTargetPosition)
+  const advisoryOpportunityScore = decisionPlans
+    .map((plan) => plan.opportunityScore)
+    .filter((score) => (
+      score?.state === 'READY'
+      && score?.usagePolicy === 'DIRECT'
+      && score?.modelVersion
+    ))
+    .sort((left, right) => (
+      Number(right.expectedNetR) - Number(left.expectedNetR)
+    ))[0] || null
+  const initialAdvice = executeDecisionReplayPacket(
+    buildDecisionReplayPacket({
+      payload,
+      plans: decisionPlans,
+      now,
+    }),
+  ).advice
+  let reviewScoreInput = null
+  let reviewEvaluation = null
+  if (isTriggeredReviewEvent(reviewEvent)) {
+    const alpha158Snapshot = suppliedAlpha158Snapshot === undefined
+      ? await bounded(fetchAlpha158Snapshot({ now }), null, 1200)
+      : suppliedAlpha158Snapshot
+    const alpha158Signal = alpha158SignalFromSnapshot(
+      alpha158Snapshot,
+      code,
+    )
+    const direction = String(reviewEvent?.direction || '').toUpperCase()
+    const requestedRoute = direction.includes('GTE')
+      ? 'BREAKOUT'
+      : direction.includes('LTE') ? 'PULLBACK' : null
+    const triggeredPlan = (
+      decisionPlans.find((plan) => plan.route === requestedRoute)
+      || initialAdvice.selectedDecisionPlan
+      || decisionPlans[0]
+    )
+    const plannedAction = String(
+      reviewEvent?.plannedAction || '',
+    ).toUpperCase()
+    const reviewedPlan = (
+      triggeredPlan
+      && /BUY|ADD|PROBE/.test(plannedAction)
+      && Number(quote.price) > 0
+    ) ? {
+        ...triggeredPlan,
+        entryPlan: {
+          ...triggeredPlan.entryPlan,
+          price: Number(quote.price),
+        },
+        riskReward: (
+          Number(triggeredPlan.exitPlan?.takeProfitPrice)
+          - Number(quote.price)
+        ) / Math.max(
+          0.01,
+          Number(quote.price)
+          - Number(triggeredPlan.exitPlan?.hardStopPrice),
+        ),
+      }
+      : triggeredPlan
+    const rawReviewPriceContract = reviewedPlan
+      ? reviewTradeContract(reviewedPlan, code)
+      : null
+    const boundReviewPriceContract = rawReviewPriceContract
+      ? reviewPriceContract(rawReviewPriceContract)
+      : null
+    const reviewFeatures = (
+      reviewedPlan
+      && rawReviewPriceContract
+      && boundReviewPriceContract
+    )
+      ? buildOpportunityReviewFeatureInputV4({
+          code,
+          asOf: now,
+          formulaId: 'TRIGGER_REVIEW',
+          triggerPrice:
+            reviewEvent.threshold
+            ?? reviewEvent.price,
+          direction:
+            reviewEvent.direction
+            ?? reviewEvent.plannedAction,
+          rows: postTriggerRows(trendRows, reviewEvent.at),
+          initialScore: reviewedPlan.opportunityScore,
+          initialScoreInput: scoreInputsByRoute.get(
+            reviewedPlan.route,
+          ),
+          alpha158Signal,
+          alphaExpectedDate: evidenceTradeDate,
+          priceContract: rawReviewPriceContract,
+        })
+      : null
+    reviewScoreInput = reviewFeatures
+      ? {
+          ...reviewFeatures,
+          priceContract: boundReviewPriceContract.canonical,
+          priceContractHash: boundReviewPriceContract.hash,
+        }
+      : null
+    const fallbackInput = reviewScoreInput || {
+      code,
+      asOf: now,
+      formulaId: 'TRIGGER_REVIEW',
+    }
+    const reviewedScores = reviewScoreInput
+      ? await reviewScore([reviewScoreInput]).catch(() => new Map())
+      : new Map()
+    const rawReviewedScore = reviewedScores.get(code)
+    const boundReviewedScore = (
+      rawReviewedScore
+      && rawReviewedScore.priceContractHash
+        === reviewScoreInput?.priceContractHash
+    ) ? rawReviewedScore : null
+    const opportunityScore = {
+      ...(boundReviewedScore || unavailableOpportunityScore(
+        fallbackInput,
+        reviewScoreInput
+          ? rawReviewedScore
+            ? 'REVIEW_PRICE_CONTRACT_MISMATCH'
+            : 'REVIEW_MODEL_UNAVAILABLE'
+          : 'REVIEW_FEATURES_INCOMPLETE',
+      )),
+      serverVerified: true,
+      priceContract: reviewedPlan ? {
+        ...reviewedPlan.opportunityScore?.priceContract,
+        entryPrice: reviewedPlan.entryPlan.price,
+        stopPrice: reviewedPlan.exitPlan.hardStopPrice,
+        targetPrice: reviewedPlan.exitPlan.takeProfitPrice,
+        modelPriceRiskPerShare: Math.max(
+          0,
+          reviewedPlan.entryPlan.price
+          - reviewedPlan.exitPlan.hardStopPrice,
+        ),
+      } : undefined,
+    }
+    reviewEvaluation = {
+      state: opportunityScore.state,
+      reason: opportunityScore.reason || null,
+      modelVersion: opportunityScore.modelVersion || null,
+      expectedNetR: finite(opportunityScore.expectedNetR),
+      netRLowerBound: finite(opportunityScore.netRLowerBound),
+    }
+    decisionPlans = reviewedPlan
+      ? [attachTargetPosition({
+          ...reviewedPlan,
+          opportunityScore,
+        })]
+      : []
+    payload.reviewScoreInput = reviewScoreInput
+  }
+  const decisionReplayPacket = buildDecisionReplayPacket({
+    payload,
+    plans: decisionPlans,
+    now,
+  })
+  const replayedDecision = executeDecisionReplayPacket(
+    decisionReplayPacket,
+  )
+  let advice = {
+    ...replayedDecision.advice,
+    advisoryOpportunityScore,
+    decisionReplayPacket,
+    decisionReplayResult: replayedDecision.result,
+    ...(reviewEvaluation ? { reviewEvaluation } : {}),
+    fundNote: '',
+    strategyPattern,
+    strategyPatternCapabilities,
+  }
+  if (reviewEvent) {
+    advice.pullbackWatchPrice = null
+    advice.breakoutWatchPrice = null
+    advice.holdingAddPlan = null
+    advice.reviewDecision = {
+      schemaVersion: 'triggered-review-decision.v1',
+      terminal: true,
+      outcome: advice.action,
+      operation: advice.action,
+      quantity: Number(advice.opQty.match(/\d+/)?.[0]) || 0,
+    }
+  }
+  payload.opportunityScore =
+    advice.selectedDecisionPlan?.opportunityScore
+    || advice.advisoryOpportunityScore
+    || null
+  payload.decisionPricePlan = advice.selectedDecisionPlan
+  const action = {
+    清仓: 'EXIT',
+    减仓: 'REDUCE',
+    持有: 'HOLD',
+    加仓: 'ADD',
+    立即买入: 'BUY',
+    观望: 'WATCH',
+  }[advice.action]
+  const mode = holding.length ? 'hold_advice' : 'buy_advice'
+  advice.fundNote = buildStockFundNote(validatedFund)
+    || '资金数据暂缺，未据此推断资金方向'
+  const plannedReviewAction = String(
+    reviewEvent?.plannedAction || '',
+  ).toUpperCase()
+  const fullAddReview = (
+    action === 'ADD'
+    && plannedReviewAction === 'ADD'
+    && reviewEvent?.directionApproved === true
+  )
+  const conditionalAdd = (
+    action === 'HOLD'
+    && advice.holdingAddPlan?.schemaVersion === 'holding-add-plan.v1'
+  )
+  const addRiskTier = (
+    action === 'ADD' || conditionalAdd
+  ) ? (
+      fullAddReview
+      || advice.holdingAddPlan?.plannedAction === 'ADD'
+        ? 'FULL'
+        : 'PROBE'
+    ) : null
+  const requestedAddPositionPct = finite(
+    reviewEvent?.maxPositionPct
+    ?? advice.holdingAddPlan?.maxPositionPct,
+  )
+  const maxStockWeightPct = addRiskTier === 'PROBE'
+    ? Math.min(5, requestedAddPositionPct || 5)
+    : Math.min(20, requestedAddPositionPct || 20)
+  const decisionPlan = compileDecisionPlan({
+    mode, advice, payload, now, accountCircuitBreaker: accountRisk.breaker,
+    deterministicPolicy: {
+      quantityModelRequired: true,
+      effectiveAction: action,
+      riskTier: !holding.length && advice.selectedDecisionPlan
+        ? 'FULL' : addRiskTier || 'NONE',
+      executionOpen: payload.todayQuote.live,
+      hardProtection: advice.decisionSource.hardProtection,
+      exitConfirmed: (
+        ['EXIT', 'REDUCE'].includes(action)
+        && isTriggeredReviewEvent(reviewEvent)
+      ),
+      riskMultiplier: context.baseRiskPct / 0.6,
+      maxStockWeightPct,
+      maxPortfolioPositionPct: 85,
+    },
+  })
+  const sourceInstruction = advice.actionPlan
+  advice = applyCompiledDecisionPlan({ ...advice, decisionPlan })
+  if (
+    advice.holdingAddPlan
+    && decisionPlan.entryBudget?.state !== 'ESTIMATED'
+  ) {
+    advice = {
+      ...advice,
+      holdingAddPlan: null,
+      pullbackWatchPrice: null,
+      breakoutWatchPrice: null,
+    }
+  }
+  const decisionRationale = buildDecisionRationale({
+    advice,
+    decisionPlan,
+  })
+  advice = {
+    ...advice,
+    decisionRationale,
+    quantNote: decisionRationale.summary || advice.quantNote,
+  }
+  if (mode === 'hold_advice' && payload.todayQuote.live !== true) {
+    advice.closePositionPlan = buildNextSessionPlan({
+      advice,
+      closePrice: payload.todayQuote.price,
+      holdingLots: payload.holdQty,
+      sellableLots: payload.holdQty,
+      now,
+    })
+  }
+  if (!['BUY', 'ADD'].includes(decisionPlan.action) && !decisionPlan.blockedReasons?.length) {
+    advice.actionPlan = sourceInstruction
+    advice.nextAction = sourceInstruction
+  }
+  const reviewedEntry = (
+    reviewEvent?.reviewMode === 'ENTRY_CONFIRMATION'
+    || /BUY|ADD/.test(plannedReviewAction)
+  )
+  const reviewedExit = (
+    reviewEvent?.reviewMode === 'EXIT_CONFIRMATION'
+    || /REDUCE|EXIT/.test(plannedReviewAction)
+  )
+  const reviewedQuantity = reviewedEntry
+    ? ['BUY', 'ADD'].includes(decisionPlan.action)
+      ? decisionPlan.quantity.lots
+      : 0
+    : reviewedExit
+      ? ['REDUCE', 'EXIT'].includes(decisionPlan.action)
+        ? decisionPlan.quantity.lots
+        : 0
+      : decisionPlan.quantity.lots
+  advice = {
+    ...advice,
+    ...(reviewEvent ? {
+      reviewDecision: {
+        ...advice.reviewDecision,
+        outcome: advice.action,
+        operation: advice.actionPlan,
+        quantity: reviewedQuantity,
+      },
+    } : {}),
+    priceContract: decisionPlan.priceContract,
+    executionPlan: compileExecutionPlan({ decisionPlan, code, name, now }),
+    decisionEvidence,
+    continuity: {
+      planId: decisionPlan.decisionId, revision: 1, thesisVersion: 1, changeType: 'initial',
+    },
+  }
+  if (decisionPlan.action === 'HOLD' && payload.holdingStopPrice > 0) {
+    // 吊灯式跟踪止盈对齐：HOLD 自动跟踪的止损位随持有期最高价上移，与训练标签同口径
+    // （shared/trailingExit.js）。跟踪位永远不低于账本硬止损，只在已创出新高、锁定
+    // 部分盈利时抬高——只收紧风险、绝不放松，账本硬止损仍是地板（AGENTS.md 铁律）。
+    const trailStop = trailingStopForHold({
+      holdCost: payload.holdCost,
+      holdingStopPrice: payload.holdingStopPrice,
+      entryDayKey: payload.holdingStartedAt
+        ? beijingDayKey(payload.holdingStartedAt)
+        : null,
+      candles,
+      quote: payload.todayQuote,
+      trailingStop: advice.selectedDecisionPlan?.exitPlan?.trailingStop,
+    })
+    const stopValue = Math.max(payload.holdingStopPrice, trailStop || 0)
+    advice.executionRules = [{
+      id: 'ledger-stop', action: 'EXIT', kind: 'RISK_EXIT',
+      lots: Math.max(0, Math.trunc(Number(payload.holdQty) || 0)),
+      logic: 'ALL', session: 'CONTINUOUS', sustainSeconds: 0,
+      conditions: [{ metric: 'price', op: 'lte', value: stopValue }],
+    }]
+    advice = attachMonitoringPlan({ advice, payload, decisionPlan, now })
+  }
+  const response = {
+    ok: true, mode, result: advice, updatedAt: now,
+    model:
+      advice.decisionSource.modelVersion
+      || 'DECISION_MODEL_UNAVAILABLE',
+    meta: {
+      todayQuote: payload.todayQuote,
+      decisionSource: advice.decisionSource,
+      reviewScoreInput,
+      reviewEvaluation,
+      llmCalls: 0,
+    },
+    news: [], truncated: false,
+  }
+  Object.defineProperty(response, '_agentContext', {
+    value: payload,
+    enumerable: false,
+  })
+  return response
+}
+
+export async function runDecision({ req, book, code, onProgress = () => {}, signal, reviewEvent = null }) {
+  if (!/^\d{6}$/.test(String(code || ''))) throw new Error('股票代码无效')
+  signal?.throwIfAborted()
+  onProgress('采集行情、账户与决策特征', 'collect')
+  const codes = [...new Set([code, ...accountRiskCodes(book)])]
+  const [quotes, detail, trends, fund, sector, market] = await Promise.all([
+    bounded(fetchQuotes(codes), []),
+    bounded(fetchResilientKline(code, '101', 120), null),
+    bounded(fetchTrendsTx(code), []),
+    bounded(fetchResilientStockFund(code), null),
+    bounded(loadSectorOpportunity(code), null),
+    bounded(readMarket(req), null),
+  ])
+  signal?.throwIfAborted()
+  onProgress('评估三条价格路径与账户风险', 'quant')
+  const result = await evaluateDecision({
+    code,
+    book,
+    quotes,
+    detail,
+    trends,
+    fund,
+    sector,
+    market,
+    reviewEvent,
+  })
+  const guidance = await generateDecisionAgentGuidance({
+    code,
+    name: result.result?.name || quotes.find((item) => item.code === code)?.name || code,
+    mode: result.mode,
+    payload: result._agentContext,
+    advice: result.result,
+    reviewEvent,
+    signal,
+    onProgress,
+    now: result.updatedAt,
+  })
+  onProgress(
+    'Agent研判已完成，正在核定并保存',
+    'finalize',
+    {
+      agentPreview: {
+        action: (
+          result.result?.actionPlan
+          || result.result?.nextAction
+          || result.result?.title
+          || result.result?.action
+          || ''
+        ),
+        ...guidance,
+      },
+    },
+  )
+  result.result = applyDecisionAgentGuidance(result.result, guidance)
+  await capturePositionPrediction({
+    code,
+    mode: result.mode,
+    advice: result.result,
+    guidance,
+    accountScope: book?.nick || book?.account?.nick || '',
+    now: result.updatedAt,
+  }).catch((error) => {
+    console.warn(
+      '[learning] position prediction capture failed',
+      error?.code || error?.message,
+    )
+  })
+  result.meta = {
+    ...result.meta,
+    agentGuidance: guidance,
+    llmCalls: 1,
+  }
+  signal?.throwIfAborted()
+  return result
+}

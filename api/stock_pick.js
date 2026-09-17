@@ -17,6 +17,10 @@ import {
   stockPickStore,
 } from './_stock_pick_store.js'
 import {
+  captureStockPickAgentSelection,
+  captureStockPickPrediction,
+} from './_learning_capture.js'
+import {
   unavailableStockPickSnapshot,
 } from '../shared/stockPick.js'
 import {
@@ -78,6 +82,12 @@ export async function handleStockPickRun({
         },
       })
       await store.saveLatest(snapshot)
+      await captureStockPickPrediction(snapshot).catch((error) => {
+        console.warn(
+          '[learning] stock-pick prediction capture failed',
+          error?.code || error?.message,
+        )
+      })
       const finishedAt = Number(now()) || Date.now()
       await store.saveProgress({
         status: 'DONE',
@@ -184,6 +194,15 @@ export async function handleStockPickAgent({
         onTrace,
       })
       await store.saveAgent(selection, normalizedMode, scope)
+      await captureStockPickAgentSelection(selection, {
+        accountScope: scope,
+        snapshot,
+      }).catch((error) => {
+        console.warn(
+          '[learning] stock-pick agent capture failed',
+          error?.code || error?.message,
+        )
+      })
       if (trace.status === 'RUNNING') {
         await onTrace({
           type: selection.availability === 'READY' ? 'result' : 'error',
@@ -272,14 +291,15 @@ export async function handleNextDayRecalculation({
   const saved = await store.readNextDaySelection(scope)
   const savedCodes = (saved?.items || []).map((item) => item.code)
   let targetCodes = []
-  let quoteTradeDate = ''
+  const quoteTradeDates = new Map()
   if (trigger === 'FIRST_QUOTE') {
     const quotes = await fetchQuoteList(savedCodes, { now: timestamp })
     targetCodes = firstQuoteRecalculationCodes(saved, quotes)
-    quoteTradeDate = String(
-      quotes.find((item) => targetCodes.includes(String(item?.code || '')))
-        ?.tradeDate || '',
-    )
+    for (const quote of quotes) {
+      const code = String(quote?.code || '')
+      if (!targetCodes.includes(code)) continue
+      quoteTradeDates.set(code, String(quote?.tradeDate || ''))
+    }
     if (!targetCodes.length) {
       return {
         ok: true,
@@ -311,10 +331,17 @@ export async function handleNextDayRecalculation({
     trigger,
     scope,
   })
-  if (trigger === 'FIRST_QUOTE' && quoteTradeDate) {
+  if (trigger === 'FIRST_QUOTE' && quoteTradeDates.size) {
     const nextSelection = {
       ...saved,
-      autoRecalculatedTradeDate: quoteTradeDate,
+      items: (saved?.items || []).map((item) => (
+        quoteTradeDates.has(String(item?.code || ''))
+          ? {
+              ...item,
+              lastAutoTradeDate: quoteTradeDates.get(String(item.code)),
+            }
+          : item
+      )),
       autoRecalculatedAt: timestamp,
     }
     await store.saveNextDaySelection(nextSelection, scope)
@@ -345,11 +372,13 @@ export default async function handler(req, res) {
       stockPickStore.readLatest(),
       stockPickStore.readProgress(),
       scope ? stockPickStore.readNextDaySelection(scope) : null,
-      Promise.all(modeIds.map(async (mode) => [
-        mode,
-        await stockPickStore.readAgent(mode, scope),
-        await stockPickStore.readAgentProgress(mode, scope),
-      ])),
+      scope
+        ? Promise.all(modeIds.map(async (mode) => [
+            mode,
+            await stockPickStore.readAgent(mode, scope),
+            await stockPickStore.readAgentProgress(mode, scope),
+          ]))
+        : modeIds.map((mode) => [mode, null, null]),
     ])
     const agents = Object.fromEntries(
       agentEntries.map(([mode, agent]) => [mode, agent || null]),
