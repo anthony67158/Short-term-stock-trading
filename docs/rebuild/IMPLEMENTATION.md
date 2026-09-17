@@ -1427,8 +1427,9 @@ GitHub Actions 自动运行验收（2026-09-17 22:21）：
   `[daily-learning] YYYY-MM-DD failed` Issue；同日再次失败只追加运行链接，不暴露
   账号、训练行或密钥。GitHub 原生失败状态仍保留。
 - 训练下载器按北京时间计算应存在的最近工作日结算日期。最新 manifest 早于该日期、
-  manifest/view 日期不一致、路径越出 `learning/v1/views/`、规范化内容哈希不匹配
-  时均失败关闭，不再静默复用陈旧或被修改的训练视图。
+  结算时间早于当日 17:00、manifest/view 日期或时间戳不一致、路径越出
+  `learning/v1/views/`、规范化内容哈希不匹配时均失败关闭，不再静默复用盘中、
+  陈旧或被修改的训练视图。
 - 选股 T+5 标签升级为 `stock-pick-t5-fee-v2`：复用
   `A_SHARE_STANDARD_V1`，以 100 股标准手数计算买入与卖出双边佣金、印花税和过户费；
   `returnPct`、MFE、MAE、方向命中和 +2% 路径命中均使用费后现金流。训练视图仅接收
