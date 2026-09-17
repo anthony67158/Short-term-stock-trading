@@ -11,6 +11,8 @@ import numpy as np
 import xgboost
 from catboost import CatBoostClassifier, CatBoostRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
+from scipy.stats import rankdata
+from sklearn.metrics import log_loss, mean_pinball_loss
 from xgboost import XGBClassifier, XGBRegressor
 
 from platform_app.modules.experiments.foundation_return_contract import (
@@ -662,3 +664,153 @@ def historical_baseline_predictions(
         }
     )
     return predictions
+
+
+def _weighted_interval_score(
+    actual: np.ndarray,
+    predicted: dict[str, np.ndarray],
+    weights: np.ndarray,
+) -> float:
+    median_error = np.abs(actual - predicted["q50"])
+    total = 0.5 * median_error
+    for lower_name, upper_name, alpha in (
+        ("q05", "q95", 0.10),
+        ("q10", "q90", 0.20),
+        ("q25", "q75", 0.50),
+    ):
+        lower = predicted[lower_name]
+        upper = predicted[upper_name]
+        interval_score = (
+            upper
+            - lower
+            + (2.0 / alpha) * np.maximum(lower - actual, 0.0)
+            + (2.0 / alpha) * np.maximum(actual - upper, 0.0)
+        )
+        total += (alpha / 2.0) * interval_score
+    return float(np.average(total / 3.5, weights=weights))
+
+
+def _ranking_metrics(
+    partition: BaselinePartition,
+    scores: np.ndarray,
+) -> dict:
+    daily_rank_ic = []
+    daily_top10 = []
+    daily_market = []
+    for decision_date in np.unique(partition.dates):
+        mask = partition.dates == decision_date
+        actual = partition.target_return[mask]
+        predicted = scores[mask]
+        if len(actual) < 2 or np.ptp(predicted) == 0:
+            rank_ic = 0.0
+        else:
+            rank_ic = float(
+                np.corrcoef(
+                    rankdata(predicted, method="average"),
+                    rankdata(actual, method="average"),
+                )[0, 1]
+            )
+        daily_rank_ic.append(rank_ic)
+        selected = np.argsort(predicted)[-min(10, len(predicted)) :]
+        daily_top10.append(float(np.mean(actual[selected])))
+        daily_market.append(float(np.mean(actual)))
+    return {
+        "meanDailyRankIc": float(np.mean(daily_rank_ic)),
+        "medianDailyRankIc": float(np.median(daily_rank_ic)),
+        "top10MeanNetReturn": float(np.mean(daily_top10)),
+        "marketMeanNetReturn": float(np.mean(daily_market)),
+        "top10NetReturnIncrement": float(
+            np.mean(daily_top10) - np.mean(daily_market)
+        ),
+    }
+
+
+def evaluate_predictions(
+    partition: BaselinePartition,
+    predictions: dict[str, np.ndarray],
+    *,
+    quantiles: tuple[float, ...] = DEFAULT_QUANTILES,
+) -> dict:
+    required = {
+        "pWin",
+        *(f"q{round(alpha * 100):02d}" for alpha in quantiles),
+    }
+    if set(predictions) != required or any(
+        np.asarray(values).shape != (len(partition.x),)
+        or not np.all(np.isfinite(values))
+        for values in predictions.values()
+    ):
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_PREDICTIONS_INVALID",
+        )
+    probability = np.clip(
+        np.asarray(predictions["pWin"], dtype=np.float64),
+        1e-7,
+        1.0 - 1e-7,
+    )
+    if np.any((predictions["pWin"] < 0) | (predictions["pWin"] > 1)):
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_PROBABILITY_INVALID",
+        )
+    quantile_matrix = np.column_stack(
+        [
+            np.asarray(
+                predictions[f"q{round(alpha * 100):02d}"],
+                dtype=np.float64,
+            )
+            for alpha in quantiles
+        ]
+    )
+    if np.any(np.diff(quantile_matrix, axis=1) < 0):
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_QUANTILE_CROSSING",
+        )
+    weights = normalized_weights(partition.sample_weight)
+    actual = partition.target_return.astype(np.float64)
+    direction = partition.direction.astype(np.int8)
+    pinball = {
+        f"q{round(alpha * 100):02d}": float(
+            mean_pinball_loss(
+                actual,
+                quantile_matrix[:, index],
+                alpha=alpha,
+                sample_weight=weights,
+            )
+        )
+        for index, alpha in enumerate(quantiles)
+    }
+    covered80 = (actual >= predictions["q10"]) & (
+        actual <= predictions["q90"]
+    )
+    return {
+        "samples": len(actual),
+        "dates": int(len(np.unique(partition.dates))),
+        "startDate": str(partition.dates.min()),
+        "endDate": str(partition.dates.max()),
+        "brier": float(
+            np.average((probability - direction) ** 2, weights=weights)
+        ),
+        "logLoss": float(
+            log_loss(
+                direction,
+                probability,
+                labels=[0, 1],
+                sample_weight=weights,
+            )
+        ),
+        "pinball": pinball,
+        "meanPinball": float(np.mean(tuple(pinball.values()))),
+        "weightedIntervalScore": _weighted_interval_score(
+            actual,
+            predictions,
+            weights,
+        ),
+        "interval80Coverage": float(np.average(covered80, weights=weights)),
+        "interval80MeanWidth": float(
+            np.average(
+                predictions["q90"] - predictions["q10"],
+                weights=weights,
+            )
+        ),
+        "ranking": _ranking_metrics(partition, predictions["q50"]),
+    }

@@ -15,6 +15,7 @@ from platform_app.modules.experiments.probabilistic_baseline_runner import (
     ProbabilisticBaselineError,
     _load_partition_from_connections,
     baseline_library_versions,
+    evaluate_predictions,
     fee_adjusted_returns,
     fit_catboost_baseline,
     fit_lightgbm_baseline,
@@ -282,6 +283,31 @@ def test_lightgbm_baseline_outputs_probability_and_ordered_quantiles():
     assert baseline_library_versions()["lightgbm"] == "4.7.0"
 
 
+def test_evaluate_predictions_uses_fee_adjusted_distribution_and_daily_ranks():
+    data = partition()
+    offsets = (-0.03, -0.02, -0.01, 0.0, 0.01, 0.02, 0.03)
+    predictions = {
+        "pWin": np.where(data.direction == 1, 0.9, 0.1).astype(np.float32),
+        **{
+            name: data.target_return + offset
+            for name, offset in zip(
+                ("q05", "q10", "q25", "q50", "q75", "q90", "q95"),
+                offsets,
+                strict=True,
+            )
+        },
+    }
+
+    metrics = evaluate_predictions(data, predictions)
+
+    assert metrics["samples"] == 4
+    assert metrics["dates"] == 2
+    assert metrics["brier"] == pytest.approx(0.01)
+    assert metrics["interval80Coverage"] == 1.0
+    assert metrics["interval80MeanWidth"] == pytest.approx(0.04)
+    assert metrics["ranking"]["meanDailyRankIc"] == pytest.approx(1.0)
+
+
 def test_baseline_primitives_reject_invalid_inputs():
     with pytest.raises(
         ProbabilisticBaselineError,
@@ -311,6 +337,13 @@ def test_baseline_primitives_reject_invalid_inputs():
             np.array(["20200101"]),
             np.array(["20200102"]),
         )
+    invalid_predictions = historical_baseline_predictions(partition(), 4)
+    invalid_predictions["q10"] = invalid_predictions["q90"] + 1
+    with pytest.raises(
+        ProbabilisticBaselineError,
+        match="PROBABILISTIC_BASELINE_QUANTILE_CROSSING",
+    ):
+        evaluate_predictions(partition(), invalid_predictions)
     ranking, sampling = baseline_databases()
     with pytest.raises(
         ProbabilisticBaselineError,
