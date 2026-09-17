@@ -9,6 +9,10 @@ import pytest
 from platform_app.modules.experiments.cash_equity_fees import (
     calculate_cash_equity_fees,
 )
+from platform_app.modules.experiments.foundation_market_cap_dataset import (
+    FoundationMarketCapDataset,
+    FoundationMarketCapDatasetError,
+)
 from platform_app.modules.experiments.foundation_return_dataset import (
     FoundationReturnDataset,
     FoundationReturnDatasetError,
@@ -434,3 +438,119 @@ def test_verification_rejects_tampered_virtual_database(
         match="FOUNDATION_DATASET_INVALID",
     ):
         verify_foundation_return_dataset(root)
+
+
+def _daily_basic_rows(trade_date, index):
+    rows = []
+    for code, base in (("000001.SZ", Decimal("10")), ("000002.SZ", Decimal("20"))):
+        close = base + Decimal(index) / 100
+        rows.append(
+            {
+                "ts_code": code,
+                "trade_date": trade_date,
+                "close": str(close),
+                "total_share": "100",
+                "float_share": "80",
+                "total_mv": str(close * 100),
+                "circ_mv": str(close * 80),
+            }
+        )
+    return rows
+
+
+def test_market_cap_dataset_is_resumable_and_covers_reference_samples(
+    tmp_path,
+    sealed_sources,
+):
+    market_root, ranking_root, _labels_root, dates = sealed_sources
+    foundation_root, foundation_manifest = _seal_foundation(
+        tmp_path,
+        sealed_sources,
+    )
+    root = tmp_path / "market-cap"
+    kwargs = {
+        "dataset_id": "market-cap-v1",
+        "foundation_dataset_root": foundation_root,
+        "ranking_dataset_root": ranking_root,
+        "market_dataset_root": market_root,
+    }
+    with FoundationMarketCapDataset(root, **kwargs) as dataset:
+        pending = dataset.pending_dates()
+        first = dataset.ingest_partition(
+            pending[0],
+            _daily_basic_rows(pending[0], dates.index(pending[0])),
+        )
+        repeated = dataset.ingest_partition(
+            pending[0],
+            _daily_basic_rows(pending[0], dates.index(pending[0])),
+        )
+        assert first["acceptedCount"] == 2
+        assert repeated["status"] == "SKIPPED"
+
+    with FoundationMarketCapDataset(root, **kwargs) as dataset:
+        for trade_date in dataset.pending_dates():
+            dataset.ingest_partition(
+                trade_date,
+                _daily_basic_rows(trade_date, dates.index(trade_date)),
+            )
+        manifest = dataset.seal()
+
+    assert manifest["partitions"] == foundation_manifest["decisionDates"]
+    assert manifest["rows"] == foundation_manifest["referenceSamples"]
+    assert manifest["rowsByBoard"] == {"MAIN": 90}
+    assert manifest["startDate"] == foundation_manifest["startDate"]
+    assert manifest["endDate"] == foundation_manifest["endDate"]
+    with sqlite3.connect(root / "market-cap.sqlite3") as database:
+        row = database.execute(
+            "SELECT total_shares, float_shares, total_market_cap_cny, "
+            "float_market_cap_cny, effective_at, published_at, as_of "
+            "FROM market_cap_rows ORDER BY decision_date, instrument_id LIMIT 1",
+        ).fetchone()
+    assert row[0:2] == ("1000000", "800000")
+    assert Decimal(row[2]) == Decimal("1000000") * Decimal(
+        _daily_basic_rows(manifest["startDate"], dates.index(manifest["startDate"]))[
+            0
+        ]["close"]
+    )
+    assert Decimal(row[3]) == Decimal(row[2]) * Decimal("0.8")
+    assert row[4].endswith("T15:00:00+08:00")
+    assert row[5].endswith("T18:00:00+08:00")
+    assert row[6] == row[5]
+
+
+def test_market_cap_partition_rejects_missing_or_invalid_rows(
+    tmp_path,
+    sealed_sources,
+):
+    market_root, ranking_root, _labels_root, dates = sealed_sources
+    foundation_root, _manifest = _seal_foundation(tmp_path, sealed_sources)
+    root = tmp_path / "market-cap"
+    with FoundationMarketCapDataset(
+        root,
+        dataset_id="market-cap-v1",
+        foundation_dataset_root=foundation_root,
+        ranking_dataset_root=ranking_root,
+        market_dataset_root=market_root,
+    ) as dataset:
+        trade_date = dataset.pending_dates()[0]
+        rows = _daily_basic_rows(trade_date, dates.index(trade_date))
+        with pytest.raises(
+            FoundationMarketCapDatasetError,
+            match="MARKET_CAP_PARTITION_COVERAGE_INCOMPLETE",
+        ):
+            dataset.ingest_partition(trade_date, rows[:1])
+
+        invalid = _daily_basic_rows(trade_date, dates.index(trade_date))
+        invalid[0]["float_share"] = "101"
+        invalid[0]["circ_mv"] = invalid[0]["total_mv"]
+        with pytest.raises(
+            FoundationMarketCapDatasetError,
+            match="MARKET_CAP_FLOAT_EXCEEDS_TOTAL",
+        ):
+            dataset.ingest_partition(trade_date, invalid)
+
+        with pytest.raises(
+            FoundationMarketCapDatasetError,
+            match="MARKET_CAP_PARTITIONS_INCOMPLETE",
+        ):
+            dataset.seal()
