@@ -3,8 +3,11 @@
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+import catboost
 import numpy as np
+from catboost import CatBoostClassifier, CatBoostRegressor
 
 from platform_app.modules.experiments.foundation_return_contract import (
     DEFAULT_QUANTILES,
@@ -27,6 +30,9 @@ SCHEMA_VERSION = "foundation-probabilistic-baselines.v1"
 REFERENCE_NOTIONAL_CNY = 100_000.0
 MARKET_EXIT_SLIPPAGE_RATE = 0.0005
 VALID_BOARDS = ("MAIN", "CHINEXT", "STAR", "BEIJING")
+BASELINE_SEED = 20260917
+DEFAULT_ITERATIONS = 120
+CATBOOST_FAMILY = "catboost-multiquantile-v1"
 PARTITION_RANGES = {
     "train": ("trainStart", "trainEnd", "trainSelected"),
     "probabilityCalibration": (
@@ -80,6 +86,94 @@ class BaselinePartition:
             raise ProbabilisticBaselineError(
                 "PROBABILISTIC_BASELINE_PARTITION_INVALID",
             )
+
+
+@dataclass
+class BaselineModelBundle:
+    family: str
+    classifier: Any
+    quantile_model: Any
+    quantiles: tuple[float, ...] = DEFAULT_QUANTILES
+
+    def predict(self, x: np.ndarray) -> dict[str, np.ndarray]:
+        probability = np.asarray(
+            self.classifier.predict_proba(x)[:, 1],
+            dtype=np.float32,
+        )
+        raw_quantiles = np.asarray(
+            self.quantile_model.predict(x),
+            dtype=np.float32,
+        )
+        if raw_quantiles.ndim == 1:
+            raw_quantiles = raw_quantiles.reshape(-1, 1)
+        if raw_quantiles.shape != (len(x), len(self.quantiles)):
+            raise ProbabilisticBaselineError(
+                "PROBABILISTIC_BASELINE_PREDICTION_SHAPE_INVALID",
+            )
+        ordered = np.sort(raw_quantiles, axis=1)
+        result = {"pWin": np.clip(probability, 0.0, 1.0)}
+        result.update(
+            {
+                f"q{round(alpha * 100):02d}": ordered[:, index]
+                for index, alpha in enumerate(self.quantiles)
+            }
+        )
+        return result
+
+
+def fit_catboost_baseline(
+    training: BaselinePartition,
+    *,
+    iterations: int = DEFAULT_ITERATIONS,
+    threads: int = 4,
+) -> BaselineModelBundle:
+    if iterations <= 0 or threads <= 0:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_TRAINING_CONFIG_INVALID",
+        )
+    weights = normalized_weights(training.sample_weight)
+    common = {
+        "iterations": iterations,
+        "learning_rate": 0.05,
+        "depth": 6,
+        "l2_leaf_reg": 3.0,
+        "random_seed": BASELINE_SEED,
+        "random_strength": 0.0,
+        "bootstrap_type": "No",
+        "thread_count": threads,
+        "allow_writing_files": False,
+        "verbose": False,
+    }
+    classifier = CatBoostClassifier(
+        loss_function="Logloss",
+        eval_metric="Logloss",
+        **common,
+    ).fit(
+        training.x,
+        training.direction,
+        sample_weight=weights,
+    )
+    alpha = ",".join(format(value, "g") for value in DEFAULT_QUANTILES)
+    quantile_model = CatBoostRegressor(
+        loss_function=f"MultiQuantile:alpha={alpha}",
+        **common,
+    ).fit(
+        training.x,
+        training.target_return,
+        sample_weight=weights,
+    )
+    return BaselineModelBundle(
+        family=CATBOOST_FAMILY,
+        classifier=classifier,
+        quantile_model=quantile_model,
+    )
+
+
+def baseline_library_versions() -> dict[str, str]:
+    return {
+        "catboost": catboost.__version__,
+        "numpy": np.__version__,
+    }
 
 
 def _readonly_database(path: Path) -> sqlite3.Connection:

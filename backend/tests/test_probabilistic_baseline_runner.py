@@ -8,10 +8,13 @@ from platform_app.modules.experiments.foundation_return_dataset import (
     reference_full_fill_net_return,
 )
 from platform_app.modules.experiments.probabilistic_baseline_runner import (
+    CATBOOST_FAMILY,
     BaselinePartition,
     ProbabilisticBaselineError,
     _load_partition_from_connections,
+    baseline_library_versions,
     fee_adjusted_returns,
+    fit_catboost_baseline,
     historical_baseline_predictions,
     normalized_weights,
     weighted_quantiles,
@@ -31,6 +34,24 @@ def partition() -> BaselinePartition:
         target_return=np.array([-0.03, -0.01, 0.02, 0.08], dtype=np.float32),
         direction=np.array([0, 0, 1, 1], dtype=np.int8),
         sample_weight=np.array([1.0, 1.0, 2.0, 6.0]),
+    )
+
+
+def model_partition(rows: int = 80) -> BaselinePartition:
+    rng = np.random.default_rng(20260917)
+    x = rng.normal(size=(rows, 4)).astype(np.float32)
+    target = (0.02 * x[:, 0] - 0.01 * x[:, 1]).astype(np.float32)
+    return BaselinePartition(
+        x=x,
+        dates=np.repeat(np.arange(20200101, 20200101 + rows // 4), 4),
+        boards=np.tile(np.arange(4, dtype=np.int8), rows // 4),
+        instruments=np.asarray(
+            [f"{index:06d}.SZ".encode() for index in range(rows)],
+            dtype="S9",
+        ),
+        target_return=target,
+        direction=(target > 0).astype(np.int8),
+        sample_weight=np.linspace(1.0, 2.0, rows),
     )
 
 
@@ -204,6 +225,23 @@ def test_partition_loader_uses_full_date_features_then_training_selection():
     assert len(test.x) == 3
     ranking.close()
     sampling.close()
+
+
+def test_catboost_baseline_outputs_probability_and_ordered_quantiles():
+    training = model_partition()
+
+    model = fit_catboost_baseline(training, iterations=3, threads=1)
+    predictions = model.predict(training.x[:7])
+
+    assert model.family == CATBOOST_FAMILY
+    assert predictions["pWin"].shape == (7,)
+    assert np.all((predictions["pWin"] >= 0) & (predictions["pWin"] <= 1))
+    quantiles = np.column_stack(
+        [value for key, value in predictions.items() if key.startswith("q")]
+    )
+    assert quantiles.shape == (7, 7)
+    assert np.all(np.diff(quantiles, axis=1) >= 0)
+    assert baseline_library_versions()["catboost"] == "1.2.10"
 
 
 def test_baseline_primitives_reject_invalid_inputs():
