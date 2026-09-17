@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any
 
 import catboost
+import lightgbm
 import numpy as np
 import xgboost
 from catboost import CatBoostClassifier, CatBoostRegressor
+from lightgbm import LGBMClassifier, LGBMRegressor
 from xgboost import XGBClassifier, XGBRegressor
 
 from platform_app.modules.experiments.foundation_return_contract import (
@@ -36,6 +38,7 @@ BASELINE_SEED = 20260917
 DEFAULT_ITERATIONS = 120
 CATBOOST_FAMILY = "catboost-multiquantile-v1"
 XGBOOST_FAMILY = "xgboost-quantile-v1"
+LIGHTGBM_FAMILY = "lightgbm-quantile-v1"
 PARTITION_RANGES = {
     "train": ("trainStart", "trainEnd", "trainSelected"),
     "probabilityCalibration": (
@@ -103,10 +106,15 @@ class BaselineModelBundle:
             self.classifier.predict_proba(x)[:, 1],
             dtype=np.float32,
         )
-        raw_quantiles = np.asarray(
-            self.quantile_model.predict(x),
-            dtype=np.float32,
-        )
+        if isinstance(self.quantile_model, tuple):
+            raw_quantiles = np.column_stack(
+                [model.predict(x) for model in self.quantile_model],
+            ).astype(np.float32)
+        else:
+            raw_quantiles = np.asarray(
+                self.quantile_model.predict(x),
+                dtype=np.float32,
+            )
         if raw_quantiles.ndim == 1:
             raw_quantiles = raw_quantiles.reshape(-1, 1)
         if raw_quantiles.shape != (len(x), len(self.quantiles)):
@@ -222,9 +230,61 @@ def fit_xgboost_baseline(
     )
 
 
+def fit_lightgbm_baseline(
+    training: BaselinePartition,
+    *,
+    iterations: int = DEFAULT_ITERATIONS,
+    threads: int = 4,
+) -> BaselineModelBundle:
+    if iterations <= 0 or threads <= 0:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_TRAINING_CONFIG_INVALID",
+        )
+    weights = normalized_weights(training.sample_weight)
+    common = {
+        "n_estimators": iterations,
+        "learning_rate": 0.05,
+        "num_leaves": 31,
+        "max_depth": 6,
+        "min_child_samples": 100,
+        "reg_lambda": 3.0,
+        "random_state": BASELINE_SEED,
+        "n_jobs": threads,
+        "verbosity": -1,
+        "deterministic": True,
+        "force_col_wise": True,
+    }
+    classifier = LGBMClassifier(
+        objective="binary",
+        **common,
+    ).fit(
+        training.x,
+        training.direction,
+        sample_weight=weights,
+    )
+    quantile_models = tuple(
+        LGBMRegressor(
+            objective="quantile",
+            alpha=alpha,
+            **common,
+        ).fit(
+            training.x,
+            training.target_return,
+            sample_weight=weights,
+        )
+        for alpha in DEFAULT_QUANTILES
+    )
+    return BaselineModelBundle(
+        family=LIGHTGBM_FAMILY,
+        classifier=classifier,
+        quantile_model=quantile_models,
+    )
+
+
 def baseline_library_versions() -> dict[str, str]:
     return {
         "catboost": catboost.__version__,
+        "lightgbm": lightgbm.__version__,
         "numpy": np.__version__,
         "xgboost": xgboost.__version__,
     }

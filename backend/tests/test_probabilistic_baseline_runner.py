@@ -9,6 +9,7 @@ from platform_app.modules.experiments.foundation_return_dataset import (
 )
 from platform_app.modules.experiments.probabilistic_baseline_runner import (
     CATBOOST_FAMILY,
+    LIGHTGBM_FAMILY,
     XGBOOST_FAMILY,
     BaselinePartition,
     ProbabilisticBaselineError,
@@ -16,6 +17,7 @@ from platform_app.modules.experiments.probabilistic_baseline_runner import (
     baseline_library_versions,
     fee_adjusted_returns,
     fit_catboost_baseline,
+    fit_lightgbm_baseline,
     fit_xgboost_baseline,
     historical_baseline_predictions,
     normalized_weights,
@@ -261,6 +263,23 @@ def test_xgboost_baseline_outputs_probability_and_ordered_quantiles():
     assert quantiles.shape == (7, 7)
     assert np.all(np.diff(quantiles, axis=1) >= 0)
     assert baseline_library_versions()["xgboost"] == "3.4.1"
+
+
+def test_lightgbm_baseline_outputs_probability_and_ordered_quantiles():
+    training = model_partition()
+
+    model = fit_lightgbm_baseline(training, iterations=3, threads=1)
+    predictions = model.predict(training.x[:7])
+
+    assert model.family == LIGHTGBM_FAMILY
+    assert predictions["pWin"].shape == (7,)
+    assert np.all((predictions["pWin"] >= 0) & (predictions["pWin"] <= 1))
+    quantiles = np.column_stack(
+        [value for key, value in predictions.items() if key.startswith("q")]
+    )
+    assert quantiles.shape == (7, 7)
+    assert np.all(np.diff(quantiles, axis=1) >= 0)
+    assert baseline_library_versions()["lightgbm"] == "4.7.0"
 
 
 def test_baseline_primitives_reject_invalid_inputs():
