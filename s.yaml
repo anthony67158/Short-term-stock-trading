@@ -1,0 +1,260 @@
+edition: 3.0.0
+name: stock-dashboard
+access: default   # 对应 `s config add` 里配置的阿里云密钥别名
+
+vars:
+  region: cn-hangzhou              # 按需改：cn-hangzhou / cn-shanghai / ap-southeast-1(新加坡) 等
+  functionName: stock-dashboard
+
+resources:
+  web:
+    component: fc3
+    props:
+      region: ${vars.region}
+      functionName: ${vars.functionName}
+      description: 短线操盘台（前端+12个API，FC3.0 自定义运行时 + OSS 存储）
+      runtime: custom.debian10        # 自定义运行时（Debian10 内置多语言，用系统 node 或自带）
+      cpu: 1
+      memorySize: 2048                 # 2GB / 1vCPU：加速 SSE 流转、上游拉取与大 JSON 解析（原 0.5C/1G 偏低拖慢生成）
+      diskSize: 512
+      timeout: 600                     # ai/agent/daily_report 走 SSE 长连接 + 慢模型(军师 V4-Pro 常 47s+)，放到 FC 上限 600s，杜绝平台侧强杀导致的"生成超时"
+      instanceConcurrency: 20          # 单实例并发（Web 函数支持多请求复用实例，省成本）
+      caPort: 9000                     # 与 server.js 监听端口一致（FC 也会用 FC_SERVER_PORT 注入）
+      code: ./.fc-package              # npm run package:fc 生成的最小运行包
+      customRuntimeConfig:
+        command:
+          - /var/fc/lang/nodejs20/bin/node
+          - server.js
+      environmentVariables:
+        # 让 PATH 包含内置 node，避免子进程找不到
+        PATH: /var/fc/lang/nodejs20/bin:/usr/local/bin:/usr/bin:/bin
+        ADVICE_FC_REGION: ${vars.region}
+        ADVICE_FC_FUNCTION_NAME: ${vars.functionName}
+        ADVICE_ASYNC_WORKER: "true"
+        DECISION_CONCURRENCY: "1"
+        # ---- 大模型（保持原样，不迁百炼）----
+        LLM_BASE_URL: ${env('LLM_BASE_URL')}
+        LLM_API_KEY: ${env('LLM_API_KEY')}
+        # 模型沿用代码内默认值（保持与线上一致）
+        EXPLAIN_MODEL: DeepSeek-V4-Pro
+        ASSISTANT_MODEL: Qwen3-Max-A
+        DAILY_MODEL: Qwen3-Max-A
+        # ---- 第三方数据 ----
+        FINNHUB_KEY: ${env('FINNHUB_KEY')}
+        # 同花顺扶摇：A股报价与日K优先源；未配置时自动跳过。
+        FUYAO_API_KEY: ${env('FUYAO_API_KEY')}
+        # 豆包搜索 Global版：军师个股/行业/舆情补盲，设 false 可立即停用。
+        DOUBAO_SEARCH_API_KEY: ${env('DOUBAO_SEARCH_API_KEY')}
+        DOUBAO_SEARCH_KEY_NAME: ${env('DOUBAO_SEARCH_KEY_NAME')}
+        DOUBAO_SEARCH_ENABLED: "true"
+        PLATFORM_AGENT_SEARCH_MAX_CALLS: "4"
+        # 可选自托管 SearXNG；未配置时不发请求，不依赖公共实例。
+        SEARXNG_ENABLED: ${env('SEARXNG_ENABLED')}
+        SEARXNG_BASE_URL: ${env('SEARXNG_BASE_URL')}
+        QUANT_URL: ${env('QUANT_URL')}
+        QUANT_KEY: ${env('QUANT_KEY')}
+        # 五策略产品工具层可独立启用；不向模型加权，也不直接授权交易。
+        STRATEGY_PATTERN_POLICY: "RESEARCH"
+        STRATEGY_PATTERN_RECALL: "ACTIVE"
+        STRATEGY_PATTERN_PRICE_ANCHORS: "ACTIVE"
+        STRATEGY_PATTERN_CONFIRMATION: "ACTIVE"
+        STRATEGY_PATTERN_DISPLAY: "ACTIVE"
+        STRATEGY_PATTERN_PLAYBOOK_BLEND: "RESEARCH"
+        STRATEGY_PATTERN_MODEL_FEATURES: "RESEARCH"
+        AUTHORIZED_ACCOUNT_HASHES: ${env('AUTHORIZED_ACCOUNT_HASHES')}
+        RUNTIME_CONFIG_ADMIN_HASHES: ${env('RUNTIME_CONFIG_ADMIN_HASHES')}
+        # ---- OSS 存储（替代 Vercel Blob）----
+        OSS_REGION: ${env('OSS_REGION')}
+        OSS_BUCKET: ${env('OSS_BUCKET')}
+        # FC 与 OSS 同在杭州，必须走内网；公网 Endpoint 会把每次 GetObject 计为 NetworkOut。
+        OSS_ENDPOINT: https://oss-cn-hangzhou-internal.aliyuncs.com
+        OSS_ALLOW_PUBLIC_NETWORK: "false"
+        OSS_ACCESS_KEY_ID: ${env('OSS_ACCESS_KEY_ID')}
+        OSS_ACCESS_KEY_SECRET: ${env('OSS_ACCESS_KEY_SECRET')}
+        # ---- FC Timer / 云端任务鉴权口令 ----
+        # Timer payload 与该值匹配后才允许进入内部定时任务。
+        CRON_KEY: ${env('CRON_KEY')}
+        # 军师委员会仅影子运行；设为 false 可紧急关闭额外 LLM 调用。
+        ADVISOR_COUNCIL_SHADOW: ${env('ADVISOR_COUNCIL_SHADOW')}
+        # 策略人工晋级使用独立密钥；空值表示批准接口禁用。
+        STRATEGY_APPROVAL_KEY: ${env('STRATEGY_APPROVAL_KEY')}
+        # ---- Web Push(VAPID)：后台/关页面推送盯盘预警 ----
+        # 公钥同时以 public/vapid.json 暴露给前端；私钥仅存服务端 env,绝不进前端/仓库。
+        VAPID_PUBLIC_KEY: ${env('VAPID_PUBLIC_KEY')}
+        VAPID_PRIVATE_KEY: ${env('VAPID_PRIVATE_KEY')}
+        VAPID_SUBJECT: ${env('VAPID_SUBJECT')}
+      # HTTP 触发器：对外提供访问地址（可再叠加 CDN/自定义域名做 HTTPS 加速）
+      triggers:
+        - triggerName: http
+          triggerType: http
+          triggerConfig:
+            authType: anonymous
+            disableURLInternet: false
+            methods:
+              - GET
+              - POST
+              - PUT
+              - OPTIONS
+        - triggerName: advice-resume-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        # 策略日报自动计划：每 5 分钟检查各账号设置，到期后异步分发独立 Worker。
+        - triggerName: daily-report-schedule-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: portfolio-analysis-resume-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: sector-forecast-due-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "@every 5m"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        # 尾盘拾金：14:50 自动正式扫描，14:52 仅作失败重试；幂等结果不重算。
+        - triggerName: tail-pick-1450-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 50,52 14 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        # V3 机会样本：盘中两次+收盘一次完整市场扫描，形成三路径反事实账本。
+        - triggerName: formula-selection-intraday-am-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 20 10 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: formula-selection-intraday-pm-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 40 13 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: formula-selection-close-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 10 15 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        # 机会雷达结果结算：读取历史账本与原始分钟价，成熟结果禁止覆盖写入。
+        - triggerName: opportunity-radar-settlement-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 10 17 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        # 每日学习闭环：压实T+5选股结果与真实人工成交归因，发布脱敏训练视图。
+        - triggerName: learning-settlement-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 20 17 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
+        # 预催化发现：交易时段低频读取新增公告，收盘后补齐当日披露。
+        - triggerName: pre-catalyst-scan-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 0,30 9-14 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: pre-catalyst-close-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 30 18 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        # 持仓自动复盘：每场分段重复触发，未完成股票按租约续跑，页面关闭也不丢任务。
+        - triggerName: review-noon-open
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 35,50 11 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: review-noon-core
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 5,20,35,50 12 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: review-close-open
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 5,20,35,50 15 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: review-close-late
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 5,20,35,50 16 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        # A股盯盘预警：工作日北京时间 09:30–11:30、13:00–15:00 每分钟触发。
+        # 拆成 5 段可精确覆盖半小时时点，避免全天每分钟空调用。
+        - triggerName: alert-market-am-open
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 30-59 9 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-am-core
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 * 10 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-am-close
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 0-30 11 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-pm-core
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 * 13-14 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+        - triggerName: alert-market-pm-close
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 0 15 * * 1-5"
+            enable: false
+            payload: ${env('CRON_KEY')}
+      # 已备案生产域名。免费证书有效至 2026-11-15，续签后需更新 certId。
+      customDomain:
+        domainName: www.tedixtf.cn
+        protocol: HTTP,HTTPS
+        certConfig:
+          certId: "26673093"
+        tlsConfig:
+          minVersion: TLSv1.2
+          maxVersion: TLSv1.3
+          cipherSuites:
+            - TLS_RSA_WITH_AES_128_GCM_SHA256
+            - TLS_RSA_WITH_AES_256_GCM_SHA384
+            - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+            - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+            - TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305
+        route:
+          qualifier: LATEST
+          path: /*
+          methods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - HEAD
+            - PATCH
+            - OPTIONS
+        authConfig:
+          authType: anonymous

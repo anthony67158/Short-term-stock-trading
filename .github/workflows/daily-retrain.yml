@@ -1,0 +1,115 @@
+name: daily-learning-challengers
+
+on:
+  schedule:
+    # UTC Sunday-Friday 17:15 = Beijing Monday-Saturday 01:15.
+    - cron: "15 17 * * 0-5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-learning-challengers
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PIP_DEFAULT_TIMEOUT: "90"
+      OSS_ENDPOINT: ${{ secrets.LEARNING_OSS_ENDPOINT }}
+      OSS_BUCKET: ${{ secrets.LEARNING_OSS_BUCKET }}
+      OSS_ACCESS_KEY_ID: ${{ secrets.LEARNING_OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.LEARNING_OSS_ACCESS_KEY_SECRET }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Verify immutable learning contracts
+        run: |
+          node --test \
+            test/learning-store.test.js \
+            test/learning-capture.test.js \
+            test/learning-settlement.test.js \
+            test/learning-training-view.test.js
+
+      - name: Use Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: qlib-service/requirements-ci.txt
+
+      - name: Install locked training dependencies
+        working-directory: qlib-service
+        run: |
+          python -m pip install --retries 5 -r requirements-ci.txt
+          python -m pip check
+
+      - name: Verify challenger training gates
+        working-directory: qlib-service
+        run: python -m unittest test_learning_pipeline.py
+
+      - name: Settle matured outcomes and publish redacted view
+        env:
+          LEARNING_PIPELINE_URL: ${{ secrets.LEARNING_PIPELINE_URL }}
+          LEARNING_CRON_KEY: ${{ secrets.LEARNING_CRON_KEY }}
+        run: |
+          test -n "$LEARNING_PIPELINE_URL"
+          test -n "$LEARNING_CRON_KEY"
+          curl --fail --silent --show-error \
+            --retry 2 \
+            --max-time 300 \
+            -X POST \
+            -H "content-type: application/json" \
+            -H "x-cron-key: $LEARNING_CRON_KEY" \
+            "$LEARNING_PIPELINE_URL" \
+            -o learning-settlement.json
+          node -e "
+            const result = require('./learning-settlement.json');
+            if (!result.ok) throw new Error(result.error || 'settlement failed');
+            console.log(JSON.stringify(result.settlement));
+          "
+
+      - name: Download latest redacted training view
+        working-directory: qlib-service
+        run: |
+          mkdir -p ../learning-artifacts
+          python learning_pipeline.py download \
+            --output ../learning-artifacts/training-view.json
+
+      - name: Train and gate challengers
+        working-directory: qlib-service
+        run: |
+          python learning_pipeline.py train \
+            --view ../learning-artifacts/training-view.json \
+            --output ../learning-artifacts/run
+          cat ../learning-artifacts/run/report.json
+
+      - name: Upload immutable challenger run
+        working-directory: qlib-service
+        run: |
+          python learning_pipeline.py upload \
+            --directory ../learning-artifacts/run
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: learning-challenger-${{ github.run_id }}
+          path: |
+            learning-settlement.json
+            learning-artifacts/run/report.json
+          if-no-files-found: warn
+          retention-days: 30
