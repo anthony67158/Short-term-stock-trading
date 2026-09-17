@@ -162,7 +162,19 @@ test('每日结算将T5结果写成不可变结果并可幂等重跑', async () 
       candidates: [{ code: '600000', price: 10, rankingScore: 0.8 }],
     },
   })
-  const store = eventStore([prediction])
+  const legacyGrossOutcome = buildLearningEvent({
+    kind: LEARNING_EVENT_KIND.OUTCOME,
+    eventId: `stock-pick-outcome:${prediction.eventId}:600000`,
+    sourceId: `${prediction.eventId}:600000`,
+    tradeDate: '2026-09-10',
+    occurredAt: 2,
+    payload: {
+      outcomeType: 'STOCK_PICK_T5',
+      code: '600000',
+      returnPct: 5,
+    },
+  })
+  const store = eventStore([prediction, legacyGrossOutcome])
   const options = {
     store,
     accounts: async () => [],
@@ -184,7 +196,12 @@ test('每日结算将T5结果写成不可变结果并可幂等重跑', async () 
   assert.equal(
     store.values.filter((event) =>
       event.payload?.outcomeType === 'STOCK_PICK_T5'
+      && event.payload?.feeAdjusted === true
     ).length,
     1,
   )
+  assert.ok(store.values.some((event) =>
+    event.eventId.startsWith('stock-pick-outcome-fee-v2:')
+    && event.payload?.labelVersion === 'stock-pick-t5-fee-v2'
+  ))
 })

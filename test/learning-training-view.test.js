@@ -36,6 +36,12 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
     tradeDate: '2026-09-10',
     payload: {
       outcomeType: 'STOCK_PICK_T5',
+      labelVersion: 'stock-pick-t5-fee-v2',
+      feeAdjusted: true,
+      feePolicyId: 'A_SHARE_STANDARD_V1',
+      quantity: 100,
+      totalFees: 10.5,
+      grossReturnPct: 6,
       code: '600000',
       rankingScore: 0.8,
       returnPct: 5,
@@ -46,6 +52,16 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
       targetDate: '2026-09-17',
     },
     lineage: { predictionEventId: 'prediction-1' },
+  }
+  const legacyGrossOutcome = {
+    ...stockOutcome,
+    eventId: 'legacy-gross-outcome',
+    payload: {
+      ...stockOutcome.payload,
+      labelVersion: undefined,
+      feeAdjusted: false,
+      returnPct: 6,
+    },
   }
   const positionPrediction = {
     kind: LEARNING_EVENT_KIND.POSITION_PREDICTION,
@@ -90,6 +106,7 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
     prediction,
     positionPrediction,
     stockOutcome,
+    legacyGrossOutcome,
     positionOutcome,
   ])
 
@@ -99,6 +116,13 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
   })
 
   assert.equal(result.view.stockPick.length, 1)
+  assert.equal(result.view.stockPick[0].feeAdjusted, true)
+  assert.equal(
+    result.view.stockPick[0].labelVersion,
+    'stock-pick-t5-fee-v2',
+  )
+  assert.equal(result.view.stockPick[0].grossReturnPctT5, 6)
+  assert.equal(result.view.stockPick[0].returnPctT5, 5)
   assert.equal(result.view.position.length, 1)
   assert.equal(result.view.position[0].expectedNetR, 0.4)
   assert.equal(result.view.position[0].realizedNetR, 0.6)
