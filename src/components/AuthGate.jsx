@@ -3,7 +3,6 @@ import Icon from './Icon'
 import BrandMark from './BrandMark'
 import { authStore, useAuthStore, hasLegacyData } from '../authStore'
 import { llmConfigStore } from '../llmConfigStore'
-import { quantReportUiStore } from '../quantReportUiStore'
 import {
   aiSearchConfigStore,
   useAiSearchConfig,
@@ -217,8 +216,8 @@ export function AccountMenu() {
                   <Icon name="edit" size={13} />
                   {searchConfig.hasKey ? '更换豆包 API Key' : '配置豆包 API Key'}
                 </button>
-                <button type="button" role="menuitem" className="acct-item" onClick={() => { quantReportUiStore.open(); setOpen(false); setAdvancedOpen(false) }}>
-                  <Icon name="gauge" size={13} />模型训练发布
+                <button type="button" role="menuitem" className="acct-item" onClick={() => { llmConfigStore.open('training'); setOpen(false); setAdvancedOpen(false) }}>
+                  <Icon name="gauge" size={13} />模型训练中心
                 </button>
               </div>
             )}

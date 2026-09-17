@@ -175,6 +175,7 @@ export function normalizeLearningTrainingReport(
       facts: [],
       comparisonMetrics: [],
       components: [],
+      thresholds: [],
       artifacts: safeStrings(result.artifacts, 120),
       reportPath: text(pathname, 500),
       sourceViewHash: text(report.sourceViewHash, 128),
@@ -208,6 +209,25 @@ export function normalizeLegacyTrainingReport(report, pathname = '') {
         selected: finite(item?.selected),
       })).filter((item) => item.label)
     : []
+  const components = Array.isArray(report.details?.components)
+    ? report.details.components.slice(0, 20).map((item) => ({
+        label: text(item?.label || item?.component, 100),
+        status: text(item?.status, 40),
+        notes: safeStrings([
+          ...(Array.isArray(item?.improvements) ? item.improvements : []),
+          ...(Array.isArray(item?.blockers) ? item.blockers : []),
+        ], 240).slice(0, 6),
+      })).filter((item) => item.label)
+    : []
+  const thresholds = Object.entries(
+    report.details?.thresholds?.overall || {},
+  ).flatMap(([key, value]) => {
+    const numeric = finite(value)
+    return numeric == null ? [] : [{
+      key: text(key, 80),
+      value: numeric,
+    }]
+  })
   const productionChanged = report.decision === 'promote'
     || report.decision === 'updated'
   return {
@@ -257,9 +277,8 @@ export function normalizeLegacyTrainingReport(report, pathname = '') {
     reasons: safeStrings(report.details?.blockers, 240),
     facts,
     comparisonMetrics: metrics,
-    components: Array.isArray(report.details?.components)
-      ? report.details.components.slice(0, 20)
-      : [],
+    components,
+    thresholds,
     artifacts: [],
     reportPath: text(pathname, 500),
     sourceViewHash: null,
