@@ -1162,6 +1162,24 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端已建立按量Serverless 
 - 54项Task 1-4聚焦测试、Ruff、产物幂等复跑与`git diff --check`通过。累计付费
   仍为0元；Task 5-8按计划停止，未打开第5折、未修改生产指针或交易事实。
 
+### 本机预测训练数据清理（2026-09-17）
+
+- 用户确认当前预测模型无继续价值后，终止Task 5-8，不再进行轻量微调、五折三种子、
+  校准或发布。删除`~/.local/share/stock-platform`下除运行/恢复资产外的全部训练
+  数据集、OOF、模型、回测、教师产物和`foundation-teacher-runtime-v1`。
+- 同时删除家目录下可重建的Tushare分片、mainboard历史、重标注工作目录、
+  `stock-datasets`、stockdb研究目录，以及仅含TTM、TimesFM、Chronos权重的
+  Hugging Face缓存。清理前计划删除量约114.9GiB；磁盘可用空间由21GiB增至137GiB，
+  实际释放约116GiB。
+- 保留`backups`、`migrations`、`joint-releases`、`joint-candidates`和
+  `daily-joint-cycles`。主备份
+  `platform-20260916T1432Z.dump` SHA-256仍为
+  `72fc6c42a4236931a9e9ade76d2ddd9a1467cbe57a3094701d2a128b59c029ba`，
+  活动SHADOW指针SHA-256仍为
+  `b67344b1aeecc1fb6e0bb81f2e31bf943c882a335fbb81d1a6505c33810f17d5`。
+- 清理后生产`https://www.tedixtf.cn/__health`返回`ok`。未删除仓库源码、文档、
+  外部配置、账户迁移记录或数据库备份，未修改OSS、FC、生产指针或交易事实。
+
 ### 选股候选源、分位门槛与净效用排序（2026-09-17）
 
 - 保留盘中回踩承接、盘中资金先行、收盘趋势回踩、收盘蓄势突破四条量价公式；
@@ -1251,7 +1269,7 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端已建立按量Serverless 
 - 选型：召回层复用全池扫描器 `fetchTailPickRealtimePool`（`api/_tail_pick_data.js`，翻页并发 + `unique.length===total` 强校验）+ Alpha158 因子公式（MIT）+ 量价/资金规则；排序层用 LightGBM（backend 已装 4.7.0）+ 现成 `ranking_*`/`execution_walk_forward` 骨架，**不新装 qlib**（默认 py3.14 装不上，backend 有 py3.12.13）。Agent 精选复用 `_stock_fund` 三级资金 + 豆包 `_ai_search`/开源 `_searxng_search`。排除 backtrader、时序模型直接上线、TimesFM3.0 商用权重、RD-Agent 直出因子。
 - 全A股全池分页扫描唯一实现在 `fetchTailPickRealtimePool`，被公式/尾盘/预催化共用。排序模型骨架：`ranking_model_trainer.py`(LGBMRanker/HGB, schema `ranking-model-bundle.v1`)、`ranking_walk_forward.py`、`release_service.py`。
 
-S1（已完成）：`shared/appShell.js` today 段 label/shortLabel 改"选股"、描述改为全市场扫描召回；`src/App.jsx` 子视图改"选股结果/盘面研究"。内部路由 key `today` 保留（深链/快捷键/历史栈不受影响）。`app-shell`、`mobile-navigation` 测试通过；无测试断言旧文案。今日作战指令中心 UI 随 S5 新选股结果视图一并替换。
+S1（已完成）：`shared/appShell.js` today 段 label/shortLabel 改"选股"、描述改为全市场扫描召回；`src/App.jsx` 子视图改"选股结果/盘面研究"，选股结果挂载 `StockPickTab`、盘面研究挂载 `ResearchTab`。内部路由 key `today` 保留（深链/快捷键/历史栈不受影响）。`app-shell`、`mobile-navigation` 测试通过；无测试断言旧文案。收尾：`src/components/PlanTab.jsx` 空态文案"从今日作战加入机会"→"从选股加入候选"，为唯一残留的生产可见旧文案。`src/components/TodayTab.jsx`（及其 `OpportunityRadar` 子树）已无任何生产消费者（App.jsx 不再挂载、无 src import），但仍被 9 个 UI 契约测试作为回归基线读取，非零消费者；按纵向切片"先验收替代、再以零消费证据删除、禁止盲删"的纪律，其物理删除留待后续独立切片，本轮不动测试基线。
 
 S2（已完成，commit 36c63fe）：`/api/stock_pick` 召回服务。`shared/stockPick.js` 合同（规则召回分/候选归一化/模型优先排序/不可用降级）；`api/_stock_pick_recall.js` 复用 `fetchTailPickRealtimePool` 全池扫描→规则预筛(取Top72)→`scoreCandidatesWithDecisionModel` 取排序分(缺失回落规则分并标注)→归一化快照；`api/_stock_pick_store.js` OSS+内存回退+单飞锁；`api/stock_pick.js` GET读快照/POST run。测试 `stock-pick-contract`(5) + `stock-pick-recall`(4) 通过。
 
@@ -1261,7 +1279,7 @@ S5（已完成，commit 98ac4c4）：前端选股结果视图。`src/stockPickCl
 
 待续：S3 离线 LightGBM 排序模型(用 backend py3.12+现成 ranking_* 骨架, 费后 walk-forward, 产真实模型分)；S6 零消费者删旧候选池 Agent 后端(opportunity_agent_selection*/OpportunityRadar*/TodayTab, 注意 opportunity_radar 账本族是训练标签来源)；S7 全量验证+浏览器走查+验收记录。
 
-S7（已完成，对已交付部分）：全量 Node `2489 passed, 0 failed`(含选股19项无回归)；vite build 通过；FC 打包通过。`/api/stock_pick` handler 契约实测：GET 空态返回 `{snapshot:null,...}`；POST 未鉴权 401；鉴权后端异常已加固为 401(不再 500)。本地隔离浏览器走查(390/768/1440)：Agent 精选卡渲染、买入策略/时机文案齐全、候选池渲染、0 横向溢出、0 控制台错误(一次性预览已清理)。
+S7（已完成）：全量 Node `2479 passed, 0 failed`（S1 PlanTab 文案收尾后复跑仍全绿，选股相关切片无回归）；`vite build` 通过（`StockPickTab`、`ResearchTab` 独立 chunk 均产出）；`npm run package:fc` FC 打包通过（`.fc-package` 就绪）。`/api/stock_pick` handler 契约实测：GET 空态返回 `{snapshot:null,...}`；POST 未鉴权 401；鉴权后端异常已加固为 401(不再 500)。本地隔离浏览器走查(390/768/1440)：Agent 精选卡渲染、买入策略/时机文案齐全、候选池渲染、0 横向溢出、0 控制台错误(一次性预览已清理)。至此 S1–S7 七个纵向切片全部交付验收，选股模块（全市场召回→LightGBM 排序→Agent 精选）已并入生产。
 
 S3 历史阻塞（已解除）：训练依赖 sealed 全A股历史行情 market-dataset；有效 Tushare 兼容源配置到仓库外后，已完成数据集构建、训练、回测和发布。
 
