@@ -9,6 +9,7 @@ from platform_app.modules.experiments.foundation_teacher_runner import (
     TeacherDataset,
     _daily_quotas,
     _mature_return_context,
+    _partition_samples,
     _score,
 )
 
@@ -73,6 +74,23 @@ def test_mature_context_excludes_unmatured_labels():
     assert context is not None
     assert context.shape == (DEFAULT_CONTEXT_LENGTH,)
     assert np.all(np.isfinite(context))
+    connection.close()
+
+
+def test_partition_samples_preserve_decision_date():
+    connection = ranking_database()
+
+    dataset = _partition_samples(
+        connection,
+        fold=1,
+        partition="test",
+        start="20200407",
+        end="20200407",
+        samples=1,
+    )
+
+    assert dataset.dates.tolist() == [20200407]
+    assert dataset.partitions.tolist() == [b"test"]
     connection.close()
 
 

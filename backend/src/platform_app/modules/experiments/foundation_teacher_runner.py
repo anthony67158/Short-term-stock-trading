@@ -211,7 +211,7 @@ def _partition_samples(
     records = []
     for date in dates:
         candidates = ranking.execute(
-            "SELECT instrument_id, board, execution_date, terminal_date, "
+            "SELECT instrument_id, decision_date, board, execution_date, terminal_date, "
             "forward_return_next_open_5 FROM ranking_samples "
             "WHERE decision_date = ? ORDER BY instrument_id",
             (date,),
