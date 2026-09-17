@@ -121,6 +121,29 @@ def _verified_upstream(root: Path, expected_schema: str) -> tuple[dict, Path]:
     return manifest, database
 
 
+def verify_foundation_market_cap_dataset(root: Path) -> tuple[dict, Path]:
+    resolved = root.expanduser().resolve()
+    manifest_path = resolved / "market-cap-manifest.json"
+    if not manifest_path.is_file():
+        raise FoundationMarketCapDatasetError("MARKET_CAP_DATASET_NOT_SEALED")
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        database = resolved / manifest["database"]
+        expected_hash = manifest["databaseSha256"]
+    except (KeyError, json.JSONDecodeError, TypeError) as exc:
+        raise FoundationMarketCapDatasetError(
+            "MARKET_CAP_DATASET_MANIFEST_INVALID",
+        ) from exc
+    if (
+        manifest.get("schemaVersion") != SCHEMA_VERSION
+        or re.fullmatch(r"[0-9a-f]{64}", str(expected_hash)) is None
+        or not database.is_file()
+        or _file_sha256(database) != expected_hash
+    ):
+        raise FoundationMarketCapDatasetError("MARKET_CAP_DATASET_INVALID")
+    return manifest, database
+
+
 def _decimal(value, error: str) -> Decimal:
     try:
         result = Decimal(str(value))
@@ -267,6 +290,7 @@ class FoundationMarketCapDataset:
         self.root.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.database_path, autocommit=True)
         self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA foreign_keys = ON")
         self.db.execute("PRAGMA journal_mode = WAL")
         self.db.execute("PRAGMA synchronous = NORMAL")
         self.db.autocommit = False

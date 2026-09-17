@@ -22,6 +22,12 @@ from platform_app.modules.experiments.foundation_return_dataset import (
     verify_foundation_return_dataset,
     walk_forward_partition,
 )
+from platform_app.modules.experiments.foundation_sampling_dataset import (
+    FoundationSamplingDataset,
+    FoundationSamplingDatasetError,
+    allocate_daily_quotas,
+    select_stratified_training_rows,
+)
 from platform_app.modules.experiments.label_dataset import SCHEMA as LABEL_SCHEMA
 from platform_app.modules.experiments.market_dataset import (
     MarketDataset,
@@ -569,3 +575,146 @@ def test_market_cap_partition_rejects_missing_or_invalid_rows(
             match="MARKET_CAP_PARTITIONS_INCOMPLETE",
         ):
             dataset.seal()
+
+
+def _seal_market_cap(tmp_path, sealed_sources, foundation_root):
+    market_root, ranking_root, _labels_root, dates = sealed_sources
+    root = tmp_path / "market-cap"
+    with FoundationMarketCapDataset(
+        root,
+        dataset_id="market-cap-v1",
+        foundation_dataset_root=foundation_root,
+        ranking_dataset_root=ranking_root,
+        market_dataset_root=market_root,
+    ) as dataset:
+        for trade_date in dataset.pending_dates():
+            dataset.ingest_partition(
+                trade_date,
+                _daily_basic_rows(trade_date, dates.index(trade_date)),
+            )
+        dataset.seal()
+    return root
+
+
+def test_stratified_selection_is_deterministic_and_weighted():
+    rows = []
+    for index in range(20):
+        rows.append(
+            {
+                "instrument_id": f"SZ.{index:06d}",
+                "board": "MAIN" if index < 10 else "CHINEXT",
+                "execution_date": "20250102",
+                "terminal_date": "20250108",
+                "median_amount_20_cny": str(1000 + index * 100),
+                "forward_return_next_open_5": (
+                    "0.02" if index % 2 else "-0.02"
+                ),
+                "total_market_cap_cny": str(1_000_000 + index * 10_000),
+            }
+        )
+
+    selected, strata = select_stratified_training_rows(
+        rows,
+        fold=1,
+        decision_date="20250101",
+        quota=12,
+        sampling_seed=17,
+    )
+    repeated, repeated_strata = select_stratified_training_rows(
+        list(reversed(rows)),
+        fold=1,
+        decision_date="20250101",
+        quota=12,
+        sampling_seed=17,
+    )
+
+    assert selected == repeated
+    assert strata == repeated_strata
+    assert len(selected) == 12
+    assert {row["board"] for row in strata} == {"MAIN", "CHINEXT"}
+    assert {row["outcomeBucket"] for row in strata} == {"LOSS", "NON_LOSS"}
+    for stratum in strata:
+        probability = Decimal(stratum["samplingProbability"])
+        weight = Decimal(stratum["inverseProbabilityWeight"])
+        assert probability * weight == 1
+
+
+def test_sampling_dataset_keeps_full_evaluation_and_all_training_dates(
+    tmp_path,
+    sealed_sources,
+):
+    _market_root, ranking_root, _labels_root, _dates = sealed_sources
+    foundation_root, _manifest = _seal_foundation(tmp_path, sealed_sources)
+    market_cap_root = _seal_market_cap(
+        tmp_path,
+        sealed_sources,
+        foundation_root,
+    )
+    with sqlite3.connect(ranking_root / "ranking.sqlite3") as database:
+        decision_dates = [
+            row[0]
+            for row in database.execute(
+                "SELECT DISTINCT decision_date FROM ranking_samples "
+                "ORDER BY decision_date",
+            )
+        ]
+    folds = build_foundation_walk_forward_splits(
+        decision_dates,
+        probability_calibration_sessions=2,
+        conformal_calibration_sessions=2,
+        purge_sessions=1,
+        embargo_sessions=1,
+        test_sessions=5,
+    )
+    sampling_root = tmp_path / "sampling"
+    with FoundationSamplingDataset(
+        sampling_root,
+        dataset_id="sampling-v1",
+        foundation_dataset_root=foundation_root,
+        ranking_dataset_root=ranking_root,
+        market_cap_dataset_root=market_cap_root,
+        maximum_windows_per_fold=40,
+        sampling_seed=17,
+        folds=folds,
+    ) as dataset:
+        list(dataset.build())
+        manifest = dataset.seal()
+
+    assert len(manifest["folds"]) == 5
+    assert manifest["fullUniverseEvaluation"] is True
+    assert all(fold["trainSelected"] <= 40 for fold in manifest["folds"])
+    assert all(fold["testRows"] == 10 for fold in manifest["folds"])
+    assert all(
+        fold["trainingSelection"] == "DETERMINISTIC_STRATIFIED_SAMPLE"
+        and fold["testSelection"] == "FULL_UNIVERSE"
+        for fold in manifest["folds"]
+    )
+    with sqlite3.connect(sampling_root / "sampling.sqlite3") as database:
+        per_fold = database.execute(
+            "SELECT fold, COUNT(DISTINCT decision_date), COUNT(*) "
+            "FROM training_samples GROUP BY fold ORDER BY fold",
+        ).fetchall()
+        leakage = database.execute(
+            "SELECT COUNT(*) FROM training_samples s "
+            "JOIN sampling_dataset_metadata m ON m.singleton = 1 "
+            "WHERE EXISTS ("
+            "SELECT 1 FROM json_each(m.folds_json) f "
+            "WHERE CAST(json_extract(f.value, '$.fold') AS INTEGER) = s.fold "
+            "AND s.decision_date > json_extract(f.value, '$.trainEnd')"
+            ")",
+        ).fetchone()[0]
+    assert [row[1] for row in per_fold] == [
+        fold["trainSessions"] for fold in folds
+    ]
+    assert leakage == 0
+
+
+def test_daily_quota_requires_at_least_one_sample_per_training_date():
+    with pytest.raises(
+        FoundationSamplingDatasetError,
+        match="FOUNDATION_DAILY_QUOTA_INPUT_INVALID",
+    ):
+        allocate_daily_quotas(
+            {"20250101": 10, "20250102": 10},
+            maximum_windows=1,
+        )
