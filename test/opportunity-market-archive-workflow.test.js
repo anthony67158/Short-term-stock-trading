@@ -2,58 +2,52 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const workflow = readFileSync(
-  new URL('../.github/workflows/daily-retrain.yml', import.meta.url),
+const read = (path) => readFileSync(
+  new URL(`../${path}`, import.meta.url),
   'utf8',
 )
 
-test('每日归档只使用QUANT_KEY调用杭州量化FC', () => {
-  const job = workflow.split('  market-data-archive:')[1] || ''
+const workflow = read('.github/workflows/daily-retrain.yml')
+const settlement = read('api/_learning_settlement.js')
+const trainingView = read('api/_learning_training_view.js')
 
-  assert.match(job, /needs: verify/)
-  assert.match(job, /timeout-minutes: 35/)
-  assert.match(job, /QUANT_KEY: \$\{\{ secrets\.QUANT_KEY \}\}/)
-  assert.match(job, /X-API-Key: \$QUANT_KEY/)
-  assert.match(job, /validate_market_archive_report\.py/)
-  assert.match(job, /--event "\$\{\{ github\.event_name \}\}"/)
-  assert.doesNotMatch(job, /REUSED_EXISTING_ARCHIVE/)
-  assert.doesNotMatch(
-    job,
-    /id: public-archive\s*\n\s*continue-on-error: true/,
-  )
-  assert.doesNotMatch(job, /TUSHARE_TOKEN|archive_tushare/)
-  assert.doesNotMatch(job, /token=[a-f0-9]{20,}/i)
-})
-
-test('机会训练先合并并压实增量样本再训练', () => {
-  const job = workflow.split('  opportunity-retrain:')[1]
-    ?.split('\n  market-data-archive:')[0] || ''
-  const collect = job.indexOf('collect_opportunity_outcomes.py')
-  const compact = job.indexOf('publish_opportunity_history.py')
-  const train = job.indexOf(
-    'decision_engine.training.ensemble',
-  )
-
-  assert.ok(collect >= 0)
-  assert.ok(compact > collect)
-  assert.ok(train > compact)
-})
-
-test('市场归档合同进入每日重训验证门禁', () => {
-  assert.match(workflow, /tests\/test_opportunity_market_archive\.py/)
-  assert.match(workflow, /tests\/test_archive_tushare_market_day\.py/)
-  assert.match(workflow, /tests\/test_validate_market_archive_report\.py/)
-})
-
-test('决策模型训练等待市场归档且每日流程不依赖Tushare', () => {
-  const job = workflow.split('  opportunity-retrain:')[1]
-    ?.split('\n  market-data-archive:')[0] || ''
-
+test('每日归档由FC定时器先于Actions压实成熟学习结果', () => {
+  const schedule = read('s.yaml')
+  assert.match(schedule, /triggerName: learning-settlement-timer/)
   assert.match(
-    job,
-    /needs\.market-data-archive\.result == 'success'/,
+    schedule,
+    /cronExpression: "CRON_TZ=Asia\/Shanghai 0 20 17 \* \* 1-5"/,
   )
-  assert.match(job, /needs:\s*\n\s+- verify\s*\n\s+- market-data-archive/)
-  assert.doesNotMatch(workflow, /^\s{2}sector-retrain:/m)
-  assert.doesNotMatch(workflow, /TUSHARE_TOKEN:/)
+  assert.doesNotMatch(workflow, /LEARNING_PIPELINE_URL|LEARNING_CRON_KEY/)
+  assert.doesNotMatch(workflow, /TUSHARE_TOKEN|QUANT_KEY/)
+})
+
+test('Actions下载FC已发布的脱敏视图后再训练', () => {
+  const downloadAt = workflow.indexOf(
+    'Download latest redacted training view',
+  )
+  const trainAt = workflow.indexOf('Train and gate challengers')
+
+  assert.ok(downloadAt >= 0)
+  assert.ok(trainAt > downloadAt)
+  assert.match(settlement, /settleStockPickCandidate/)
+  assert.match(settlement, /captureAccountLearningEvents/)
+  assert.match(trainingView, /learning-training-view\.v1/)
+})
+
+test('Actions只下载learning视图且不读取账户事实目录', () => {
+  const trainer = read('qlib-service/learning_pipeline.py')
+
+  assert.match(trainer, /learning\/v1\/manifests\//)
+  assert.match(trainer, /learning\/v1\/views\//)
+  assert.doesNotMatch(workflow, /accounts\//)
+  assert.doesNotMatch(trainer, /accounts\//)
+})
+
+test('每日流程不依赖Tushare且不包含生产发布步骤', () => {
+  assert.doesNotMatch(workflow, /TUSHARE_TOKEN|archive_tushare/)
+  assert.doesNotMatch(
+    workflow,
+    /activate-baseline|promote_decision_model|upload_decision_model/,
+  )
 })

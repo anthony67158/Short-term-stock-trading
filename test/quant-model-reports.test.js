@@ -77,18 +77,16 @@ test('量化汇报按最新时间读取，并保留同一轮不同模型', async
   assert.equal(await readOpportunitySummary(async () => { throw new Error('offline') }), null)
 })
 
-test('决策模型无论训练成败都发布汇报，选择性上传后才确认发布', () => {
+test('每日训练无论门禁结果都保留诊断报告且不直接发布', () => {
   const workflow = readFileSync('.github/workflows/daily-retrain.yml', 'utf8')
-  const report = workflow.split('- name: Publish decision-model result to in-app quant report')[1]?.split('\n      - name:')[0]
-  assert.ok(report)
-  assert.match(report, /if: always\(\)/)
-  assert.match(report, /RETRAIN_JOB_STATUS:/)
-  assert.match(report, /publish_model_retrain_report\.py/)
-  assert.match(report, /release_decision\.json/)
-  const publish = workflow.split('- name: Publish selected decision release atomically')[1].split('\n      - name:')[0]
-  assert.ok(publish.indexOf('upload_decision_model.py') < publish.indexOf('echo "published=true"'))
-  assert.match(publish, /--release-decision/)
-  assert.match(workflow, /test_publish_model_retrain_report\.py/)
+  assert.match(workflow, /Upload diagnostics/)
+  assert.match(workflow, /if: always\(\)/)
+  assert.match(workflow, /learning-artifacts\/run\/report\.json/)
+  assert.match(workflow, /Upload immutable challenger run/)
+  assert.doesNotMatch(
+    workflow,
+    /Publish selected decision release atomically|upload_decision_model/,
+  )
 })
 
 test('量化汇报用决策任务结果覆盖整条工作流的辅助任务失败', () => {

@@ -270,6 +270,9 @@ export function buildAdvicePriceContract({
     : null
   const watchHorizonPct = observationHorizonPct(atrPct)
   const anchors = collectAnchors(payload)
+  const trustedEntryPrice = roundedPrice(
+    trustedPricePlan?.entryPlan?.price,
+  )
   if (trustedPricePlan) {
     pushAnchor(anchors, 'decision.entry', trustedPricePlan.entryPlan?.price, ['entry', 'add', 'watch_pullback', 'watch_breakout'])
     pushAnchor(anchors, 'decision.stop', trustedPricePlan.exitPlan?.hardStopPrice, ['stop'])
@@ -302,10 +305,16 @@ export function buildAdvicePriceContract({
       : null
     const futureFacing = !observationLevel
       || observationIsAhead(direction, price, currentPrice)
+    const trustedObservation = observationLevel
+      && trustedEntryPrice != null
+      && price === trustedEntryPrice
     const shortTermReachable = !observationLevel
       || (
         currentDistancePct != null
-        && currentDistancePct <= watchHorizonPct + 1e-6
+        && (
+          currentDistancePct <= watchHorizonPct + 1e-6
+          || trustedObservation
+        )
       )
     const entryNotAboveCurrent = !['entry', 'add'].includes(key)
       || currentPrice == null

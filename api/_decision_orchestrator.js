@@ -7,6 +7,9 @@ import {
   fetchDecisionReviewScores,
   fetchDecisionScores,
 } from './_action_value_client.js'
+import {
+  capturePositionPrediction,
+} from './_learning_capture.js'
 import { internalApiOrigin } from './_internal_origin.js'
 import { accountFrom, buildHoldPayload, computePortfolio } from './_portfolio.js'
 import { buildAccountRiskContext, accountRiskCodes } from '../shared/accountRiskBudget.js'
@@ -847,7 +850,15 @@ export async function evaluateDecision({
   }
 }
 
-export async function runDecision({ req, book, code, onProgress = () => {}, signal, reviewEvent = null }) {
+export async function runDecision({
+  req,
+  book,
+  code,
+  accountScope = '',
+  onProgress = () => {},
+  signal,
+  reviewEvent = null,
+}) {
   if (!/^\d{6}$/.test(String(code || ''))) throw new Error('股票代码无效')
   signal?.throwIfAborted()
   onProgress('采集行情、账户与决策特征', 'collect')
@@ -863,6 +874,19 @@ export async function runDecision({ req, book, code, onProgress = () => {}, sign
   signal?.throwIfAborted()
   onProgress('评估三条价格路径与账户风险', 'quant')
   const result = await evaluateDecision({ code, book, quotes, detail, trends, fund, sector, market, reviewEvent })
+  await capturePositionPrediction({
+    code,
+    mode: result.mode,
+    advice: result.result,
+    guidance: null,
+    accountScope,
+    now: result.updatedAt,
+  }).catch((error) => {
+    console.warn(
+      '[learning] position prediction capture failed',
+      error?.code || error?.message,
+    )
+  })
   signal?.throwIfAborted()
   return result
 }

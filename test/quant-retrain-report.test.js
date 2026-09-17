@@ -64,29 +64,16 @@ test('量化汇报按runId幂等去重，旧记录按内容去重', () => {
   assert.deepEqual(reports.map((item) => item.id), ['new', 'legacy-new'])
 })
 
-test('每日重训工作流只把决策模型发布结果写入量化汇报OSS', () => {
+test('每日重训工作流只上传脱敏challenger报告且不改生产指针', () => {
   const workflow = read('.github/workflows/daily-retrain.yml')
-  const publisher = read('qlib-service/publish_model_retrain_report.py')
+  const trainer = read('qlib-service/learning_pipeline.py')
 
-  assert.match(workflow, /Publish decision-model result to in-app quant report/)
-  assert.match(workflow, /python publish_model_retrain_report\.py/)
-  assert.match(workflow, /--model opportunity/)
-  assert.doesNotMatch(workflow, /--model sector/)
-  assert.doesNotMatch(workflow, /python publish_retrain_report\.py/)
-  assert.match(workflow, /Verify incremental training and forecast contracts/)
-  assert.match(workflow, /test_retrain_daily\.py/)
-  assert.match(workflow, /test_build_dataset_forecast\.py/)
-  assert.match(workflow, /test_production_backtest\.py/)
-  assert.match(workflow, /test_app_forecast\.py/)
-  assert.match(workflow, /test_publish_retrain_report\.py/)
-  assert.match(workflow, /GITHUB_RUN_ID:/)
-  assert.match(workflow, /OSS_ACCESS_KEY_ID:\s*\$\{\{\s*secrets\.OSS_ACCESS_KEY_ID\s*\}\}/)
-  assert.match(publisher, /quantreport\/\{model\}-\{run_id\}\.json/)
-  assert.match(publisher, /生产对照版本/)
-  assert.match(publisher, /训练候选版本/)
-  assert.match(publisher, /晋级组成/)
-  assert.match(publisher, /put_object\(/)
-  assert.doesNotMatch(workflow, /QUANT_REPORT_KEY/)
+  assert.match(workflow, /learning_pipeline\.py upload/)
+  assert.match(workflow, /secrets\.OSS_ACCESS_KEY_ID/)
+  assert.match(workflow, /secrets\.OSS_ACCESS_KEY_SECRET/)
+  assert.match(trainer, /learning\/v1\/training-runs\//)
+  assert.match(trainer, /productionPointerChanged": False/)
+  assert.doesNotMatch(workflow, /upload_decision_model|activate-baseline/)
 })
 
 test('量化汇报弹窗展示任务状态、训练结果和GitHub运行入口', () => {
