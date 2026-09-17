@@ -1019,10 +1019,15 @@ def run_baseline_fold(
     )[family]
 
 
-def _audit_development_oof(output_root: Path) -> dict:
+def _audit_oof(
+    output_root: Path,
+    *,
+    folds: tuple[int, ...],
+    schema_version: str,
+) -> dict:
     fold_ranges = []
     family_rows = {family: 0 for family in MODEL_FAMILIES}
-    for fold in range(1, 5):
+    for fold in folds:
         reference_path = (
             output_root
             / f"fold-{fold}"
@@ -1103,10 +1108,10 @@ def _audit_development_oof(output_root: Path) -> dict:
                     )
             family_rows[family] += len(dates)
     return {
-        "schemaVersion": "foundation-probabilistic-baseline-oof-audit.v1",
+        "schemaVersion": schema_version,
         "folds": [
             {"fold": fold, "testStart": start, "testEnd": end}
-            for fold, (start, end) in enumerate(fold_ranges, 1)
+            for fold, (start, end) in zip(folds, fold_ranges, strict=True)
         ],
         "rowsByFamily": family_rows,
         "uniqueKey": ["decisionDate", "instrumentId"],
@@ -1117,7 +1122,12 @@ def _audit_development_oof(output_root: Path) -> dict:
     }
 
 
-def _development_metrics(output_root: Path) -> dict:
+def _aggregate_metrics(
+    output_root: Path,
+    *,
+    folds: tuple[int, ...],
+    schema_version: str,
+) -> dict:
     summary = {}
     sample_metrics = (
         "brier",
@@ -1135,8 +1145,8 @@ def _development_metrics(output_root: Path) -> dict:
         "top10NetReturnIncrement",
     )
     for family in MODEL_FAMILIES:
-        folds = []
-        for fold in range(1, 5):
+        fold_metrics = []
+        for fold in folds:
             path = output_root / f"fold-{fold}" / family / "evaluation.json"
             try:
                 evaluation = json.loads(path.read_text())
@@ -1145,16 +1155,22 @@ def _development_metrics(output_root: Path) -> dict:
                 raise ProbabilisticBaselineError(
                     "PROBABILISTIC_BASELINE_EVALUATION_INVALID",
                 ) from exc
-            folds.append({"fold": fold, **test})
-        samples = np.asarray([item["samples"] for item in folds], dtype=np.float64)
-        dates = np.asarray([item["dates"] for item in folds], dtype=np.float64)
+            fold_metrics.append({"fold": fold, **test})
+        samples = np.asarray(
+            [item["samples"] for item in fold_metrics],
+            dtype=np.float64,
+        )
+        dates = np.asarray(
+            [item["dates"] for item in fold_metrics],
+            dtype=np.float64,
+        )
         summary[family] = {
             "testRows": int(samples.sum()),
             "testDates": int(dates.sum()),
             "sampleWeighted": {
                 name: float(
                     np.average(
-                        [item[name] for item in folds],
+                        [item[name] for item in fold_metrics],
                         weights=samples,
                     )
                 )
@@ -1163,17 +1179,17 @@ def _development_metrics(output_root: Path) -> dict:
             "dateWeightedRanking": {
                 name: float(
                     np.average(
-                        [item["ranking"][name] for item in folds],
+                        [item["ranking"][name] for item in fold_metrics],
                         weights=dates,
                     )
                 )
                 for name in ranking_metrics
             },
-            "folds": folds,
+            "folds": fold_metrics,
         }
     return {
-        "schemaVersion": "foundation-probabilistic-baseline-development-summary.v1",
-        "folds": [1, 2, 3, 4],
+        "schemaVersion": schema_version,
+        "folds": list(folds),
         "selectionUse": "NONE_METRICS_REPORTED_WITHOUT_HYPERPARAMETER_TUNING",
         "families": summary,
         "releaseStatus": "UNAVAILABLE",
@@ -1214,10 +1230,21 @@ def freeze_development_configuration(output_root: Path) -> dict:
             receipts[f"{fold}:{family}"] = _file_sha256(
                 root / "receipt.json",
             )
-    audit = _audit_development_oof(output_root)
+    development_folds = (1, 2, 3, 4)
+    audit = _audit_oof(
+        output_root,
+        folds=development_folds,
+        schema_version="foundation-probabilistic-baseline-oof-audit.v1",
+    )
     audit_path = output_root / "development-oof-audit.json"
     _write_json(audit_path, audit, immutable=True)
-    summary = _development_metrics(output_root)
+    summary = _aggregate_metrics(
+        output_root,
+        folds=development_folds,
+        schema_version=(
+            "foundation-probabilistic-baseline-development-summary.v1"
+        ),
+    )
     summary_path = output_root / "development-summary.json"
     _write_json(summary_path, summary, immutable=True)
     payload = {
@@ -1248,6 +1275,77 @@ def freeze_development_configuration(output_root: Path) -> dict:
         immutable=True,
     )
     return payload
+
+
+def seal_baseline_oof(output_root: Path) -> dict:
+    protocol_path = output_root / "protocol.json"
+    _require_development_freeze(output_root, protocol_path)
+    receipts = {}
+    for fold in range(1, 6):
+        for family in MODEL_FAMILIES:
+            root = output_root / f"fold-{fold}" / family
+            receipt = _receipt_is_valid(root)
+            if (
+                receipt is None
+                or receipt.get("fold") != fold
+                or receipt.get("family") != family
+                or receipt.get("usage") != "FULL_OOF"
+                or receipt.get("protocolSha256")
+                != _file_sha256(protocol_path)
+            ):
+                raise ProbabilisticBaselineError(
+                    "PROBABILISTIC_BASELINE_OOF_INCOMPLETE",
+                )
+            receipts[f"{fold}:{family}"] = _file_sha256(
+                root / "receipt.json",
+            )
+    folds = (1, 2, 3, 4, 5)
+    audit_path = output_root / "oof-audit.json"
+    _write_json(
+        audit_path,
+        _audit_oof(
+            output_root,
+            folds=folds,
+            schema_version="foundation-probabilistic-baseline-final-oof-audit.v1",
+        ),
+        immutable=True,
+    )
+    summary_path = output_root / "summary.json"
+    _write_json(
+        summary_path,
+        _aggregate_metrics(
+            output_root,
+            folds=folds,
+            schema_version="foundation-probabilistic-baseline-summary.v1",
+        ),
+        immutable=True,
+    )
+    manifest = {
+        "schemaVersion": "foundation-probabilistic-baseline-manifest.v1",
+        "protocolSha256": _file_sha256(protocol_path),
+        "developmentFreezeSha256": _file_sha256(
+            output_root / "development-freeze.json",
+        ),
+        "oofAuditSha256": _file_sha256(audit_path),
+        "summarySha256": _file_sha256(summary_path),
+        "completedFolds": list(folds),
+        "families": list(MODEL_FAMILIES),
+        "receiptSha256": receipts,
+        "paidCostCny": "0.00",
+        "releaseStatus": "UNAVAILABLE",
+        "releaseBlockers": [
+            "FOUNDATION_TEACHER_SCREENING_PENDING",
+            "FOUNDATION_CANDIDATE_OOF_PENDING",
+            "CALIBRATION_AND_EXECUTION_GATES_PENDING",
+            "AGENT_AND_FORWARD_GATES_PENDING",
+        ],
+    }
+    _write_json(
+        output_root / "manifest.json",
+        manifest,
+        immutable=True,
+    )
+    return manifest
 
 
 def _round_cny(values: np.ndarray) -> np.ndarray:
@@ -1610,9 +1708,15 @@ def main() -> None:
     run_parser.add_argument("--smoke-dates", type=int)
     freeze_parser = subparsers.add_parser("freeze-development")
     freeze_parser.add_argument("--output", type=Path, required=True)
+    seal_parser = subparsers.add_parser("seal")
+    seal_parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "freeze-development":
         result = freeze_development_configuration(
+            args.output.expanduser().resolve(),
+        )
+    elif args.command == "seal":
+        result = seal_baseline_oof(
             args.output.expanduser().resolve(),
         )
     else:
