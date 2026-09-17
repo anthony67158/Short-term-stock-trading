@@ -167,9 +167,15 @@ export default async function handler(req, res) {
     })
   }
 
-  const authentication = await authenticateAccountRequest(req, {
-    includeAdviceRuntime: false,
-  })
+  let authentication
+  try {
+    authentication = await authenticateAccountRequest(req, {
+      includeAdviceRuntime: false,
+    })
+  } catch {
+    // 存储/鉴权后端异常按未授权处理，不暴露为 500。
+    authentication = { ok: false, error: '账号鉴权失败' }
+  }
   if (!authentication.ok) {
     return reply(res, 401, {
       ok: false,

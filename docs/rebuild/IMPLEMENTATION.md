@@ -1261,3 +1261,9 @@ S5（已完成，commit 98ac4c4）：前端选股结果视图。`src/stockPickCl
 
 待续：S3 离线 LightGBM 排序模型(用 backend py3.12+现成 ranking_* 骨架, 费后 walk-forward, 产真实模型分)；S6 零消费者删旧候选池 Agent 后端(opportunity_agent_selection*/OpportunityRadar*/TodayTab, 注意 opportunity_radar 账本族是训练标签来源)；S7 全量验证+浏览器走查+验收记录。
 
+S7（已完成，对已交付部分）：全量 Node `2489 passed, 0 failed`(含选股19项无回归)；vite build 通过；FC 打包通过。`/api/stock_pick` handler 契约实测：GET 空态返回 `{snapshot:null,...}`；POST 未鉴权 401；鉴权后端异常已加固为 401(不再 500)。本地隔离浏览器走查(390/768/1440)：Agent 精选卡渲染、买入策略/时机文案齐全、候选池渲染、0 横向溢出、0 控制台错误(一次性预览已清理)。
+
+S3（数据阻塞，用户将提供 Tushare token/数据集）：训练排序模型依赖链为 `train-ranking-model` ← `ranking-dataset.v1`(sqlite) ← `build-ranking-dataset` ← sealed 全A股历史行情 market-dataset(sqlite)。本地无该数据集，构建需 Tushare token 下载全市场多年历史。按 AGENTS.md 不伪造模型/回测指标。用户已选择"提供数据/Token"：待其在仓库外 `~/.config/stock-platform/platform.env` 配置 `TUSHARE_TOKEN` 或给出已封存数据集路径后，在 backend py3.12 用 `ranking_model_trainer`+`ranking_walk_forward` 训练+费后 walk-forward 回测，达标发布模型分接入 `/api/stock_pick`(召回层已预留 MODEL/RULE 双源，缺失时回落规则分并标注)。
+
+S6（需谨慎解耦，非盲删）：旧候选池 Agent 仍有活跃共享消费者——`api/opportunity_radar.js` 调用 agent selection；`api/position_workbench.js`(持仓工作台,保留) 用 `readOpportunityRadarSnapshot`；`api/formula_selection.js` 用 `_opportunity_radar_ledger_store`；`AdaptiveWorkbench` 经 DEV 预览(`?preview=adaptive`)仍引用 OpportunityRadar 链。生产 App.jsx 选股结果视图已改由 StockPickTab 渲染，不再挂载 TodayTab/AdaptiveWorkbench。删除须先从 opportunity_radar 解耦 agent selection 调用，再删纯 Agent 文件，保留 radar 聚合与 ledger(position_workbench 消费)。未在本轮盲删，避免破坏共享生产代码。
+
