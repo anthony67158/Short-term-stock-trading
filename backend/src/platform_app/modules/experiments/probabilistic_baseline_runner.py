@@ -764,18 +764,23 @@ def _require_development_freeze(output_root: Path, protocol_path: Path) -> None:
             )
 
 
-def run_baseline_fold(
+def run_baseline_families_fold(
     loader: FoundationBaselineDataLoader,
     *,
     experiment_root: Path,
     output_root: Path,
     fold: int,
-    family: str,
+    families: tuple[str, ...] = MODEL_FAMILIES,
     iterations: int = DEFAULT_ITERATIONS,
     threads: int = 4,
     smoke_dates: int | None = None,
-) -> dict:
-    if fold not in loader.folds or family not in MODEL_FAMILIES:
+) -> dict[str, dict]:
+    if (
+        fold not in loader.folds
+        or not families
+        or len(set(families)) != len(families)
+        or any(family not in MODEL_FAMILIES for family in families)
+    ):
         raise ProbabilisticBaselineError(
             "PROBABILISTIC_BASELINE_RUN_CONFIG_INVALID",
         )
@@ -791,12 +796,31 @@ def run_baseline_fold(
     if fold == 5 and smoke_dates is None:
         _require_development_freeze(output_root, protocol_path)
 
-    root = output_root / f"fold-{fold}" / family
-    root.mkdir(parents=True, exist_ok=True)
-    existing = _receipt_is_valid(root)
-    if existing is not None:
-        return existing
+    roots = {
+        family: output_root / f"fold-{fold}" / family
+        for family in families
+    }
+    completed = {}
+    pending = []
+    for family, root in roots.items():
+        root.mkdir(parents=True, exist_ok=True)
+        receipt = _receipt_is_valid(root)
+        if (
+            receipt is not None
+            and receipt.get("protocolSha256") == _file_sha256(protocol_path)
+        ):
+            completed[family] = receipt
+        else:
+            pending.append(family)
+    if not pending:
+        return completed
 
+    print(
+        json.dumps(
+            {"state": "LOADING_TRAIN", "fold": fold, "families": pending},
+        ),
+        flush=True,
+    )
     training = loader.load_partition(
         fold,
         "train",
@@ -808,24 +832,45 @@ def run_baseline_fold(
         "startDate": str(training.dates.min()),
         "endDate": str(training.dates.max()),
     }
-    model = fit_baseline_model(
-        family,
-        training,
-        iterations=iterations,
-        threads=threads,
-    )
-    model_path = root / "model.joblib"
-    _write_joblib(model_path, model)
+    models = {}
+    model_paths = {}
+    for family in pending:
+        print(
+            json.dumps(
+                {"state": "FITTING", "fold": fold, "family": family},
+            ),
+            flush=True,
+        )
+        model = fit_baseline_model(
+            family,
+            training,
+            iterations=iterations,
+            threads=threads,
+        )
+        model_path = roots[family] / "model.joblib"
+        _write_joblib(model_path, model)
+        models[family] = model
+        model_paths[family] = model_path
     del training
     gc.collect()
 
-    metrics = {}
-    prediction_paths = {}
+    metrics = {family: {} for family in pending}
+    prediction_paths = {family: {} for family in pending}
     for partition_name in (
         "probabilityCalibration",
         "conformalCalibration",
         "test",
     ):
+        print(
+            json.dumps(
+                {
+                    "state": "LOADING_EVALUATION",
+                    "fold": fold,
+                    "partition": partition_name,
+                },
+            ),
+            flush=True,
+        )
         partition = loader.load_partition(
             fold,
             partition_name,
@@ -835,46 +880,87 @@ def run_baseline_fold(
             raise ProbabilisticBaselineError(
                 "PROBABILISTIC_BASELINE_TRAIN_TEST_OVERLAP",
             )
-        predictions = model.predict(partition.x)
-        metrics[partition_name] = evaluate_predictions(
-            partition,
-            predictions,
-        )
-        prediction_path = root / f"{partition_name}.npz"
-        _write_predictions(prediction_path, partition, predictions)
-        prediction_paths[prediction_path.name] = _file_sha256(prediction_path)
-        del partition, predictions
+        for family, model in models.items():
+            print(
+                json.dumps(
+                    {
+                        "state": "PREDICTING",
+                        "fold": fold,
+                        "family": family,
+                        "partition": partition_name,
+                    },
+                ),
+                flush=True,
+            )
+            predictions = model.predict(partition.x)
+            metrics[family][partition_name] = evaluate_predictions(
+                partition,
+                predictions,
+            )
+            prediction_path = roots[family] / f"{partition_name}.npz"
+            _write_predictions(prediction_path, partition, predictions)
+            prediction_paths[family][prediction_path.name] = _file_sha256(
+                prediction_path,
+            )
+            del predictions
+        del partition
         gc.collect()
 
-    evaluation_path = root / "evaluation.json"
-    _write_json(
-        evaluation_path,
-        {
-            "schemaVersion": "foundation-probabilistic-baseline-evaluation.v1",
+    for family in pending:
+        root = roots[family]
+        evaluation_path = root / "evaluation.json"
+        _write_json(
+            evaluation_path,
+            {
+                "schemaVersion": "foundation-probabilistic-baseline-evaluation.v1",
+                "fold": fold,
+                "family": family,
+                "usage": "SMOKE_ONLY" if smoke_dates is not None else "FULL_OOF",
+                "training": training_summary,
+                "partitions": metrics[family],
+                "releaseStatus": "UNAVAILABLE",
+            },
+            immutable=True,
+        )
+        receipt = {
+            "schemaVersion": "foundation-probabilistic-baseline-receipt.v1",
             "fold": fold,
             "family": family,
             "usage": "SMOKE_ONLY" if smoke_dates is not None else "FULL_OOF",
-            "training": training_summary,
-            "partitions": metrics,
+            "protocolSha256": _file_sha256(protocol_path),
+            "files": {
+                "model.joblib": _file_sha256(model_paths[family]),
+                "evaluation.json": _file_sha256(evaluation_path),
+                **prediction_paths[family],
+            },
             "releaseStatus": "UNAVAILABLE",
-        },
-        immutable=True,
-    )
-    receipt = {
-        "schemaVersion": "foundation-probabilistic-baseline-receipt.v1",
-        "fold": fold,
-        "family": family,
-        "usage": "SMOKE_ONLY" if smoke_dates is not None else "FULL_OOF",
-        "protocolSha256": _file_sha256(protocol_path),
-        "files": {
-            "model.joblib": _file_sha256(model_path),
-            "evaluation.json": _file_sha256(evaluation_path),
-            **prediction_paths,
-        },
-        "releaseStatus": "UNAVAILABLE",
-    }
-    _write_json(root / "receipt.json", receipt, immutable=True)
-    return receipt
+        }
+        _write_json(root / "receipt.json", receipt, immutable=True)
+        completed[family] = receipt
+    return completed
+
+
+def run_baseline_fold(
+    loader: FoundationBaselineDataLoader,
+    *,
+    experiment_root: Path,
+    output_root: Path,
+    fold: int,
+    family: str,
+    iterations: int = DEFAULT_ITERATIONS,
+    threads: int = 4,
+    smoke_dates: int | None = None,
+) -> dict:
+    return run_baseline_families_fold(
+        loader,
+        experiment_root=experiment_root,
+        output_root=output_root,
+        fold=fold,
+        families=(family,),
+        iterations=iterations,
+        threads=threads,
+        smoke_dates=smoke_dates,
+    )[family]
 
 
 def freeze_development_configuration(output_root: Path) -> dict:
@@ -1242,6 +1328,16 @@ def _run_command(args: argparse.Namespace) -> dict:
             args.sampling_root,
             args.ranking_root,
         ) as loader:
+            if args.family == "all":
+                return run_baseline_families_fold(
+                    loader,
+                    experiment_root=args.experiment_root,
+                    output_root=output_root,
+                    fold=args.fold,
+                    iterations=args.iterations,
+                    threads=args.threads,
+                    smoke_dates=args.smoke_dates,
+                )
             return run_baseline_fold(
                 loader,
                 experiment_root=args.experiment_root,
@@ -1264,7 +1360,11 @@ def main() -> None:
     run_parser.add_argument("--ranking-root", type=Path, required=True)
     run_parser.add_argument("--output", type=Path, required=True)
     run_parser.add_argument("--fold", type=int, required=True)
-    run_parser.add_argument("--family", choices=MODEL_FAMILIES, required=True)
+    run_parser.add_argument(
+        "--family",
+        choices=(*MODEL_FAMILIES, "all"),
+        required=True,
+    )
     run_parser.add_argument(
         "--iterations",
         type=int,
