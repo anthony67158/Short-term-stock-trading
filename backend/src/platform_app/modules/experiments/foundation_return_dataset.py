@@ -590,6 +590,67 @@ def verify_foundation_return_dataset(root: Path) -> tuple[dict, Path]:
         or _file_sha256(database) != expected_hash
     ):
         raise FoundationReturnDatasetError("FOUNDATION_DATASET_INVALID")
+    connection = FoundationReturnDataset._open_readonly(database)
+    try:
+        metadata = dict(
+            connection.execute(
+                "SELECT * FROM foundation_dataset_metadata",
+            ).fetchone()
+        )
+        statistics = dict(
+            connection.execute(
+                "SELECT * FROM foundation_dataset_statistics",
+            ).fetchone()
+        )
+    except (sqlite3.DatabaseError, TypeError) as exc:
+        raise FoundationReturnDatasetError("FOUNDATION_DATASET_INVALID") from exc
+    finally:
+        connection.close()
+    expected_manifest_values = {
+        "datasetId": metadata["dataset_id"],
+        "schemaVersion": metadata["schema_version"],
+        "databaseSha256": expected_hash,
+        "historySessions": metadata["history_sessions"],
+        "featureSchemaSha256": metadata["feature_schema_sha256"],
+        "labelPolicySha256": metadata["label_policy_sha256"],
+        "referenceSamples": statistics["reference_sample_count"],
+        "instruments": statistics["instrument_count"],
+        "decisionDates": statistics["decision_date_count"],
+        "startDate": statistics["start_date"],
+        "endDate": statistics["end_date"],
+    }
+    lineage = {
+        "rankingDataset": (
+            metadata["ranking_dataset_id"],
+            metadata["ranking_schema_version"],
+            metadata["ranking_database_sha256"],
+        ),
+        "marketDataset": (
+            metadata["market_dataset_id"],
+            metadata["market_schema_version"],
+            metadata["market_database_sha256"],
+        ),
+        "executionLabelDataset": (
+            metadata["execution_dataset_id"],
+            metadata["execution_schema_version"],
+            metadata["execution_database_sha256"],
+        ),
+    }
+    if any(
+        manifest.get(key) != value
+        for key, value in expected_manifest_values.items()
+    ) or any(
+        (
+            manifest.get(key, {}).get("datasetId"),
+            manifest.get(key, {}).get("schemaVersion"),
+            manifest.get(key, {}).get("databaseSha256"),
+        )
+        != value
+        for key, value in lineage.items()
+    ):
+        raise FoundationReturnDatasetError(
+            "FOUNDATION_DATASET_MANIFEST_MISMATCH",
+        )
     return manifest, database
 
 

@@ -30,6 +30,23 @@ POLICY_VERSION = "foundation-deterministic-stratified-sampling.v1"
 DEFAULT_MAX_WINDOWS_PER_FOLD = 1_500_000
 DEFAULT_SAMPLING_SEED = 20260917
 QUANTILE_BUCKETS = 5
+FOLD_CONTRACT_KEYS = (
+    "fold",
+    "trainStart",
+    "trainEnd",
+    "probabilityCalibrationStart",
+    "probabilityCalibrationEnd",
+    "conformalCalibrationStart",
+    "conformalCalibrationEnd",
+    "testStart",
+    "testEnd",
+    "trainSessions",
+    "probabilityCalibrationSessions",
+    "conformalCalibrationSessions",
+    "testSessions",
+    "purgeSessions",
+    "embargoSessions",
+)
 POLICY = {
     "policyVersion": POLICY_VERSION,
     "dateAllocation": "EQUAL_WITH_DETERMINISTIC_REMAINDER",
@@ -118,6 +135,104 @@ def _now() -> str:
 def _file_sha256(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def verify_foundation_sampling_dataset(root: Path) -> tuple[dict, Path]:
+    resolved = root.expanduser().resolve()
+    manifest_path = resolved / "split-manifest.json"
+    if not manifest_path.is_file():
+        raise FoundationSamplingDatasetError(
+            "FOUNDATION_SAMPLING_NOT_SEALED",
+        )
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        database = resolved / manifest["database"]
+        expected_hash = manifest["databaseSha256"]
+    except (KeyError, json.JSONDecodeError, TypeError) as exc:
+        raise FoundationSamplingDatasetError(
+            "FOUNDATION_SAMPLING_MANIFEST_INVALID",
+        ) from exc
+    if (
+        manifest.get("schemaVersion") != SCHEMA_VERSION
+        or not database.is_file()
+        or _file_sha256(database) != expected_hash
+    ):
+        raise FoundationSamplingDatasetError(
+            "FOUNDATION_SAMPLING_INVALID",
+        )
+    connection = sqlite3.connect(
+        f"{database.resolve().as_uri()}?mode=ro&immutable=1",
+        uri=True,
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        metadata = dict(
+            connection.execute(
+                "SELECT * FROM sampling_dataset_metadata",
+            ).fetchone()
+        )
+        fold_totals = {
+            row["fold"]: dict(row)
+            for row in connection.execute(
+                "SELECT fold, COUNT(*) AS train_dates, "
+                "SUM(population_count) AS train_population, "
+                "SUM(selected_count) AS train_selected "
+                "FROM sampling_partitions GROUP BY fold ORDER BY fold",
+            )
+        }
+    except (sqlite3.DatabaseError, TypeError) as exc:
+        raise FoundationSamplingDatasetError(
+            "FOUNDATION_SAMPLING_INVALID",
+        ) from exc
+    finally:
+        connection.close()
+    try:
+        base_folds = [
+            {key: fold[key] for key in FOLD_CONTRACT_KEYS}
+            for fold in manifest["folds"]
+        ]
+    except (KeyError, TypeError) as exc:
+        raise FoundationSamplingDatasetError(
+            "FOUNDATION_SAMPLING_MANIFEST_INVALID",
+        ) from exc
+    expected_values = {
+        "datasetId": metadata["dataset_id"],
+        "schemaVersion": metadata["schema_version"],
+        "databaseSha256": expected_hash,
+        "foundationDatasetId": metadata["foundation_dataset_id"],
+        "foundationDatabaseSha256": metadata["foundation_database_sha256"],
+        "marketCapDatasetId": metadata["market_cap_dataset_id"],
+        "marketCapDatabaseSha256": metadata["market_cap_database_sha256"],
+        "rankingDatabaseSha256": metadata["ranking_database_sha256"],
+        "samplingSeed": metadata["sampling_seed"],
+        "maximumWindowsPerFold": metadata["max_windows_per_fold"],
+        "policySha256": metadata["policy_sha256"],
+        "foldsSha256": metadata["folds_sha256"],
+    }
+    fold_manifest_mismatch = (
+        hashlib.sha256(canonical_json(base_folds).encode()).hexdigest()
+        != metadata["folds_sha256"]
+        or any(
+            fold_totals.get(fold["fold"], {}).get("train_dates")
+            != fold["trainSessions"]
+            or fold_totals.get(fold["fold"], {}).get("train_population")
+            != fold["trainPopulation"]
+            or fold_totals.get(fold["fold"], {}).get("train_selected")
+            != fold["trainSelected"]
+            for fold in manifest.get("folds", [])
+        )
+    )
+    if (
+        any(
+            manifest.get(key) != value
+            for key, value in expected_values.items()
+        )
+        or fold_manifest_mismatch
+    ):
+        raise FoundationSamplingDatasetError(
+            "FOUNDATION_SAMPLING_MANIFEST_MISMATCH",
+        )
+    return manifest, database
 
 
 def _text(value: Decimal) -> str:

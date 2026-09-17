@@ -12,6 +12,10 @@ from platform_app.modules.experiments.cash_equity_fees import (
 from platform_app.modules.experiments.foundation_market_cap_dataset import (
     FoundationMarketCapDataset,
     FoundationMarketCapDatasetError,
+    verify_foundation_market_cap_dataset,
+)
+from platform_app.modules.experiments.foundation_experiment_factory import (
+    freeze_registered_experiment,
 )
 from platform_app.modules.experiments.foundation_return_dataset import (
     FoundationReturnDataset,
@@ -27,6 +31,7 @@ from platform_app.modules.experiments.foundation_sampling_dataset import (
     FoundationSamplingDatasetError,
     allocate_daily_quotas,
     select_stratified_training_rows,
+    verify_foundation_sampling_dataset,
 )
 from platform_app.modules.experiments.label_dataset import SCHEMA as LABEL_SCHEMA
 from platform_app.modules.experiments.market_dataset import (
@@ -457,6 +462,23 @@ def test_verification_rejects_tampered_virtual_database(
         verify_foundation_return_dataset(root)
 
 
+def test_verification_rejects_tampered_virtual_manifest(
+    tmp_path,
+    sealed_sources,
+):
+    root, _manifest = _seal_foundation(tmp_path, sealed_sources)
+    path = root / "data-manifest.json"
+    payload = json.loads(path.read_text())
+    payload["referenceSamples"] += 1
+    path.write_text(json.dumps(payload))
+
+    with pytest.raises(
+        FoundationReturnDatasetError,
+        match="FOUNDATION_DATASET_MANIFEST_MISMATCH",
+    ):
+        verify_foundation_return_dataset(root)
+
+
 def _daily_basic_rows(trade_date, index):
     rows = []
     for code, base in (
@@ -634,6 +656,40 @@ def _seal_market_cap(tmp_path, sealed_sources, foundation_root):
     return root
 
 
+def _seal_sampling(tmp_path, sealed_sources, foundation_root, market_cap_root):
+    _market_root, ranking_root, _labels_root, _dates = sealed_sources
+    with sqlite3.connect(ranking_root / "ranking.sqlite3") as database:
+        decision_dates = [
+            row[0]
+            for row in database.execute(
+                "SELECT DISTINCT decision_date FROM ranking_samples "
+                "ORDER BY decision_date",
+            )
+        ]
+    folds = build_foundation_walk_forward_splits(
+        decision_dates,
+        probability_calibration_sessions=2,
+        conformal_calibration_sessions=2,
+        purge_sessions=5,
+        embargo_sessions=5,
+        test_sessions=3,
+    )
+    root = tmp_path / "sampling"
+    with FoundationSamplingDataset(
+        root,
+        dataset_id="sampling-v1",
+        foundation_dataset_root=foundation_root,
+        ranking_dataset_root=ranking_root,
+        market_cap_dataset_root=market_cap_root,
+        maximum_windows_per_fold=40,
+        sampling_seed=17,
+        folds=folds,
+    ) as dataset:
+        list(dataset.build())
+        manifest = dataset.seal()
+    return root, manifest
+
+
 def test_stratified_selection_is_deterministic_and_weighted():
     rows = []
     for index in range(20):
@@ -688,40 +744,18 @@ def test_sampling_dataset_keeps_full_evaluation_and_all_training_dates(
         sealed_sources,
         foundation_root,
     )
-    with sqlite3.connect(ranking_root / "ranking.sqlite3") as database:
-        decision_dates = [
-            row[0]
-            for row in database.execute(
-                "SELECT DISTINCT decision_date FROM ranking_samples "
-                "ORDER BY decision_date",
-            )
-        ]
-    folds = build_foundation_walk_forward_splits(
-        decision_dates,
-        probability_calibration_sessions=2,
-        conformal_calibration_sessions=2,
-        purge_sessions=1,
-        embargo_sessions=1,
-        test_sessions=5,
+    sampling_root, manifest = _seal_sampling(
+        tmp_path,
+        sealed_sources,
+        foundation_root,
+        market_cap_root,
     )
-    sampling_root = tmp_path / "sampling"
-    with FoundationSamplingDataset(
-        sampling_root,
-        dataset_id="sampling-v1",
-        foundation_dataset_root=foundation_root,
-        ranking_dataset_root=ranking_root,
-        market_cap_dataset_root=market_cap_root,
-        maximum_windows_per_fold=40,
-        sampling_seed=17,
-        folds=folds,
-    ) as dataset:
-        list(dataset.build())
-        manifest = dataset.seal()
+    folds = manifest["folds"]
 
     assert len(manifest["folds"]) == 5
     assert manifest["fullUniverseEvaluation"] is True
     assert all(fold["trainSelected"] <= 40 for fold in manifest["folds"])
-    assert all(fold["testRows"] == 10 for fold in manifest["folds"])
+    assert all(fold["testRows"] == 6 for fold in manifest["folds"])
     assert all(
         fold["trainingSelection"] == "DETERMINISTIC_STRATIFIED_SAMPLE"
         and fold["testSelection"] == "FULL_UNIVERSE"
@@ -745,6 +779,93 @@ def test_sampling_dataset_keeps_full_evaluation_and_all_training_dates(
         fold["trainSessions"] for fold in folds
     ]
     assert leakage == 0
+
+
+def test_registered_experiment_freezes_real_artifact_hashes(
+    tmp_path,
+    sealed_sources,
+):
+    _market_root, _ranking_root, _labels_root, _dates = sealed_sources
+    foundation_root, foundation = _seal_foundation(tmp_path, sealed_sources)
+    market_cap_root = _seal_market_cap(
+        tmp_path,
+        sealed_sources,
+        foundation_root,
+    )
+    sampling_root, sampling = _seal_sampling(
+        tmp_path,
+        sealed_sources,
+        foundation_root,
+        market_cap_root,
+    )
+    output = tmp_path / "experiment"
+
+    frozen = freeze_registered_experiment(
+        output,
+        foundation_dataset_root=foundation_root,
+        market_cap_dataset_root=market_cap_root,
+        sampling_dataset_root=sampling_root,
+    )
+    repeated = freeze_registered_experiment(
+        output,
+        foundation_dataset_root=foundation_root,
+        market_cap_dataset_root=market_cap_root,
+        sampling_dataset_root=sampling_root,
+    )
+
+    dataset = frozen["configuration"]["dataset"]
+    assert frozen == repeated
+    assert frozen["releaseStatus"] == "UNAVAILABLE"
+    assert dataset["databaseSha256"] == foundation["databaseSha256"]
+    assert dataset["samplingDatabaseSha256"] == sampling["databaseSha256"]
+    assert dataset["historySessions"] == 90
+    assert frozen["configuration"]["training"]["finalConfirmationFold"] == 5
+    assert frozen["configuration"]["releasePolicy"][
+        "allowProductionPointerUpdate"
+    ] is False
+    assert (
+        frozen["configuration"]["models"][0]["revision"]
+        == "cd2ad2a54ba5531fbcf6ba3b7a763a6e14223680"
+    )
+    assert (output / "experiment.json").is_file()
+    assert (output / "model-sources.json").is_file()
+
+
+def test_market_cap_and_sampling_manifests_reject_metadata_drift(
+    tmp_path,
+    sealed_sources,
+):
+    foundation_root, _foundation = _seal_foundation(tmp_path, sealed_sources)
+    market_cap_root = _seal_market_cap(
+        tmp_path,
+        sealed_sources,
+        foundation_root,
+    )
+    sampling_root, _sampling = _seal_sampling(
+        tmp_path,
+        sealed_sources,
+        foundation_root,
+        market_cap_root,
+    )
+    market_cap_path = market_cap_root / "market-cap-manifest.json"
+    market_cap_payload = json.loads(market_cap_path.read_text())
+    market_cap_payload["rows"] += 1
+    market_cap_path.write_text(json.dumps(market_cap_payload))
+    with pytest.raises(
+        FoundationMarketCapDatasetError,
+        match="MARKET_CAP_DATASET_MANIFEST_MISMATCH",
+    ):
+        verify_foundation_market_cap_dataset(market_cap_root)
+
+    sampling_path = sampling_root / "split-manifest.json"
+    sampling_payload = json.loads(sampling_path.read_text())
+    sampling_payload["folds"][0]["trainEnd"] = "19000101"
+    sampling_path.write_text(json.dumps(sampling_payload))
+    with pytest.raises(
+        FoundationSamplingDatasetError,
+        match="FOUNDATION_SAMPLING_MANIFEST_MISMATCH",
+    ):
+        verify_foundation_sampling_dataset(sampling_root)
 
 
 def test_daily_quota_requires_at_least_one_sample_per_training_date():

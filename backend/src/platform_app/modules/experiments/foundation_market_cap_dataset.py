@@ -142,6 +142,54 @@ def verify_foundation_market_cap_dataset(root: Path) -> tuple[dict, Path]:
         or _file_sha256(database) != expected_hash
     ):
         raise FoundationMarketCapDatasetError("MARKET_CAP_DATASET_INVALID")
+    connection = sqlite3.connect(
+        f"{database.resolve().as_uri()}?mode=ro&immutable=1",
+        uri=True,
+    )
+    connection.row_factory = sqlite3.Row
+    try:
+        metadata = dict(
+            connection.execute(
+                "SELECT * FROM market_cap_dataset_metadata",
+            ).fetchone()
+        )
+        totals = dict(
+            connection.execute(
+                "SELECT COUNT(*) AS partitions, "
+                "SUM(accepted_count) AS rows, "
+                "MIN(decision_date) AS start_date, "
+                "MAX(decision_date) AS end_date "
+                "FROM market_cap_partitions",
+            ).fetchone()
+        )
+    except (sqlite3.DatabaseError, TypeError) as exc:
+        raise FoundationMarketCapDatasetError(
+            "MARKET_CAP_DATASET_INVALID",
+        ) from exc
+    finally:
+        connection.close()
+    expected_values = {
+        "datasetId": metadata["dataset_id"],
+        "schemaVersion": metadata["schema_version"],
+        "databaseSha256": expected_hash,
+        "foundationDatasetId": metadata["foundation_dataset_id"],
+        "foundationDatabaseSha256": metadata["foundation_database_sha256"],
+        "rankingDatasetId": metadata["ranking_dataset_id"],
+        "rankingDatabaseSha256": metadata["ranking_database_sha256"],
+        "marketDatasetId": metadata["market_dataset_id"],
+        "marketDatabaseSha256": metadata["market_database_sha256"],
+        "policySha256": metadata["policy_sha256"],
+        "partitions": totals["partitions"],
+        "rows": totals["rows"],
+        "startDate": totals["start_date"],
+        "endDate": totals["end_date"],
+    }
+    if any(
+        manifest.get(key) != value for key, value in expected_values.items()
+    ):
+        raise FoundationMarketCapDatasetError(
+            "MARKET_CAP_DATASET_MANIFEST_MISMATCH",
+        )
     return manifest, database
 
 
