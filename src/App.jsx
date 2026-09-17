@@ -66,9 +66,9 @@ function lazyWithReload(loader, name) {
     }
   })
 }
-const TodayTab = lazyWithReload(
-  () => import('./components/AdaptiveWorkbench'),
-  'today',
+const StockPickTab = lazyWithReload(
+  () => import('./components/StockPickTab'),
+  'stock-pick',
 )
 const AdaptiveWorkbenchPreview = import.meta.env.DEV
   ? lazyWithReload(
@@ -560,11 +560,7 @@ export function MainApp() {
               <>
               <WorkspaceViews label="选股视图" current={todaySub} onChange={setTodaySub}
                 items={[['selection', '选股结果', 'radar'], ['research', '盘面研究', 'layers']]} />
-              {todaySub === 'selection' ? <TodayTab
-                market={market.data}
-                book={book}
-                quotes={(reviewQuotes.data && reviewQuotes.data.list) || []}
-              /> : <ResearchTab
+              {todaySub === 'selection' ? <StockPickTab /> : <ResearchTab
                 interval={interval}
                 snapshot={marketSnapshot.data}
                 snapshotLoading={marketSnapshot.loading}
