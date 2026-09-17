@@ -1,6 +1,13 @@
 name: daily-learning-challengers
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/daily-retrain.yml"
+      - "api/_learning_*.js"
+      - "api/cron_learning.js"
+      - "qlib-service/learning_pipeline.py"
   schedule:
     # UTC Sunday-Friday 17:15 = Beijing Monday-Saturday 01:15.
     - cron: "15 17 * * 0-5"
