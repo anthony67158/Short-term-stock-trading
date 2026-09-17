@@ -22,6 +22,8 @@ dependencies = [
 dev = ["pytest>=8.3,<10", "hypothesis>=6.130", "ruff>=0.11"]
 research = [
     "catboost>=1.2,<2",
+    "tabm==0.0.3",
+    "torch>=2.13,<2.14",
 ]
 
 [project.scripts]
