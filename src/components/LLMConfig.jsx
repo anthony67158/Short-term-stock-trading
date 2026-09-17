@@ -529,7 +529,7 @@ export default function LLMConfig() {
             onClick={() => llmConfigStore.setView('endpoints')}
           >
             <Icon name="brain" size={14} />
-            端点配置
+            模型角色与端点
           </button>
           <button
             type="button"
