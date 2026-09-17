@@ -107,6 +107,34 @@ def _write_immutable_json(path: Path, payload: dict | list) -> None:
     os.replace(temporary, path)
 
 
+def _write_initial_cost_ledger(path: Path, experiment_id: str) -> None:
+    payload = {
+        "schemaVersion": "foundation-cost-ledger-entry.v1",
+        "sequence": 0,
+        "event": "BUDGET_OPENED",
+        "experimentId": experiment_id,
+        "currency": "CNY",
+        "spentCny": "0.00",
+        "hardStopCny": "90.00",
+        "totalLimitCny": "100.00",
+    }
+    rendered = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ) + "\n"
+    if path.exists():
+        if path.read_text() != rendered:
+            raise FoundationReturnContractError(
+                "FOUNDATION_ARTIFACT_RESUME_MISMATCH:cost-ledger.jsonl",
+            )
+        return
+    temporary = path.with_suffix(".jsonl.tmp")
+    temporary.write_text(rendered)
+    os.replace(temporary, path)
+
+
 def build_registered_experiment(
     *,
     foundation_dataset_root: Path,
@@ -241,6 +269,14 @@ def freeze_registered_experiment(
             "experimentId": frozen["experimentId"],
             "models": list(MODEL_SOURCES),
         },
+    )
+    _write_immutable_json(
+        root.expanduser().resolve() / "split-manifest.json",
+        verify_foundation_sampling_dataset(sampling_dataset_root)[0],
+    )
+    _write_initial_cost_ledger(
+        root.expanduser().resolve() / "cost-ledger.jsonl",
+        frozen["experimentId"],
     )
     return frozen
 

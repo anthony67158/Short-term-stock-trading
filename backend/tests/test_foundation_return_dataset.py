@@ -885,6 +885,10 @@ def test_registered_experiment_freezes_real_artifact_hashes(
     )
     assert (output / "experiment.json").is_file()
     assert (output / "model-sources.json").is_file()
+    assert (output / "split-manifest.json").is_file()
+    ledger = json.loads((output / "cost-ledger.jsonl").read_text())
+    assert ledger["spentCny"] == "0.00"
+    assert ledger["hardStopCny"] == "90.00"
 
 
 def test_market_cap_and_sampling_manifests_reject_metadata_drift(
