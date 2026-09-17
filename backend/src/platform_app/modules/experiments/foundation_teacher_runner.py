@@ -2,9 +2,12 @@
 
 import argparse
 import hashlib
+import importlib.metadata
 import json
 import os
+import platform
 import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,21 +22,17 @@ from platform_app.modules.experiments.foundation_return_contract import (
     load_frozen_experiment,
 )
 from platform_app.modules.experiments.foundation_return_dataset import (
+    _verified_upstream,
     verify_foundation_return_dataset,
 )
 from platform_app.modules.experiments.foundation_sampling_dataset import (
     verify_foundation_sampling_dataset,
 )
-from platform_app.modules.experiments.probabilistic_baseline_runner import (
-    fee_adjusted_returns,
-)
-from platform_app.modules.experiments.ranking_model_trainer import (
-    BOARD_CODES,
-    _verified_ranking_database,
-)
-
 SCHEMA_VERSION = "foundation-teacher-screening.v2"
 DATASET_SCHEMA_VERSION = "foundation-teacher-screening-dataset.v2"
+REFERENCE_NOTIONAL_CNY = 100_000.0
+MARKET_EXIT_SLIPPAGE_RATE = 0.0005
+BOARD_CODES = {"MAIN": 0, "CHINEXT": 1, "STAR": 2, "BEIJING": 3}
 DEFAULT_CONTEXT_LENGTH = 90
 DEFAULT_FORECAST_HORIZON = 5
 DEFAULT_SAMPLES_PER_PARTITION = 2_048
@@ -181,6 +180,64 @@ def _write_json(path: Path, payload: dict, *, immutable: bool = False) -> None:
     os.replace(temporary, path)
 
 
+def _round_cny(values: np.ndarray) -> np.ndarray:
+    cents = np.nextafter(values * 100.0 + 0.5, np.inf)
+    return np.floor(cents) / 100.0
+
+
+def fee_adjusted_returns(
+    gross_returns: np.ndarray,
+    boards: np.ndarray,
+    execution_dates: np.ndarray,
+    terminal_dates: np.ndarray,
+) -> np.ndarray:
+    gross = np.asarray(gross_returns, dtype=np.float64)
+    board = np.asarray(boards)
+    execution = np.asarray(execution_dates)
+    terminal = np.asarray(terminal_dates)
+    if (
+        gross.ndim != 1
+        or len({len(gross), len(board), len(execution), len(terminal)}) != 1
+        or not np.all(np.isfinite(gross))
+        or np.any(gross <= -1.0)
+        or not np.all(np.isin(board, tuple(BOARD_CODES)))
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_LABEL_INPUT_INVALID",
+        )
+    pre_cutoff_transfer = np.where(board == "BEIJING", 0.000025, 0.00002)
+    buy_transfer_rate = np.where(
+        execution >= "20220429",
+        0.00001,
+        pre_cutoff_transfer,
+    )
+    sell_transfer_rate = np.where(
+        terminal >= "20220429",
+        0.00001,
+        pre_cutoff_transfer,
+    )
+    stamp_rate = np.where(terminal >= "20230828", 0.0005, 0.001)
+    buy_fees = 30.0 + _round_cny(
+        REFERENCE_NOTIONAL_CNY * buy_transfer_rate,
+    )
+    sell_gross = (
+        REFERENCE_NOTIONAL_CNY
+        * (1.0 + gross)
+        * (1.0 - MARKET_EXIT_SLIPPAGE_RATE)
+    )
+    sell_fees = (
+        _round_cny(np.maximum(5.0, sell_gross * 0.0003))
+        + _round_cny(sell_gross * sell_transfer_rate)
+        + _round_cny(sell_gross * stamp_rate)
+    )
+    return (
+        sell_gross
+        - sell_fees
+        - REFERENCE_NOTIONAL_CNY
+        - buy_fees
+    ) / (REFERENCE_NOTIONAL_CNY + buy_fees)
+
+
 def _score(fold: int, partition: str, date: str, instrument: str) -> bytes:
     return hashlib.sha256(
         f"foundation-teacher-v2:{fold}:{partition}:{date}:{instrument}".encode(),
@@ -325,7 +382,10 @@ def export_teacher_dataset(
     experiment = load_frozen_experiment(experiment_root)
     foundation, _ = verify_foundation_return_dataset(foundation_root)
     sampling, _ = verify_foundation_sampling_dataset(sampling_root)
-    ranking, ranking_database = _verified_ranking_database(ranking_root)
+    ranking, ranking_database = _verified_upstream(
+        ranking_root,
+        "ranking-dataset.v1",
+    )
     if (
         experiment.dataset.database_sha256 != foundation["databaseSha256"]
         or experiment.dataset.sampling_database_sha256
@@ -707,27 +767,393 @@ def evaluate_teacher_test(
     return metrics, predictions
 
 
+def _device(model_name: str, requested: str) -> str:
+    if requested != "auto":
+        return requested
+    import torch
+
+    if torch.cuda.is_available():
+        return "cuda"
+    if (
+        model_name != "timesfm-2.5"
+        and hasattr(torch.backends, "mps")
+        and torch.backends.mps.is_available()
+    ):
+        return "mps"
+    return "cpu"
+
+
+def _run_ttm(
+    contexts: np.ndarray,
+    *,
+    batch_size: int,
+    device: str,
+) -> TeacherRawForecast:
+    import torch
+    from tsfm_public.models.tinytimemixer import (
+        TinyTimeMixerForPrediction,
+    )
+
+    spec = MODEL_SPECS["ttm-r2.1"]
+    model = TinyTimeMixerForPrediction.from_pretrained(
+        spec["modelId"],
+        revision=spec["revision"],
+    )
+    model.to(device)
+    model.eval()
+    outputs = []
+    started = time.monotonic()
+    with torch.inference_mode():
+        for start in range(0, len(contexts), batch_size):
+            values = torch.from_numpy(
+                contexts[start : start + batch_size, :, None],
+            ).to(device)
+            prediction = model(
+                past_values=values,
+                return_loss=False,
+            ).prediction_outputs
+            outputs.append(prediction[:, :DEFAULT_FORECAST_HORIZON, 0].cpu())
+    elapsed = time.monotonic() - started
+    point = torch.cat(outputs).numpy().astype(np.float32)
+    return TeacherRawForecast(
+        point=point,
+        quantiles=np.empty(
+            (len(point), DEFAULT_FORECAST_HORIZON, 0),
+            dtype=np.float32,
+        ),
+        quantile_levels=(),
+        inference_seconds=elapsed,
+    )
+
+
+def _run_timesfm(
+    contexts: np.ndarray,
+    *,
+    batch_size: int,
+) -> TeacherRawForecast:
+    import timesfm
+
+    spec = MODEL_SPECS["timesfm-2.5"]
+    model = timesfm.TimesFM_2p5_200M_torch.from_pretrained(
+        spec["modelId"],
+        revision=spec["revision"],
+        torch_compile=False,
+    )
+    model.compile(
+        timesfm.ForecastConfig(
+            max_context=DEFAULT_CONTEXT_LENGTH,
+            max_horizon=DEFAULT_FORECAST_HORIZON,
+            normalize_inputs=True,
+            per_core_batch_size=batch_size,
+            use_continuous_quantile_head=True,
+            force_flip_invariance=True,
+            infer_is_positive=False,
+            fix_quantile_crossing=True,
+        )
+    )
+    started = time.monotonic()
+    point, raw_quantiles = model.forecast(
+        horizon=DEFAULT_FORECAST_HORIZON,
+        inputs=[values for values in contexts],
+    )
+    elapsed = time.monotonic() - started
+    raw_quantiles = np.asarray(raw_quantiles)
+    native_levels = tuple(MODEL_SPECS["timesfm-2.5"]["nativeQuantiles"])
+    if raw_quantiles.shape == (
+        len(contexts),
+        DEFAULT_FORECAST_HORIZON,
+        len(native_levels) + 1,
+    ):
+        raw_quantiles = raw_quantiles[..., 1:]
+    return TeacherRawForecast(
+        point=np.asarray(point, dtype=np.float32),
+        quantiles=np.asarray(raw_quantiles, dtype=np.float32),
+        quantile_levels=native_levels,
+        inference_seconds=elapsed,
+    )
+
+
+def _run_chronos(
+    contexts: np.ndarray,
+    *,
+    batch_size: int,
+    device: str,
+) -> TeacherRawForecast:
+    from chronos import Chronos2Pipeline
+
+    spec = MODEL_SPECS["chronos-2"]
+    pipeline = Chronos2Pipeline.from_pretrained(
+        spec["modelId"],
+        revision=spec["revision"],
+        device_map=device,
+    )
+    started = time.monotonic()
+    quantiles, median = pipeline.predict_quantiles(
+        inputs=[values for values in contexts],
+        prediction_length=DEFAULT_FORECAST_HORIZON,
+        quantile_levels=list(DEFAULT_QUANTILES),
+        batch_size=batch_size,
+        context_length=DEFAULT_CONTEXT_LENGTH,
+    )
+    elapsed = time.monotonic() - started
+
+    def univariate(values, dimensions: int) -> np.ndarray:
+        result = []
+        for value in values:
+            array = value.detach().cpu().numpy()
+            if array.ndim == dimensions + 1 and array.shape[0] == 1:
+                array = array[0]
+            result.append(array)
+        return np.stack(result)
+
+    return TeacherRawForecast(
+        point=univariate(median, 1).astype(np.float32),
+        quantiles=univariate(quantiles, 2).astype(np.float32),
+        quantile_levels=DEFAULT_QUANTILES,
+        inference_seconds=elapsed,
+    )
+
+
+def run_teacher_inference(
+    *,
+    dataset_root: Path,
+    output_root: Path,
+    model_name: str,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+    device: str = "auto",
+) -> dict:
+    if model_name not in MODEL_SPECS or batch_size <= 0:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_RUN_CONFIG_INVALID",
+        )
+    dataset, data_manifest = load_teacher_dataset(dataset_root)
+    resolved_device = _device(model_name, device)
+    root = output_root / model_name
+    if (root / "receipt.json").is_file():
+        _raw, existing = load_teacher_forecast(
+            root,
+            expected_dataset_sha256=data_manifest["dataSha256"],
+        )
+        if (
+            existing.get("model") == model_name
+            and existing.get("batchSize") == batch_size
+            and existing.get("device") == resolved_device
+        ):
+            return existing
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_RESUME_CONFIG_MISMATCH",
+        )
+    if model_name == "ttm-r2.1":
+        raw = _run_ttm(
+            dataset.contexts,
+            batch_size=batch_size,
+            device=resolved_device,
+        )
+    elif model_name == "timesfm-2.5":
+        raw = _run_timesfm(
+            dataset.contexts,
+            batch_size=batch_size,
+        )
+    else:
+        raw = _run_chronos(
+            dataset.contexts,
+            batch_size=batch_size,
+            device=resolved_device,
+        )
+    root.mkdir(parents=True, exist_ok=True)
+    raw_path = root / "raw-forecast.npz"
+    temporary = raw_path.with_suffix(".npz.tmp")
+    with temporary.open("wb") as stream:
+        np.savez_compressed(
+            stream,
+            point=raw.point,
+            quantiles=raw.quantiles,
+            quantileLevels=np.asarray(raw.quantile_levels),
+            inferenceSeconds=np.asarray(raw.inference_seconds),
+        )
+    os.replace(temporary, raw_path)
+    distributions = {}
+    for name in (
+        "torch",
+        "numpy",
+        "granite-tsfm",
+        "timesfm",
+        "chronos-forecasting",
+        "transformers",
+    ):
+        try:
+            distributions[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+    receipt = {
+        "schemaVersion": "foundation-teacher-inference-receipt.v1",
+        "model": model_name,
+        "modelSpec": MODEL_SPECS[model_name],
+        "datasetSha256": data_manifest["dataSha256"],
+        "rows": len(dataset.contexts),
+        "batchSize": batch_size,
+        "device": resolved_device,
+        "inferenceSeconds": raw.inference_seconds,
+        "rawForecast": raw_path.name,
+        "rawForecastSha256": _file_sha256(raw_path),
+        "platform": platform.platform(),
+        "python": platform.python_version(),
+        "distributions": distributions,
+        "paidCostCny": "0.00",
+        "releaseStatus": "UNAVAILABLE",
+    }
+    _write_json(root / "receipt.json", receipt, immutable=True)
+    return receipt
+
+
+def load_teacher_forecast(
+    root: Path,
+    *,
+    expected_dataset_sha256: str,
+) -> tuple[TeacherRawForecast, dict]:
+    try:
+        receipt = json.loads((root / "receipt.json").read_text())
+        raw_path = root / receipt["rawForecast"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_FORECAST_NOT_SEALED",
+        ) from exc
+    if (
+        receipt.get("schemaVersion")
+        != "foundation-teacher-inference-receipt.v1"
+        or receipt.get("datasetSha256") != expected_dataset_sha256
+        or not raw_path.is_file()
+        or _file_sha256(raw_path) != receipt.get("rawForecastSha256")
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_FORECAST_INVALID",
+        )
+    with np.load(raw_path, allow_pickle=False) as saved:
+        raw = TeacherRawForecast(
+            point=saved["point"].copy(),
+            quantiles=saved["quantiles"].copy(),
+            quantile_levels=tuple(saved["quantileLevels"].tolist()),
+            inference_seconds=float(saved["inferenceSeconds"]),
+        )
+    if len(raw.point) != receipt["rows"]:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_FORECAST_COUNT_MISMATCH",
+        )
+    return raw, receipt
+
+
+def evaluate_teacher_model(
+    *,
+    dataset_root: Path,
+    inference_root: Path,
+    output_root: Path,
+    model_name: str,
+) -> dict:
+    dataset, data_manifest = load_teacher_dataset(dataset_root)
+    raw, receipt = load_teacher_forecast(
+        inference_root / model_name,
+        expected_dataset_sha256=data_manifest["dataSha256"],
+    )
+    if receipt["model"] != model_name:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_MODEL_MISMATCH",
+        )
+    root = output_root / model_name
+    root.mkdir(parents=True, exist_ok=True)
+    folds = []
+    files = {}
+    for fold in SCREENING_FOLDS:
+        metrics, predictions = evaluate_teacher_test(
+            dataset,
+            raw,
+            model_name=model_name,
+            fold=fold,
+        )
+        prediction_path = root / f"fold-{fold}-test.npz"
+        temporary = prediction_path.with_suffix(".npz.tmp")
+        with temporary.open("wb") as stream:
+            np.savez_compressed(stream, **predictions)
+        os.replace(temporary, prediction_path)
+        files[prediction_path.name] = _file_sha256(prediction_path)
+        folds.append(metrics)
+    evaluation_path = root / "evaluation.json"
+    evaluation = {
+        "schemaVersion": "foundation-teacher-evaluation.v1",
+        "model": model_name,
+        "datasetSha256": data_manifest["dataSha256"],
+        "inferenceReceiptSha256": _file_sha256(
+            inference_root / model_name / "receipt.json",
+        ),
+        "folds": folds,
+        "releaseStatus": "UNAVAILABLE",
+    }
+    _write_json(evaluation_path, evaluation, immutable=True)
+    files[evaluation_path.name] = _file_sha256(evaluation_path)
+    result = {
+        "schemaVersion": "foundation-teacher-evaluation-receipt.v1",
+        "model": model_name,
+        "files": files,
+        "paidCostCny": "0.00",
+        "releaseStatus": "UNAVAILABLE",
+    }
+    _write_json(root / "receipt.json", result, immutable=True)
+    return result
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--experiment-root", type=Path, required=True)
-    parser.add_argument("--foundation-root", type=Path, required=True)
-    parser.add_argument("--sampling-root", type=Path, required=True)
-    parser.add_argument("--ranking-root", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument(
+    commands = parser.add_subparsers(dest="command", required=True)
+    export = commands.add_parser("export")
+    export.add_argument("--experiment-root", type=Path, required=True)
+    export.add_argument("--foundation-root", type=Path, required=True)
+    export.add_argument("--sampling-root", type=Path, required=True)
+    export.add_argument("--ranking-root", type=Path, required=True)
+    export.add_argument("--output", type=Path, required=True)
+    export.add_argument(
         "--samples-per-partition",
         type=int,
         default=DEFAULT_SAMPLES_PER_PARTITION,
     )
-    args = parser.parse_args()
-    result = export_teacher_dataset(
-        experiment_root=args.experiment_root,
-        foundation_root=args.foundation_root,
-        sampling_root=args.sampling_root,
-        ranking_root=args.ranking_root,
-        output_root=args.output,
-        samples_per_partition=args.samples_per_partition,
+    run = commands.add_parser("run")
+    run.add_argument("--dataset-root", type=Path, required=True)
+    run.add_argument("--output", type=Path, required=True)
+    run.add_argument("--model", choices=tuple(MODEL_SPECS), required=True)
+    run.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    run.add_argument(
+        "--device",
+        choices=("auto", "cuda", "mps", "cpu"),
+        default="auto",
     )
+    evaluate = commands.add_parser("evaluate")
+    evaluate.add_argument("--dataset-root", type=Path, required=True)
+    evaluate.add_argument("--inference-root", type=Path, required=True)
+    evaluate.add_argument("--output", type=Path, required=True)
+    evaluate.add_argument("--model", choices=tuple(MODEL_SPECS), required=True)
+    args = parser.parse_args()
+    if args.command == "export":
+        result = export_teacher_dataset(
+            experiment_root=args.experiment_root,
+            foundation_root=args.foundation_root,
+            sampling_root=args.sampling_root,
+            ranking_root=args.ranking_root,
+            output_root=args.output,
+            samples_per_partition=args.samples_per_partition,
+        )
+    elif args.command == "run":
+        result = run_teacher_inference(
+            dataset_root=args.dataset_root,
+            output_root=args.output,
+            model_name=args.model,
+            batch_size=args.batch_size,
+            device=args.device,
+        )
+    else:
+        result = evaluate_teacher_model(
+            dataset_root=args.dataset_root,
+            inference_root=args.inference_root,
+            output_root=args.output,
+            model_name=args.model,
+        )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 

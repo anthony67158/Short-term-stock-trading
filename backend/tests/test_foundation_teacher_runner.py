@@ -1,8 +1,13 @@
+import json
 import sqlite3
+from decimal import Decimal
 
 import numpy as np
 import pytest
 
+from platform_app.modules.experiments.foundation_return_dataset import (
+    reference_full_fill_net_return,
+)
 from platform_app.modules.experiments.foundation_teacher_runner import (
     DEFAULT_CONTEXT_LENGTH,
     FoundationTeacherError,
@@ -14,6 +19,8 @@ from platform_app.modules.experiments.foundation_teacher_runner import (
     _partition_samples,
     _score,
     evaluate_teacher_test,
+    fee_adjusted_returns,
+    load_teacher_forecast,
     select_forecast_steps,
 )
 
@@ -64,6 +71,41 @@ def test_daily_quotas_are_equal_and_deterministic():
         dates[0],
         "000001.SZ",
     )
+
+
+def test_teacher_fee_returns_match_frozen_decimal_policy():
+    gross = np.array([-0.1, 0.0, 0.034567])
+    boards = np.array(["MAIN", "BEIJING", "STAR"])
+    executions = np.array(["20210104", "20220428", "20220429"])
+    terminals = np.array(["20210111", "20220429", "20230828"])
+
+    actual = fee_adjusted_returns(
+        gross,
+        boards,
+        executions,
+        terminals,
+    )
+    expected = np.asarray(
+        [
+            float(
+                reference_full_fill_net_return(
+                    gross_return=Decimal(str(value)),
+                    board=board,
+                    execution_date=execution,
+                    terminal_date=terminal,
+                )
+            )
+            for value, board, execution, terminal in zip(
+                gross,
+                boards,
+                executions,
+                terminals,
+                strict=True,
+            )
+        ]
+    )
+
+    np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=0)
 
 
 def test_mature_context_excludes_unmatured_labels():
@@ -208,6 +250,48 @@ def test_teacher_evaluation_uses_calibration_and_test_partitions():
         "q75",
         "q90",
     ]
+
+
+def test_load_teacher_forecast_rejects_hash_drift(tmp_path):
+    point = np.zeros((2, 5), dtype=np.float32)
+    quantiles = np.zeros((2, 5, 0), dtype=np.float32)
+    raw_path = tmp_path / "raw-forecast.npz"
+    np.savez_compressed(
+        raw_path,
+        point=point,
+        quantiles=quantiles,
+        quantileLevels=np.asarray([]),
+        inferenceSeconds=np.asarray(1.0),
+    )
+    import hashlib
+
+    digest = hashlib.sha256(raw_path.read_bytes()).hexdigest()
+    receipt = {
+        "schemaVersion": "foundation-teacher-inference-receipt.v1",
+        "model": "ttm-r2.1",
+        "datasetSha256": "a" * 64,
+        "rows": 2,
+        "rawForecast": raw_path.name,
+        "rawForecastSha256": digest,
+    }
+    (tmp_path / "receipt.json").write_text(json.dumps(receipt))
+
+    raw, loaded = load_teacher_forecast(
+        tmp_path,
+        expected_dataset_sha256="a" * 64,
+    )
+
+    assert raw.point.shape == (2, 5)
+    assert loaded["model"] == "ttm-r2.1"
+    raw_path.write_bytes(b"drift")
+    with pytest.raises(
+        FoundationTeacherError,
+        match="FOUNDATION_TEACHER_FORECAST_INVALID",
+    ):
+        load_teacher_forecast(
+            tmp_path,
+            expected_dataset_sha256="a" * 64,
+        )
 
 
 def test_daily_quota_requires_one_sample_per_date():
