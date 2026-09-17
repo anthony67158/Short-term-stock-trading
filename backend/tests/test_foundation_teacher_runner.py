@@ -300,3 +300,12 @@ def test_daily_quota_requires_one_sample_per_date():
         match="FOUNDATION_TEACHER_SAMPLE_BUDGET_INVALID",
     ):
         _daily_quotas(["20200101", "20200102"], 1)
+    with pytest.raises(
+        FoundationTeacherError,
+        match="FOUNDATION_TEACHER_SAMPLE_BUDGET_INVALID",
+    ):
+        _daily_quotas(
+            ["20200101", "20200102"],
+            30,
+            minimum_per_date=20,
+        )

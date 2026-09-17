@@ -21,22 +21,17 @@ from platform_app.modules.experiments.foundation_return_contract import (
     experiment_id,
     load_frozen_experiment,
 )
-from platform_app.modules.experiments.foundation_return_dataset import (
-    _verified_upstream,
-    verify_foundation_return_dataset,
-)
-from platform_app.modules.experiments.foundation_sampling_dataset import (
-    verify_foundation_sampling_dataset,
-)
-SCHEMA_VERSION = "foundation-teacher-screening.v2"
-DATASET_SCHEMA_VERSION = "foundation-teacher-screening-dataset.v2"
+SCHEMA_VERSION = "foundation-teacher-screening.v3"
+DATASET_SCHEMA_VERSION = "foundation-teacher-screening-dataset.v3"
 REFERENCE_NOTIONAL_CNY = 100_000.0
 MARKET_EXIT_SLIPPAGE_RATE = 0.0005
 BOARD_CODES = {"MAIN": 0, "CHINEXT": 1, "STAR": 2, "BEIJING": 3}
 DEFAULT_CONTEXT_LENGTH = 90
 DEFAULT_FORECAST_HORIZON = 5
-DEFAULT_SAMPLES_PER_PARTITION = 2_048
+DEFAULT_SAMPLES_PER_PARTITION = 12_600
+MINIMUM_SAMPLES_PER_DATE = 20
 DEFAULT_BATCH_SIZE = 32
+TTM_DAILY_FREQUENCY_TOKEN = 8
 SCREENING_FOLDS = (1, 2)
 SCREENING_PARTITIONS = ("probabilityCalibration", "test")
 PARTITION_RANGES = {
@@ -54,6 +49,8 @@ MODEL_SPECS = {
         "nativeQuantiles": [],
         "contextLimit": 90,
         "forecastLimit": 30,
+        "frequency": "D",
+        "frequencyToken": TTM_DAILY_FREQUENCY_TOKEN,
         "officialSource": (
             "https://huggingface.co/ibm-granite/"
             "granite-timeseries-ttm-r2"
@@ -240,12 +237,21 @@ def fee_adjusted_returns(
 
 def _score(fold: int, partition: str, date: str, instrument: str) -> bytes:
     return hashlib.sha256(
-        f"foundation-teacher-v2:{fold}:{partition}:{date}:{instrument}".encode(),
+        f"foundation-teacher-v3:{fold}:{partition}:{date}:{instrument}".encode(),
     ).digest()
 
 
-def _daily_quotas(dates: list[str], total: int) -> dict[str, int]:
-    if not dates or total < len(dates):
+def _daily_quotas(
+    dates: list[str],
+    total: int,
+    *,
+    minimum_per_date: int = 1,
+) -> dict[str, int]:
+    if (
+        not dates
+        or minimum_per_date <= 0
+        or total < len(dates) * minimum_per_date
+    ):
         raise FoundationTeacherError(
             "FOUNDATION_TEACHER_SAMPLE_BUDGET_INVALID",
         )
@@ -297,6 +303,7 @@ def _partition_samples(
     start: str,
     end: str,
     samples: int,
+    minimum_per_date: int = 1,
 ) -> TeacherDataset:
     dates = [
         row[0]
@@ -306,7 +313,11 @@ def _partition_samples(
             (start, end),
         )
     ]
-    quotas = _daily_quotas(dates, samples)
+    quotas = _daily_quotas(
+        dates,
+        samples,
+        minimum_per_date=minimum_per_date,
+    )
     records = []
     for date in dates:
         candidates = ranking.execute(
@@ -379,6 +390,14 @@ def export_teacher_dataset(
     output_root: Path,
     samples_per_partition: int = DEFAULT_SAMPLES_PER_PARTITION,
 ) -> dict:
+    from platform_app.modules.experiments.foundation_return_dataset import (
+        _verified_upstream,
+        verify_foundation_return_dataset,
+    )
+    from platform_app.modules.experiments.foundation_sampling_dataset import (
+        verify_foundation_sampling_dataset,
+    )
+
     experiment = load_frozen_experiment(experiment_root)
     foundation, _ = verify_foundation_return_dataset(foundation_root)
     sampling, _ = verify_foundation_sampling_dataset(sampling_root)
@@ -416,6 +435,7 @@ def export_teacher_dataset(
                         start=contract[start_key],
                         end=contract[end_key],
                         samples=samples_per_partition,
+                        minimum_per_date=MINIMUM_SAMPLES_PER_DATE,
                     )
                 )
     finally:
@@ -456,6 +476,7 @@ def export_teacher_dataset(
         "dataSha256": _file_sha256(data_path),
         "rows": len(combined.contexts),
         "samplesPerPartition": samples_per_partition,
+        "minimumSamplesPerDate": MINIMUM_SAMPLES_PER_DATE,
         "folds": list(SCREENING_FOLDS),
         "partitions": list(SCREENING_PARTITIONS),
         "contextLength": DEFAULT_CONTEXT_LENGTH,
@@ -775,7 +796,7 @@ def _device(model_name: str, requested: str) -> str:
     if torch.cuda.is_available():
         return "cuda"
     if (
-        model_name != "timesfm-2.5"
+        model_name == "ttm-r2.1"
         and hasattr(torch.backends, "mps")
         and torch.backends.mps.is_available()
     ):
@@ -808,8 +829,15 @@ def _run_ttm(
             values = torch.from_numpy(
                 contexts[start : start + batch_size, :, None],
             ).to(device)
+            frequency = torch.full(
+                (len(values),),
+                TTM_DAILY_FREQUENCY_TOKEN,
+                dtype=torch.long,
+                device=device,
+            )
             prediction = model(
                 past_values=values,
+                freq_token=frequency,
                 return_loss=False,
             ).prediction_outputs
             outputs.append(prediction[:, :DEFAULT_FORECAST_HORIZON, 0].cpu())

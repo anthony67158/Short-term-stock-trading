@@ -2,5 +2,7 @@
 granite-tsfm==0.2.28
 timesfm[torch]==2.0.2
 chronos-forecasting==2.3.2
+transformers==4.52.4
+huggingface-hub==0.36.0
 pyarrow==21.0.0
 pydantic==2.12.5
