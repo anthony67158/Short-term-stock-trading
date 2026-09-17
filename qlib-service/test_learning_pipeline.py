@@ -1,12 +1,64 @@
+import hashlib
 import json
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
-from learning_pipeline import train
+from learning_pipeline import (
+    expected_settlement_date,
+    train,
+    validate_training_view,
+)
 
 
 class LearningPipelineTest(unittest.TestCase):
+    def test_expected_settlement_date_skips_weekend(self):
+        self.assertEqual(
+            expected_settlement_date(
+                datetime(2026, 9, 21, 17, 15, tzinfo=timezone.utc)
+            ),
+            "2026-09-21",
+        )
+        self.assertEqual(
+            expected_settlement_date(
+                datetime(2026, 9, 20, 17, 15, tzinfo=timezone.utc)
+            ),
+            "2026-09-18",
+        )
+
+    def test_training_view_rejects_stale_date_and_hash_mismatch(self):
+        now = datetime(2026, 9, 17, 17, 15, tzinfo=timezone.utc)
+        view = {
+            "schemaVersion": "learning-training-view.v1",
+            "generatedAt": 1,
+            "date": "2026-09-17",
+            "stockPick": [],
+            "position": [],
+        }
+        content_hash = hashlib.sha256(json.dumps(
+            view,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()).hexdigest()
+        view["contentHash"] = content_hash
+        manifest = {
+            "schemaVersion": "learning-manifest.v1",
+            "date": "2026-09-17",
+            "viewHash": content_hash,
+        }
+
+        validate_training_view(manifest, view, now)
+
+        stale_manifest = {**manifest, "date": "2026-09-16"}
+        with self.assertRaisesRegex(RuntimeError, "stale learning manifest"):
+            validate_training_view(stale_manifest, view, now)
+
+        invalid_view = {**view, "stockPick": [{"sampleId": "tampered"}]}
+        with self.assertRaisesRegex(RuntimeError, "content hash mismatch"):
+            validate_training_view(manifest, invalid_view, now)
+
     def test_insufficient_samples_skip_without_model_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -8,7 +8,7 @@ import json
 import os
 import pickle
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +40,7 @@ POSITION_FEATURES = (
     "expectedNetR",
 )
 SEEDS = (17, 41, 97)
+BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 
 
 def _number(value: Any) -> float:
@@ -55,6 +56,50 @@ def _matrix(rows: list[dict], features: tuple[str, ...]) -> np.ndarray:
         [[_number(row.get(name)) for name in features] for row in rows],
         dtype=np.float64,
     )
+
+
+def expected_settlement_date(now: datetime | None = None) -> str:
+    current = (now or datetime.now(timezone.utc)).astimezone(BEIJING_TIMEZONE)
+    expected = current.date() - timedelta(days=1)
+    while expected.weekday() >= 5:
+        expected -= timedelta(days=1)
+    return expected.isoformat()
+
+
+def _canonical_hash(value: dict) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def validate_training_view(
+    manifest: dict,
+    view: dict,
+    now: datetime | None = None,
+) -> None:
+    if manifest.get("schemaVersion") != "learning-manifest.v1":
+        raise RuntimeError("unsupported learning manifest")
+    manifest_date = str(manifest.get("date") or "")
+    expected_date = expected_settlement_date(now)
+    if manifest_date < expected_date:
+        raise RuntimeError(
+            f"stale learning manifest: {manifest_date} < {expected_date}"
+        )
+    if view.get("schemaVersion") != "learning-training-view.v1":
+        raise RuntimeError("unsupported learning training view")
+    if str(view.get("date") or "") != manifest_date:
+        raise RuntimeError("learning manifest and view dates differ")
+    declared_hash = str(view.get("contentHash") or "")
+    content = {key: value for key, value in view.items() if key != "contentHash"}
+    actual_hash = _canonical_hash(content)
+    if not declared_hash or declared_hash != actual_hash:
+        raise RuntimeError("learning view content hash mismatch")
+    if str(manifest.get("viewHash") or "") != declared_hash:
+        raise RuntimeError("learning manifest view hash mismatch")
 
 
 def _position_rows(rows: list[dict]) -> list[dict]:
@@ -297,7 +342,10 @@ def _bucket():
     return oss2.Bucket(auth, endpoint, bucket_name)
 
 
-def download_latest(output: Path) -> Path:
+def download_latest(
+    output: Path,
+    now: datetime | None = None,
+) -> Path:
     import oss2
 
     bucket = _bucket()
@@ -316,8 +364,11 @@ def download_latest(output: Path) -> Path:
     view_path = str(manifest["viewPath"])
     if not view_path.startswith("learning/v1/views/"):
         raise RuntimeError("manifest points outside redacted learning views")
+    view_bytes = bucket.get_object(view_path).read()
+    view = json.loads(view_bytes)
+    validate_training_view(manifest, view, now)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(bucket.get_object(view_path).read())
+    output.write_bytes(view_bytes)
     return output
 
 
