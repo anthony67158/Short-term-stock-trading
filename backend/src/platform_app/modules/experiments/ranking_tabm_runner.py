@@ -160,6 +160,27 @@ def _training_indices(mask: np.ndarray, limit: int | None, seed: int) -> np.ndar
     return np.sort(rng.choice(indices, size=limit, replace=False))
 
 
+def temporal_training_partition(
+    dates: np.ndarray,
+    train_mask: np.ndarray,
+    *,
+    validation_sessions: int,
+    purge_sessions: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    train_dates = np.unique(dates[train_mask])
+    if (
+        validation_sessions < 1
+        or purge_sessions < 0
+        or len(train_dates) <= validation_sessions + purge_sessions
+    ):
+        raise QuantModelError("TABM_INTERNAL_VALIDATION_INVALID")
+    validation_start = len(train_dates) - validation_sessions
+    fit_end = validation_start - purge_sessions
+    fit_mask = train_mask & (dates <= train_dates[fit_end - 1])
+    validation_mask = train_mask & (dates >= train_dates[validation_start])
+    return fit_mask, validation_mask
+
+
 def _tensor_batch(
     data,
     indices: np.ndarray,
@@ -184,6 +205,29 @@ def _tensor_batch(
     )
 
 
+@torch.inference_mode()
+def validation_loss(
+    model: nn.Module,
+    data,
+    indices: np.ndarray,
+    preprocessor: dict,
+    *,
+    batch_size: int,
+    device: torch.device,
+) -> float:
+    model.eval()
+    weighted_loss = 0.0
+    seen_weight = 0.0
+    for start in range(0, len(indices), batch_size):
+        batch = indices[start : start + batch_size]
+        x, target, weight = _tensor_batch(data, batch, preprocessor, device)
+        loss = independent_ensemble_mse(model(x).squeeze(-1), target, weight)
+        batch_weight = float(weight.sum().cpu())
+        weighted_loss += float(loss.cpu()) * batch_weight
+        seen_weight += batch_weight
+    return weighted_loss / seen_weight
+
+
 def fit_deep_model(
     data,
     train_mask: np.ndarray,
@@ -199,11 +243,28 @@ def fit_deep_model(
     learning_rate: float,
     device_name: str,
     max_train_rows: int | None = None,
+    validation_sessions: int = 63,
+    purge_sessions: int = 5,
+    patience: int = 3,
 ) -> tuple[nn.Module, dict, dict]:
-    if epochs < 1 or batch_size < 1 or members < 1 or blocks < 1 or width < 1:
+    if (
+        epochs < 1
+        or batch_size < 1
+        or members < 1
+        or blocks < 1
+        or width < 1
+        or patience < 1
+    ):
         raise QuantModelError("TABM_BUDGET_INVALID")
     device = resolve_device(device_name)
-    indices = _training_indices(train_mask, max_train_rows, seed)
+    fit_mask, validation_mask = temporal_training_partition(
+        data.dates,
+        train_mask,
+        validation_sessions=validation_sessions,
+        purge_sessions=purge_sessions,
+    )
+    indices = _training_indices(fit_mask, max_train_rows, seed)
+    validation_indices = np.flatnonzero(validation_mask)
     preprocessor = fit_preprocessor(data.x, data.target_return, indices)
     _seed_everything(seed, device)
     model = build_model(
@@ -221,9 +282,13 @@ def fit_deep_model(
     )
     rng = np.random.default_rng(seed)
     history = []
+    best_loss = float("inf")
+    best_epoch = 0
+    best_state = None
+    stale_epochs = 0
     started = time.monotonic()
-    model.train()
     for epoch in range(epochs):
+        model.train()
         shuffled = rng.permutation(indices)
         weighted_loss = 0.0
         seen_weight = 0.0
@@ -239,20 +304,49 @@ def fit_deep_model(
             batch_weight = float(weight.sum().detach().cpu())
             weighted_loss += float(loss.detach().cpu()) * batch_weight
             seen_weight += batch_weight
-        epoch_loss = weighted_loss / seen_weight
-        history.append(epoch_loss)
+        train_loss = weighted_loss / seen_weight
+        held_out_loss = validation_loss(
+            model,
+            data,
+            validation_indices,
+            preprocessor,
+            batch_size=batch_size,
+            device=device,
+        )
+        history.append({"train": train_loss, "validation": held_out_loss})
+        if held_out_loss < best_loss:
+            best_loss = held_out_loss
+            best_epoch = epoch + 1
+            best_state = {
+                key: value.detach().cpu().clone()
+                for key, value in model.state_dict().items()
+            }
+            stale_epochs = 0
+        else:
+            stale_epochs += 1
         print(
             f"epoch={epoch + 1}/{epochs} architecture={architecture} "
-            f"seed={seed} loss={epoch_loss:.6f}",
+            f"seed={seed} train={train_loss:.6f} validation={held_out_loss:.6f}",
             flush=True,
         )
+        if stale_epochs >= patience:
+            break
+    if best_state is None:
+        raise QuantModelError("TABM_TRAINING_DID_NOT_COMPLETE")
+    model.load_state_dict(best_state)
     if device.type == "mps":
         torch.mps.synchronize()
     metadata = {
         "device": str(device),
         "elapsedSeconds": time.monotonic() - started,
         "epochLoss": history,
+        "bestEpoch": best_epoch,
+        "bestValidationLoss": best_loss,
         "trainingRows": int(len(indices)),
+        "modelTrainStart": str(data.dates[fit_mask].min()),
+        "modelTrainEnd": str(data.dates[fit_mask].max()),
+        "validationStart": str(data.dates[validation_mask].min()),
+        "validationEnd": str(data.dates[validation_mask].max()),
     }
     return model, preprocessor, metadata
 
@@ -305,6 +399,9 @@ def train_fold(
     learning_rate: float = 1e-3,
     device_name: str = "auto",
     max_train_rows: int | None = None,
+    validation_sessions: int = 63,
+    purge_sessions: int = 5,
+    patience: int = 3,
 ) -> tuple[np.ndarray, np.ndarray]:
     name = _candidate_name(architecture, seed)
     artifact = root / f"{name}.pt"
@@ -321,6 +418,9 @@ def train_fold(
         "dropout": dropout,
         "learningRate": learning_rate,
         "maxTrainRows": max_train_rows,
+        "validationSessions": validation_sessions,
+        "purgeSessions": purge_sessions,
+        "patience": patience,
     }
     valid = False
     if receipt_path.exists() and artifact.exists() and predictions.exists():
@@ -346,6 +446,9 @@ def train_fold(
             learning_rate=learning_rate,
             device_name=device_name,
             max_train_rows=max_train_rows,
+            validation_sessions=validation_sessions,
+            purge_sessions=purge_sessions,
+            patience=patience,
         )
         device = next(model.parameters()).device
         state = {
@@ -378,6 +481,12 @@ def train_fold(
             "device": metadata["device"],
             "elapsedSeconds": metadata["elapsedSeconds"],
             "epochLoss": metadata["epochLoss"],
+            "bestEpoch": metadata["bestEpoch"],
+            "bestValidationLoss": metadata["bestValidationLoss"],
+            "modelTrainStart": metadata["modelTrainStart"],
+            "modelTrainEnd": metadata["modelTrainEnd"],
+            "validationStart": metadata["validationStart"],
+            "validationEnd": metadata["validationEnd"],
         })
         del model
         gc.collect()
@@ -404,6 +513,9 @@ def run(
     device_name: str = "auto",
     fold_numbers: tuple[int, ...] | None = None,
     max_train_rows: int | None = None,
+    validation_sessions: int = 63,
+    purge_sessions: int = 5,
+    patience: int = 3,
 ) -> dict:
     output.mkdir(parents=True, exist_ok=True)
     with (output / "run.lock").open("w") as lock:
@@ -424,6 +536,9 @@ def run(
             device_name=device_name,
             fold_numbers=fold_numbers,
             max_train_rows=max_train_rows,
+            validation_sessions=validation_sessions,
+            purge_sessions=purge_sessions,
+            patience=patience,
         )
 
 
@@ -444,6 +559,9 @@ def _run_locked(
     device_name,
     fold_numbers,
     max_train_rows,
+    validation_sessions,
+    purge_sessions,
+    patience,
 ):
     manifest, _ = _verified_ranking_database(dataset_root)
     base_protocol_path = base_root / "protocol.json"
@@ -480,8 +598,11 @@ def _run_locked(
         "device": str(resolve_device(device_name)),
         "folds": list(fold_numbers) if fold_numbers is not None else None,
         "maxTrainRows": max_train_rows,
+        "internalValidationSessions": validation_sessions,
+        "internalPurgeSessions": purge_sessions,
+        "earlyStoppingPatience": patience,
         "trainingScope": "SMOKE" if max_train_rows is not None else "FULL",
-        "earlyStopping": False,
+        "earlyStopping": True,
         "fusion": "date-balanced-simplex-mse-50pct-equal-shrinkage",
         "comparisonStatus": "DEVELOPMENT_ONLY_PREVIOUSLY_OBSERVED_DATES",
         "baseExperiment": {
@@ -540,6 +661,9 @@ def _run_locked(
             learning_rate=learning_rate,
             device_name=device_name,
             max_train_rows=max_train_rows,
+            validation_sessions=validation_sessions,
+            purge_sessions=purge_sessions,
+            patience=patience,
         )
         fusion_predictions.append(calibration_values)
         test_predictions.append(test_values)
@@ -621,6 +745,9 @@ if __name__ == "__main__":
     parser.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     parser.add_argument("--fold", type=int, action="append", dest="fold_numbers")
     parser.add_argument("--max-train-rows", type=int)
+    parser.add_argument("--validation-sessions", type=int, default=63)
+    parser.add_argument("--internal-purge-sessions", type=int, default=5)
+    parser.add_argument("--patience", type=int, default=3)
     arguments = parser.parse_args()
     run(
         arguments.dataset_root,
@@ -638,4 +765,7 @@ if __name__ == "__main__":
         device_name=arguments.device,
         fold_numbers=tuple(arguments.fold_numbers) if arguments.fold_numbers else None,
         max_train_rows=arguments.max_train_rows,
+        validation_sessions=arguments.validation_sessions,
+        purge_sessions=arguments.internal_purge_sessions,
+        patience=arguments.patience,
     )

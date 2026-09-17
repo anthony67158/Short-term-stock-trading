@@ -8,6 +8,7 @@ from platform_app.modules.experiments.quant_model_trainer import QuantModelError
 from platform_app.modules.experiments.ranking_tabm_runner import (
     fit_preprocessor,
     independent_ensemble_mse,
+    temporal_training_partition,
     train_fold,
 )
 
@@ -42,6 +43,22 @@ def test_preprocessor_uses_only_training_rows():
     assert result["targetUpper"] < 4.0
 
 
+def test_internal_validation_is_after_purged_training_window():
+    dates = np.repeat(np.arange(100, 112), 2)
+    train = dates <= 110
+
+    fit, validation = temporal_training_partition(
+        dates,
+        train,
+        validation_sessions=2,
+        purge_sessions=2,
+    )
+
+    assert dates[fit].max() == 106
+    assert dates[validation].min() == 109
+    assert not np.any(fit & validation)
+
+
 def test_tabm_fold_is_reproducible_and_resumable(tmp_path):
     rng = np.random.default_rng(17)
     x = rng.normal(size=(120, 4)).astype(np.float32)
@@ -65,6 +82,9 @@ def test_tabm_fold_is_reproducible_and_resumable(tmp_path):
         "dropout": 0.0,
         "learning_rate": 1e-3,
         "device_name": "cpu",
+        "validation_sessions": 2,
+        "purge_sessions": 1,
+        "patience": 2,
     }
 
     first = train_fold(data, train, fusion, test, tmp_path, **options)
