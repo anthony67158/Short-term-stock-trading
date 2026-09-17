@@ -6,6 +6,7 @@ import {
 } from './_blob.js'
 import {
   LEARNING_PREFIX,
+  learningContentHash,
   learningEventPath,
 } from '../shared/learningEvent.js'
 
@@ -22,6 +23,17 @@ function jsonOptions() {
     cacheControlMaxAge: 0,
     forbidOverwrite: true,
   }
+}
+
+function artifactPath(path) {
+  const value = String(path || '').replace(/^\/+/, '')
+  if (
+    !/^learning\/v1\/(?:views|manifests|training-runs)\/[a-zA-Z0-9/._:-]+$/
+      .test(value)
+  ) {
+    throw new Error('学习产物路径无效')
+  }
+  return value
 }
 
 export function createLearningStore(storage = {
@@ -94,6 +106,40 @@ export function createLearningStore(storage = {
         storage.readJson(blob.pathname || blob).catch(() => null),
       ))
       return values.filter(Boolean)
+    },
+
+    async saveArtifact(path, value) {
+      const target = artifactPath(path)
+      const envelope = {
+        ...value,
+        contentHash: learningContentHash(value),
+      }
+      if (!storage.hasStorage()) {
+        const current = memory.get(target)
+        if (!current) {
+          memory.set(target, envelope)
+          return envelope
+        }
+        if (current.contentHash !== envelope.contentHash) {
+          throw new Error('LEARNING_ARTIFACT_IMMUTABLE_CONFLICT')
+        }
+        return current
+      }
+      try {
+        await storage.put(
+          target,
+          JSON.stringify(envelope),
+          jsonOptions(),
+        )
+        return envelope
+      } catch (error) {
+        if (!conflict(error)) throw error
+        const current = await storage.readJson(target)
+        if (!current || current.contentHash !== envelope.contentHash) {
+          throw new Error('LEARNING_ARTIFACT_IMMUTABLE_CONFLICT')
+        }
+        return current
+      }
     },
   }
 }

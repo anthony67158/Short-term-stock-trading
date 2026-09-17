@@ -39,8 +39,10 @@ test('选股召回仅采集排序训练字段并保留全候选顺序', async ()
       },
       quote: {
         price: 10.2,
+        pct: 3.2,
         tradeDate: '2026-09-17',
       },
+      recallScore: 72,
       recallReasons: ['不应写入训练账本'],
     }],
   }, { store })
@@ -55,6 +57,13 @@ test('选股召回仅采集排序训练字段并保留全候选顺序', async ()
     pWinGivenFill: 0.62,
     expectedNetR: 0.3,
     price: 10.2,
+    pct: 3.2,
+    amount: null,
+    turnover: null,
+    volumeRatio: null,
+    mainInflow: null,
+    mainRatio: null,
+    recallScore: 72,
     tradeDate: '2026-09-17',
   }])
   assert.equal(

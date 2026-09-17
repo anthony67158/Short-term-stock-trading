@@ -38,6 +38,13 @@ function stockPickCandidates(candidates) {
     pWinGivenFill: finite(candidate?.model?.pWinGivenFill),
     expectedNetR: finite(candidate?.model?.expectedNetR),
     price: finite(candidate?.quote?.price),
+    pct: finite(candidate?.quote?.pct),
+    amount: finite(candidate?.quote?.amount),
+    turnover: finite(candidate?.quote?.turnover),
+    volumeRatio: finite(candidate?.quote?.volumeRatio),
+    mainInflow: finite(candidate?.quote?.mainInflow),
+    mainRatio: finite(candidate?.quote?.mainRatio),
+    recallScore: finite(candidate?.recallScore),
     tradeDate: text(candidate?.quote?.tradeDate, 16),
   })).filter((candidate) => /^\d{6}$/.test(candidate.code))
 }
