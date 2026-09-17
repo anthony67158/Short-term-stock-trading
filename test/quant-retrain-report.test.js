@@ -1,0 +1,102 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+
+import {
+  dedupeQuantReports,
+  normalizeRetrainRun,
+} from '../shared/quantRetrainReport.js'
+
+const read = (path) => readFileSync(
+  new URL(`../${path}`, import.meta.url),
+  'utf8',
+)
+
+test('GitHub每日重训运行态归一化为稳定公开契约', () => {
+  const running = normalizeRetrainRun({
+    id: 31961972386,
+    run_number: 11,
+    status: 'in_progress',
+    conclusion: null,
+    event: 'schedule',
+    run_started_at: '2026-08-16T17:33:44Z',
+    updated_at: '2026-08-16T17:40:00Z',
+    html_url: 'https://github.com/example/repo/actions/runs/31961972386',
+    head_sha: '065a73415b94283bed31ea55b643c8705eb34ae1',
+  }, Date.parse('2026-08-16T17:40:00Z'))
+
+  assert.deepEqual(running, {
+    runId: 31961972386,
+    runNumber: 11,
+    state: 'running',
+    status: 'in_progress',
+    conclusion: null,
+    event: 'schedule',
+    startedAt: Date.parse('2026-08-16T17:33:44Z'),
+    completedAt: null,
+    updatedAt: Date.parse('2026-08-16T17:40:00Z'),
+    durationSec: 376,
+    url: 'https://github.com/example/repo/actions/runs/31961972386',
+    headSha: '065a73415b94',
+  })
+
+  const success = normalizeRetrainRun({
+    ...running,
+    id: 31961972386,
+    run_number: 11,
+    status: 'completed',
+    conclusion: 'success',
+    run_started_at: '2026-08-16T17:33:44Z',
+    updated_at: '2026-08-16T17:53:14Z',
+  })
+  assert.equal(success.state, 'success')
+  assert.equal(success.durationSec, 1170)
+})
+
+test('量化汇报按runId幂等去重，旧记录按内容去重', () => {
+  const reports = dedupeQuantReports([
+    { id: 'new', at: 30, body: 'B', meta: { runId: 11 } },
+    { id: 'retry', at: 20, body: 'A', meta: { runId: 11 } },
+    { id: 'legacy-new', at: 15, decision: 'reject', body: 'same' },
+    { id: 'legacy-old', at: 10, decision: 'reject', body: 'same' },
+  ])
+
+  assert.deepEqual(reports.map((item) => item.id), ['new', 'legacy-new'])
+})
+
+test('每日重训工作流只上传脱敏challenger报告且不改生产指针', () => {
+  const workflow = read('.github/workflows/daily-retrain.yml')
+  const trainer = read('qlib-service/learning_pipeline.py')
+
+  assert.match(workflow, /learning_pipeline\.py upload/)
+  assert.match(workflow, /LEARNING_OSS_ACCESS_KEY_ID/)
+  assert.match(workflow, /LEARNING_OSS_ACCESS_KEY_SECRET/)
+  assert.match(trainer, /learning\/v1\/training-runs\//)
+  assert.match(trainer, /productionPointerChanged": False/)
+  assert.doesNotMatch(workflow, /upload_decision_model|activate-baseline/)
+})
+
+test('量化汇报弹窗展示任务状态、训练结果和GitHub运行入口', () => {
+  const api = read('api/quant_report.js')
+  const component = read('src/components/QuantReport.jsx')
+  const store = read('src/quantReportStore.js')
+
+  assert.match(api, /normalizeRetrainRun/)
+  assert.match(api, /decisionWorkflowRun\(workflow, reports\)/)
+  assert.match(api, /api\.github\.com\/repos\/anthony67158\/Short-term-stock-trading\/actions\/workflows\/daily-retrain\.yml\/runs/)
+  assert.match(api, /workflow/)
+  assert.match(store, /workflow:/)
+  assert.match(store, /model=opportunity/)
+  assert.match(store, /clear_decision/)
+  assert.match(api, /quantReportModel\(record\) === 'opportunity'/)
+  assert.match(component, /决策模型每日训练与发布/)
+  assert.match(component, /决策模型每日训练任务/)
+  assert.match(component, /训练中/)
+  assert.match(component, /运行详情/)
+  assert.match(component, /r\.meta\?\.runNumber/)
+  assert.match(component, /组成部分评估/)
+  assert.match(component, /整体发布硬阈值/)
+  assert.match(component, /生产对照/)
+  assert.match(component, /发布组合/)
+  assert.doesNotMatch(component, /模型筛选/)
+})

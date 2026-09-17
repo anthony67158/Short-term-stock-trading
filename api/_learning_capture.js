@@ -137,11 +137,15 @@ export async function capturePositionPrediction({
     || !guidance?.agentRunId
   ) return null
   const decisionSource = advice?.decisionSource || {}
+  const decisionId = text(
+    advice?.decisionPlan?.decisionId || guidance.agentRunId,
+    180,
+  )
   const pricePlan = advice?.pricePlan || advice?.actionPlan || {}
   return store.saveEvent(buildLearningEvent({
     kind: LEARNING_EVENT_KIND.POSITION_PREDICTION,
-    eventId: `position:${guidance.agentRunId}`,
-    sourceId: guidance.agentRunId,
+    eventId: `position:${decisionId}`,
+    sourceId: decisionId,
     tradeDate: eventDate('', now),
     accountScope,
     occurredAt: Number(guidance.generatedAt) || Number(now),
@@ -179,6 +183,9 @@ export async function capturePositionPrediction({
       expectedNetR: finite(decisionSource?.expectedNetR),
       modelVersion: text(guidance.modelVersion, 120),
       agentModel: text(guidance.agentModel, 120),
+    },
+    lineage: {
+      agentRunId: guidance.agentRunId,
     },
   }))
 }

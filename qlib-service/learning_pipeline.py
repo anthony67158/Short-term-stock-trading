@@ -30,14 +30,14 @@ STOCK_FEATURES = (
     "expectedNetR",
 )
 POSITION_FEATURES = (
-    "filledLots",
-    "fillRatePct",
-    "totalFees",
-    "plannedExpectedNetR",
-    "holdingDurationMinutes",
-    "mfePct",
-    "maePct",
-    "profitCapturePct",
+    "actionCode",
+    "referencePrice",
+    "entryPrice",
+    "stopLoss",
+    "takeProfit",
+    "pFill",
+    "pWinGivenFill",
+    "expectedNetR",
 )
 SEEDS = (17, 41, 97)
 
@@ -55,6 +55,28 @@ def _matrix(rows: list[dict], features: tuple[str, ...]) -> np.ndarray:
         [[_number(row.get(name)) for name in features] for row in rows],
         dtype=np.float64,
     )
+
+
+def _position_rows(rows: list[dict]) -> list[dict]:
+    actions = {
+        "买入": 1,
+        "建仓": 1,
+        "加仓": 2,
+        "持有": 3,
+        "减仓": 4,
+        "卖出": 5,
+        "清仓": 5,
+    }
+    return [{
+        **row,
+        "actionCode": next(
+            (
+                code for label, code in actions.items()
+                if label in str(row.get("action") or "")
+            ),
+            0,
+        ),
+    } for row in rows]
 
 
 def _dates(rows: list[dict]) -> list[str]:
@@ -175,6 +197,7 @@ def train_stock_pick(rows: list[dict], output: Path) -> Gate:
 
 
 def train_position(rows: list[dict], output: Path) -> Gate:
+    rows = _position_rows(rows)
     dates = _dates(rows)
     reasons = []
     if len(rows) < 30:
@@ -188,7 +211,7 @@ def train_position(rows: list[dict], output: Path) -> Gate:
         })
     train, test = _split(rows)
     baseline = np.asarray([
-        _number(row.get("plannedExpectedNetR")) for row in test
+        _number(row.get("expectedNetR")) for row in test
     ])
     actual = np.asarray([_number(row.get("realizedNetR")) for row in test])
     baseline_mae = float(np.mean(np.abs(baseline - actual)))
@@ -279,13 +302,17 @@ def download_latest(output: Path) -> Path:
 
     bucket = _bucket()
     prefix = "learning/v1/manifests/"
-    manifests = sorted(
-        (item.key for item in oss2.ObjectIterator(bucket, prefix=prefix)),
-        reverse=True,
-    )
+    manifests = list(oss2.ObjectIterator(bucket, prefix=prefix))
     if not manifests:
         raise RuntimeError("no learning manifest available")
-    manifest = json.loads(bucket.get_object(manifests[0]).read())
+    latest = max(
+        manifests,
+        key=lambda item: (
+            int(getattr(item, "last_modified", 0) or 0),
+            str(item.key),
+        ),
+    )
+    manifest = json.loads(bucket.get_object(latest.key).read())
     view_path = str(manifest["viewPath"])
     if not view_path.startswith("learning/v1/views/"):
         raise RuntimeError("manifest points outside redacted learning views")

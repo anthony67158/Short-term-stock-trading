@@ -19,9 +19,18 @@ export async function publishLearningTrainingView({
   store = learningStore,
   now = Date.now(),
 } = {}) {
-  const [predictions, executions, outcomes] = await Promise.all([
+  const [
+    stockPickPredictions,
+    positionPredictions,
+    executions,
+    outcomes,
+  ] = await Promise.all([
     store.listEvents({
       kind: LEARNING_EVENT_KIND.STOCK_PICK_PREDICTION,
+      limit: 10000,
+    }),
+    store.listEvents({
+      kind: LEARNING_EVENT_KIND.POSITION_PREDICTION,
       limit: 10000,
     }),
     store.listEvents({
@@ -33,15 +42,16 @@ export async function publishLearningTrainingView({
       limit: 10000,
     }),
   ])
-  const predictionsById = new Map(predictions.map((event) => [
+  const predictionsById = new Map(stockPickPredictions.map((event) => [
     String(event.eventId),
     event,
   ]))
-  const executionsByRecommendation = new Map()
-  for (const event of executions) {
-    const key = String(event.payload?.linkedRecommendationId || '')
-    if (key) executionsByRecommendation.set(key, event)
-  }
+  const positionPredictionsByDecision = new Map(
+    positionPredictions.map((event) => [
+      String(event.sourceId || ''),
+      event,
+    ]),
+  )
 
   const stockPickRows = []
   const positionRows = []
@@ -76,29 +86,33 @@ export async function publishLearningTrainingView({
       continue
     }
     if (outcome.payload?.outcomeType !== 'POSITION_ACTUAL') continue
-    const execution = executionsByRecommendation.get(
+    const prediction = positionPredictionsByDecision.get(
       String(outcome.payload.decisionId || ''),
     )
+    if (!prediction) continue
     positionRows.push({
       sampleId: outcome.eventId,
       tradeDate: outcome.tradeDate,
       accountHash: outcome.accountHash,
       code: outcome.payload.code,
-      action: outcome.payload.action,
+      action: prediction.payload.action,
       side: outcome.payload.side,
-      status: outcome.payload.status,
-      filledLots: outcome.payload.filledLots,
-      fillRatePct: outcome.payload.fillRatePct,
-      totalFees: outcome.payload.totalFees,
+      mode: prediction.payload.mode,
+      referencePrice: prediction.payload.referencePrice,
+      entryPrice: prediction.payload.entryPrice,
+      stopLoss: prediction.payload.stopLoss,
+      takeProfit: prediction.payload.takeProfit,
+      pFill: prediction.payload.pFill,
+      pWinGivenFill: prediction.payload.pWinGivenFill,
+      expectedNetR: prediction.payload.expectedNetR,
+      modelVersion: prediction.payload.modelVersion,
       netPnl: outcome.payload.netPnl,
-      plannedExpectedNetR: outcome.payload.plannedExpectedNetR,
       realizedNetR: outcome.payload.realizedNetR,
       expectancyErrorR: outcome.payload.expectancyErrorR,
       holdingDurationMinutes: outcome.payload.holdingDurationMinutes,
       mfePct: outcome.payload.mfePct,
       maePct: outcome.payload.maePct,
       profitCapturePct: outcome.payload.profitCapturePct,
-      manuallyRecorded: execution?.payload?.manuallyRecorded ?? true,
     })
   }
 
@@ -128,7 +142,8 @@ export async function publishLearningTrainingView({
         total: stockPickRows.length + positionRows.length,
       },
       sourceEvents: {
-        predictions: predictions.length,
+        predictions:
+          stockPickPredictions.length + positionPredictions.length,
         executions: executions.length,
         outcomes: outcomes.length,
       },

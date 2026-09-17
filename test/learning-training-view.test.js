@@ -47,6 +47,24 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
     },
     lineage: { predictionEventId: 'prediction-1' },
   }
+  const positionPrediction = {
+    kind: LEARNING_EVENT_KIND.POSITION_PREDICTION,
+    eventId: 'position:decision-1',
+    sourceId: 'decision-1',
+    tradeDate: '2026-09-17',
+    payload: {
+      code: '600001',
+      action: '减仓',
+      mode: 'holding',
+      referencePrice: 10.2,
+      stopLoss: 9.8,
+      takeProfit: 10.8,
+      pFill: 0.8,
+      pWinGivenFill: 0.6,
+      expectedNetR: 0.4,
+      modelVersion: 'position-v1',
+    },
+  }
   const positionOutcome = {
     kind: LEARNING_EVENT_KIND.OUTCOME,
     eventId: 'position-outcome-1',
@@ -54,6 +72,7 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
     accountHash: 'account-hash',
     payload: {
       outcomeType: 'POSITION_ACTUAL',
+      decisionId: 'decision-1',
       code: '600001',
       action: '减仓',
       side: 'SELL',
@@ -67,7 +86,12 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
       expectancyErrorR: 0.2,
     },
   }
-  const store = storeWith([prediction, stockOutcome, positionOutcome])
+  const store = storeWith([
+    prediction,
+    positionPrediction,
+    stockOutcome,
+    positionOutcome,
+  ])
 
   const result = await publishLearningTrainingView({
     store,
@@ -76,6 +100,12 @@ test('训练视图只包含成熟样本并发布带计数的不可变清单', as
 
   assert.equal(result.view.stockPick.length, 1)
   assert.equal(result.view.position.length, 1)
+  assert.equal(result.view.position[0].expectedNetR, 0.4)
+  assert.equal(result.view.position[0].realizedNetR, 0.6)
+  assert.equal(
+    Object.hasOwn(result.view.position[0], 'filledLots'),
+    false,
+  )
   assert.deepEqual(result.manifest.samples, {
     stockPick: 1,
     position: 1,

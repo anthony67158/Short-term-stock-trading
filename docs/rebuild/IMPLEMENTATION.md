@@ -1036,6 +1036,19 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端已建立按量Serverless 
 - 在线建议Harness需要仓库外`HARNESS_NICK/HARNESS_PASSWORD`，本次执行环境未
   配置，未把生产密码写入命令或自动化浏览器；因此账户级单股Agent完整生成仍需
   登录后手动点击确认。
+- 修复量化服务直用状态的响应层级兼容：`/decision-score`顶层返回的
+  `usagePolicy=DIRECT`、模型版本及发布状态会下沉到未重复携带这些字段的单条预测，
+  不再把已加载模型错误归为`QUALIFIED`。
+- Agent选取模型结果时会跳过路径上的不可用占位项，优先使用同轮
+  `READY`模型结果；无真实模型响应时仍失败关闭，但用户提示改为“模型服务本轮未
+  返回有效结果”，不再误报模型“未训练”。
+- 修复已同步发布至阿里云FC主域和Vercel生产别名。生产量化端点实测
+  `modelLoaded=true`、`state=READY`、`usagePolicy=DIRECT`，版本为
+  `opportunity-score.20260910T200644Z.ensemble3`；主域健康检查、FC健康检查、
+  主域行情接口和Vercel首页均返回HTTP 200。相关67项回归、生产构建及FC打包通过。
+- 全量Node测试为2416/2417通过；唯一失败是既有选股UI源码文本测试仍在
+  `StockPickTab.jsx`内查找已集中到`shared/stockPickModes.js`的模式文案，与本次
+  模型状态适配无关，本次未混入该项修复。
 
 ### 闲置阿里云资源清理（2026-09-17）
 
@@ -1296,3 +1309,93 @@ S6（需谨慎解耦，非盲删）：旧候选池 Agent 仍有活跃共享消�
 S6（已完成，先解耦后零消费者删除）：`opportunity_radar.js` 摘除候选池 Agent selection 全部逻辑（3个agent import、readAgentSelection参数、agentResult分支、applyOpportunityAgentSelection应用块、死助手 agentSourceState/currentAgentSnapshot/applyAccountBudgetGate/summarizeRows、未用 sha import），回归纯聚合(sector/formula/tail/preCatalyst+ledger+训练状态)，position_workbench 调用不传 agentScope 故行为不变。删除纯 Agent 文件(均为 untracked 恢复文件)：`api/opportunity_agent_selection.js`、`_opportunity_agent_selection.js`、`_opportunity_agent_selection_store.js`、`_opportunity_agent_evidence.js`、`shared/opportunityAgentSelection.js` 及 `test/opportunity-agent-selection.test.js`。确认删除前这些文件仅互相 import、无外部消费者。`src/opportunityRadarClient.js` 的 runOpportunityAgentSelection/invalidate 改为 AGENT_RETIRED 占位(不再调已删端点)，移除死 mutate。`App.jsx` 移除 DEV 预览 AdaptiveWorkbenchPreview 挂载。`account-auth.test.js` 改用 stock_pick handler 覆盖鉴权；`opportunity-radar-api.test.js` 删除过时 agent 选择用例；`opportunity-radar-ui.test.js` 断言改 AGENT_RETIRED。保留：opportunity_radar 聚合、ledger/baseline/settlement/outcome 族(position_workbench/formula_selection 消费, 且为训练标签来源)、OpportunityRadar*/TodayTab/AdaptiveWorkbench 组件(radar UI 仍可用, 只是不再跑候选池 Agent)。全量 2479 passed + vite build + FC 打包通过。commit 见 git log。
 
 生产发布（2026-09-17）：同一源码版本已发布到 Vercel 与阿里云 FC。Vercel生产别名 `https://stock-dashboard-one-plum.vercel.app`，FC `https://stock-dashboard-znrlekbzit.cn-hangzhou.fcapp.run`，主域 `https://www.tedixtf.cn`。主域与 FC 的 `/api/stock_pick`、`/api/quote?code=600519` 均返回 HTTP 200；两套前端均加载 `StockPickTab`，Vercel 构建的 API base 指向当前 FC。Vercel仅托管静态前端，自身 `/api/*` 404 属设计行为。
+
+### 选股三模式与 Agent 工具闭环（已完成并部署，2026-09-17）
+
+设计与判断见 `docs/rebuild/stock-picker-three-mode-agent-design-2026-09-17.md`。
+当前采用一个已通过时间外费后验证的 LightGBM 基础排序模型 + 盘中机会/提前布局/
+次日关注三种场景策略，不发布三个未经独立训练、五折三种子验证和校准的模型。
+Agent 采用一个选股 runtime 与一个独立端点的三种严格模式；结果、单飞锁和运行轨迹
+按账号及模式隔离。原内部 `sector` key 保留兼容旧 OSS 配置，模型配置页和后端角色
+标签已从“板块前瞻”改为“选股”，选股 Agent 不再使用通用 assistant 端点。
+
+完成能力：
+- `shared/stockPickModes.js` 固化三模式、人工次日名单、逐股票首报价幂等和运行轨迹
+  合同；`_stock_pick_store.js` 按账号哈希和模式保存 Agent 结果/轨迹/锁，不在路径中
+  写明文账号。
+- `_stock_pick_tools.js` 提供市场盘面、候选实时行情、个股资金、公告新闻四类受限工具；
+  `_stock_pick_agent.js` 支持最多4轮“工具调用→结果感知→继续分析”，Agent 漏调模式
+  必要证据时由服务端补齐，再进行最终结构化判断。
+- `stockPickAgent.v2` 服务端复校候选 code、价带、仓位和 T+1；盘中 `BUY_NOW` 缺少
+  当日实时价时降级为 `WAIT_TRIGGER`，提前布局仓位上限固定收紧到5%，次日初始判断
+  固定为观察而非成交。
+- 次日关注支持人工勾选并保存（最多12只）、手动复算和次日首笔实时价自动复算。
+  自动复算只覆盖人工名单，并按账号+股票+交易日幂等；一只股票先出报价不会阻断
+  其他名单项。
+- 前端重构为全市场候选基线、三模式分段控件、模式主动作、次日专属操作带、Agent
+  执行轨迹、当前模式结果和模型候选池。轨迹展示阶段、进度、工具名称、返回摘要、
+  校验、异常和最终状态，不展示隐藏思维链。
+- 匿名 GET 只可读取市场候选快照，不返回任何账号 Agent 结果或次日人工名单。
+
+验收：
+- 选股/端点专项 `50 passed, 0 failed`；
+- 全量 Node `2421 passed, 0 failed`；此前其它切片记录的选股 UI 文案断言已改为读取
+  `shared/stockPickModes.js` 的真实模式定义，不再保留已知失败；
+- `vite build` 通过，`StockPickTab` 独立 chunk 正常；
+- `npm run package:fc` 通过；
+- 本机 Chrome 139 隔离预览，390/768/1440 三视口实际点击盘中机会→提前布局→次日
+  关注，勾选第二只股票并保存：三视口横向溢出均为0、轨迹5个事件、结果和候选池
+  正常、控制台 error/warning 为0。截图位于
+  `artifacts/stock-pick-{390,768,1440}.png`。
+
+发布状态：已从同一源码部署 Vercel 与 FC；未修改生产模型指针、未写交易事实。
+
+### 每日量化学习闭环（已部署并完成首轮生产门禁，2026-09-17）
+
+- 新增 `learning-event.v1` 与 `learning/v1/` OSS 命名空间。事件路径由类型、交易日、
+  账户哈希和稳定事件 ID 派生，写入使用 `x-oss-forbid-overwrite`；相同内容可幂等
+  重放，不同内容覆盖同一 ID 会返回 `LEARNING_EVENT_IMMUTABLE_CONFLICT`。
+- 选股全市场召回、Agent 精选和持仓联合决策均旁路写入预测事件。学习写入失败只记录
+  告警，不阻断原建议和人工交易流程；训练载荷不含账号明文、理由全文、新闻原文或
+  密钥。
+- `cron_learning` 每个交易日 17:20 由 FC Timer 运行：结算预测后 5 个交易日的
+  选股收益/MFE/MAE/方向命中；遍历 OSS 账户只读快照，导出人工执行和
+  `validationComplete && learningEligible` 的真实持仓归因。计划、未成交建议、
+  模拟成交和未成熟结果不进入实际结果样本。
+- 每次结算发布不可变 `learning-training-view.v1` 和 `learning-manifest.v1`。
+  GitHub Actions 北京时间 01:15 调用受 `CRON_KEY` 保护的端点做幂等复核，只从
+  `learning/v1/views/` 下载脱敏视图。
+- `qlib-service/learning_pipeline.py` 训练 LightGBM LambdaRank 选股 challenger 和
+  LightGBM Huber 持仓净 R challenger。两者使用时间外末 3 个交易日验证和
+  17/41/97 三种子；选股要求平均及最差种子 Top5 收益均优于现役排序分，持仓要求
+  平均及最差种子 MAE 均优于原计划净 R。
+- 持仓训练通过 `decisionPlan.decisionId` 连接预测与真实归因。动作、参考价、止损/
+  止盈和模型概率是训练特征；成交后的净收益、MFE/MAE、持有时长仅作为标签或评估
+  指标，禁止进入特征矩阵，避免标签泄漏。
+- 样本门禁：选股至少 60 个成熟样本/12 个交易日；持仓至少 30 个真实成熟样本/
+  10 个交易日。不足时返回 `SKIPPED_INSUFFICIENT_MATURED_DATA`；未优于基线返回
+  `CHALLENGER_REJECTED`。训练产物只写
+  `learning/v1/training-runs/`，报告固定
+  `productionPointerChanged=false`，不存在生产模型指针更新步骤。
+- 本地验收：学习合同/采集/结算/训练视图与调度专项 Node 33 项通过；Python 训练
+  门禁 1 项通过；Vite 生产构建通过。完整 Node 测试和 FC 打包结果在本节后续补记。
+- GitHub 自动训练前置尚未完成：GitHub 仓库需配置
+  `LEARNING_PIPELINE_URL`、`LEARNING_CRON_KEY` 及四个最小权限
+  `LEARNING_OSS_*` secrets；OSS RAM 账号应限制为读取 manifests/views、写入
+  training-runs，不得授予 `accounts/` 读取权限。首个真实日批已人工执行，Actions
+  自动运行尚未发生。
+
+恢复与首轮生产验收（2026-09-17 21:46）：
+- 确认此前没有训练进程卡死；新 `daily-learning-challengers` 工作流仅存在于本地
+  `rebuild/platform-v1`，未进入 GitHub 默认分支，因此远端定时任务从未注册。
+- 已从同一源码重新构建并部署 FC 与 Vercel。FC
+  `learning-settlement-timer` 已启用（工作日 17:20），
+  `/api/cron_learning` 未授权请求返回 401，`/api/stock_pick` 返回 200；
+  主域与 Vercel 生产别名均返回 200。
+- 已人工触发首轮生产结算：选股预测 0 条成熟样本；持仓 6 条成熟样本、覆盖 2 个
+  交易日。随后完成训练视图下载、三种子门禁执行和不可变训练运行上传，结果为
+  `NO_CHALLENGER_PROMOTION`，两路均为
+  `SKIPPED_INSUFFICIENT_MATURED_DATA`，`productionPointerChanged=false`。
+- 当前不是故障状态，而是正常采样等待状态：选股门槛为 60 条/12 个交易日，持仓
+  门槛为 30 条/10 个交易日。GitHub 自动训练仍需将工作流发布到默认分支并配置
+  最小权限 secrets；在此之前 FC 会继续每日结算并积累脱敏样本。

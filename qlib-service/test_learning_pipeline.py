@@ -25,7 +25,7 @@ class LearningPipelineTest(unittest.TestCase):
                     "sampleId": "position-1",
                     "tradeDate": "2026-09-10",
                     "code": "600001",
-                    "plannedExpectedNetR": 0.2,
+                    "expectedNetR": 0.2,
                     "realizedNetR": 0.1,
                 }],
             }), encoding="utf-8")

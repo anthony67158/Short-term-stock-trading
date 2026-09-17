@@ -868,7 +868,15 @@ export async function evaluateDecision({
   return response
 }
 
-export async function runDecision({ req, book, code, onProgress = () => {}, signal, reviewEvent = null }) {
+export async function runDecision({
+  req,
+  book,
+  code,
+  accountScope = '',
+  onProgress = () => {},
+  signal,
+  reviewEvent = null,
+}) {
   if (!/^\d{6}$/.test(String(code || ''))) throw new Error('股票代码无效')
   signal?.throwIfAborted()
   onProgress('采集行情、账户与决策特征', 'collect')
@@ -927,7 +935,7 @@ export async function runDecision({ req, book, code, onProgress = () => {}, sign
     mode: result.mode,
     advice: result.result,
     guidance,
-    accountScope: book?.nick || book?.account?.nick || '',
+    accountScope,
     now: result.updatedAt,
   }).catch((error) => {
     console.warn(

@@ -124,6 +124,7 @@ test('持仓预测保存模型Agent版本与动作参数但不写解释文本', 
       currentPrice: 10.2,
       stop: 9.8,
       target: 10.8,
+      decisionPlan: { decisionId: 'decision-1' },
       decisionSource: {
         pFill: 0.8,
         pWinGivenFill: 0.6,
@@ -135,5 +136,7 @@ test('持仓预测保存模型Agent版本与动作参数但不写解释文本', 
   const event = store.events[0]
   assert.equal(event.payload.action, '减仓')
   assert.equal(event.payload.modelVersion, 'position-v1')
+  assert.equal(event.sourceId, 'decision-1')
+  assert.equal(event.lineage.agentRunId, 'position-run-1')
   assert.equal(JSON.stringify(event).includes('不进入训练账本'), false)
 })
