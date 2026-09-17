@@ -263,13 +263,21 @@ def _market_cap_row(
         )
     expected_total = close * total_shares
     expected_float = close * float_shares
-    for expected, actual in (
-        (expected_total, total_market_cap),
-        (expected_float, float_market_cap),
+    for scope, expected, actual in (
+        ("TOTAL", expected_total, total_market_cap),
+        ("FLOAT", expected_float, float_market_cap),
     ):
-        if abs(expected - actual) / actual > Decimal("0.001"):
-            raise FoundationMarketCapDatasetError(
-                "MARKET_CAP_VALUE_RECONCILIATION_FAILED",
+        relative_error = abs(expected - actual) / actual
+        if relative_error > Decimal("0.001"):
+            quality_flags.append(
+                {
+                    "flag": f"SOURCE_{scope}_VALUE_RECONCILIATION_MISMATCH",
+                    "details": {
+                        "expectedMarketCapCny": _text(expected),
+                        "reportedMarketCapCny": _text(actual),
+                        "relativeError": _text(relative_error),
+                    },
+                }
             )
     date = (
         f"{decision_date[:4]}-{decision_date[4:6]}-{decision_date[6:]}"

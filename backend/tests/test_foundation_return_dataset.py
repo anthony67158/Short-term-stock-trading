@@ -600,6 +600,27 @@ def test_market_cap_partition_rejects_missing_and_flags_source_anomaly(
         assert flags == ["SOURCE_FLOAT_EXCEEDS_TOTAL"]
 
         next_date = dataset.pending_dates()[0]
+        mismatched = _daily_basic_rows(
+            next_date,
+            dates.index(next_date),
+        )
+        mismatched[0]["circ_mv"] = str(
+            Decimal(mismatched[0]["circ_mv"]) * Decimal("1.03")
+        )
+        dataset.ingest_partition(next_date, mismatched)
+        mismatch_flags = [
+            row["flag"]
+            for row in dataset.db.execute(
+                "SELECT flag FROM market_cap_quality_flags "
+                "WHERE decision_date = ?",
+                (next_date,),
+            )
+        ]
+        assert mismatch_flags == [
+            "SOURCE_FLOAT_VALUE_RECONCILIATION_MISMATCH"
+        ]
+
+        next_date = dataset.pending_dates()[0]
         invalid_number = _daily_basic_rows(
             next_date,
             dates.index(next_date),
