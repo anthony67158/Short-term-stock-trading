@@ -1,4 +1,5 @@
 from decimal import Decimal
+import sqlite3
 
 import numpy as np
 import pytest
@@ -9,10 +10,15 @@ from platform_app.modules.experiments.foundation_return_dataset import (
 from platform_app.modules.experiments.probabilistic_baseline_runner import (
     BaselinePartition,
     ProbabilisticBaselineError,
+    _load_partition_from_connections,
     fee_adjusted_returns,
     historical_baseline_predictions,
     normalized_weights,
     weighted_quantiles,
+)
+from platform_app.modules.experiments.ranking_model_trainer import (
+    MODEL_FEATURE_NAMES,
+    RAW_COLUMNS,
 )
 
 
@@ -26,6 +32,63 @@ def partition() -> BaselinePartition:
         direction=np.array([0, 0, 1, 1], dtype=np.int8),
         sample_weight=np.array([1.0, 1.0, 2.0, 6.0]),
     )
+
+
+def baseline_databases() -> tuple[sqlite3.Connection, sqlite3.Connection]:
+    ranking = sqlite3.connect(":memory:")
+    ranking.row_factory = sqlite3.Row
+    raw_schema = ", ".join(f"{name} TEXT NOT NULL" for name in RAW_COLUMNS)
+    ranking.execute(
+        "CREATE TABLE ranking_samples ("
+        "instrument_id TEXT, decision_date TEXT, board TEXT, "
+        "execution_date TEXT, terminal_date TEXT, "
+        f"{raw_schema}, forward_return_next_open_5 TEXT)"
+    )
+    columns = (
+        "instrument_id",
+        "decision_date",
+        "board",
+        "execution_date",
+        "terminal_date",
+        *RAW_COLUMNS,
+        "forward_return_next_open_5",
+    )
+    for decision_date in ("20200101", "20200102"):
+        for index, instrument in enumerate(("000001.SZ", "000002.SZ", "000003.SZ")):
+            raw = {name: "1" for name in RAW_COLUMNS}
+            raw["adjusted_return_1"] = str((0.0, 1.0, 10.0)[index])
+            raw["forward_return_next_open_5"] = str((0.01, -0.02, 0.03)[index])
+            values = {
+                "instrument_id": instrument,
+                "decision_date": decision_date,
+                "board": "MAIN",
+                "execution_date": "20200102",
+                "terminal_date": "20200108",
+                **raw,
+            }
+            ranking.execute(
+                f"INSERT INTO ranking_samples ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' for _ in columns)})",
+                [values[name] for name in columns],
+            )
+    sampling = sqlite3.connect(":memory:")
+    sampling.row_factory = sqlite3.Row
+    sampling.executescript(
+        "CREATE TABLE training_samples ("
+        "fold INTEGER, decision_date TEXT, instrument_id TEXT, stratum_id TEXT);"
+        "CREATE TABLE sampling_strata ("
+        "fold INTEGER, decision_date TEXT, stratum_id TEXT, "
+        "inverse_probability_weight TEXT);"
+    )
+    sampling.executemany(
+        "INSERT INTO sampling_strata VALUES (1, '20200101', ?, ?)",
+        [("a", "2"), ("b", "4")],
+    )
+    sampling.executemany(
+        "INSERT INTO training_samples VALUES (1, '20200101', ?, ?)",
+        [("000001.SZ", "a"), ("000002.SZ", "b")],
+    )
+    return ranking, sampling
 
 
 def test_fee_adjusted_returns_match_frozen_decimal_policy():
@@ -97,6 +160,50 @@ def test_historical_baseline_repeats_frozen_training_distribution():
         np.full(3, 0.08, dtype=np.float32),
     )
     assert list(predictions) == ["pWin", "q10", "q50", "q90"]
+
+
+def test_partition_loader_uses_full_date_features_then_training_selection():
+    ranking, sampling = baseline_databases()
+    contract = {
+        "fold": 1,
+        "trainStart": "20200101",
+        "trainEnd": "20200101",
+        "trainSelected": 2,
+        "testStart": "20200102",
+        "testEnd": "20200102",
+        "testRows": 3,
+    }
+
+    training = _load_partition_from_connections(
+        ranking,
+        sampling,
+        fold_contract=contract,
+        partition="train",
+    )
+    test = _load_partition_from_connections(
+        ranking,
+        sampling,
+        fold_contract=contract,
+        partition="test",
+    )
+
+    market_return_index = MODEL_FEATURE_NAMES.index("marketMeanReturn1")
+    np.testing.assert_allclose(
+        training.x[:, market_return_index],
+        np.full(2, 11 / 3),
+    )
+    np.testing.assert_array_equal(
+        training.instruments,
+        np.array([b"000001.SZ", b"000002.SZ"]),
+    )
+    np.testing.assert_array_equal(training.sample_weight, np.array([2.0, 4.0]))
+    np.testing.assert_array_equal(
+        test.sample_weight,
+        np.full(3, 1 / 3),
+    )
+    assert len(test.x) == 3
+    ranking.close()
+    sampling.close()
 
 
 def test_baseline_primitives_reject_invalid_inputs():
