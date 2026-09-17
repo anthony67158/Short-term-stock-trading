@@ -315,11 +315,31 @@ def allocate_daily_quotas(
             "FOUNDATION_DAILY_QUOTA_INPUT_INVALID",
         )
     target = min(maximum_windows, sum(date_counts.values()))
-    return _largest_remainder_allocation(
-        date_counts,
-        target,
-        guarantee_one=True,
-    )
+    dates = sorted(date_counts)
+    base, extra = divmod(target, len(dates))
+    quotas = {
+        decision_date: min(
+            date_counts[decision_date],
+            base + int(index < extra),
+        )
+        for index, decision_date in enumerate(dates)
+    }
+    remaining = target - sum(quotas.values())
+    while remaining > 0:
+        progressed = False
+        for decision_date in dates:
+            if quotas[decision_date] >= date_counts[decision_date]:
+                continue
+            quotas[decision_date] += 1
+            remaining -= 1
+            progressed = True
+            if remaining == 0:
+                break
+        if not progressed:
+            raise FoundationSamplingDatasetError(
+                "FOUNDATION_DAILY_QUOTA_INPUT_INVALID",
+            )
+    return quotas
 
 
 def _quantile_buckets(rows: list[dict], key: str) -> dict[str, int]:

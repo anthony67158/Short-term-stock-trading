@@ -925,6 +925,18 @@ def test_market_cap_and_sampling_manifests_reject_metadata_drift(
 
 
 def test_daily_quota_requires_at_least_one_sample_per_training_date():
+    assert allocate_daily_quotas(
+        {
+            "20250101": 20,
+            "20250102": 20,
+            "20250103": 20,
+        },
+        maximum_windows=31,
+    ) == {
+        "20250101": 11,
+        "20250102": 10,
+        "20250103": 10,
+    }
     with pytest.raises(
         FoundationSamplingDatasetError,
         match="FOUNDATION_DAILY_QUOTA_INPUT_INVALID",
