@@ -13,8 +13,10 @@ from platform_app.modules.experiments.foundation_return_dataset import (
     FoundationReturnDataset,
     FoundationReturnDatasetError,
     FoundationReturnDatasetReader,
+    build_foundation_walk_forward_splits,
     reference_full_fill_net_return,
     verify_foundation_return_dataset,
+    walk_forward_partition,
 )
 from platform_app.modules.experiments.label_dataset import SCHEMA as LABEL_SCHEMA
 from platform_app.modules.experiments.market_dataset import (
@@ -356,6 +358,67 @@ def test_reference_target_rejects_impossible_loss():
             execution_date="20250102",
             terminal_date="20250108",
         )
+
+
+def test_walk_forward_splits_preserve_date_groups_and_gaps():
+    dates = [
+        (date(2020, 1, 1) + timedelta(days=offset)).strftime("%Y%m%d")
+        for offset in range(500)
+    ]
+
+    folds = build_foundation_walk_forward_splits(
+        dates,
+        test_sessions=63,
+    )
+
+    assert len(folds) == 5
+    assert [fold["fold"] for fold in folds] == [1, 2, 3, 4, 5]
+    assert all(fold["testSessions"] == 63 for fold in folds)
+    assert all(fold["purgeSessions"] == 5 for fold in folds)
+    assert all(fold["embargoSessions"] == 5 for fold in folds)
+    assert all(
+        previous["trainEnd"] < current["trainEnd"]
+        and previous["testEnd"] < current["testStart"]
+        for previous, current in zip(folds, folds[1:], strict=False)
+    )
+    for fold in folds:
+        partitions = [walk_forward_partition(value, fold) for value in dates]
+        assert partitions.count("PROBABILITY_CALIBRATION") == 63
+        assert partitions.count("CONFORMAL_CALIBRATION") == 63
+        assert partitions.count("TEST") == 63
+        assert partitions.count("PURGE") == 5
+        assert partitions.count("EMBARGO") == 5
+        grouped = {
+            partition: {
+                value
+                for value in dates
+                if walk_forward_partition(value, fold) == partition
+            }
+            for partition in set(partitions)
+        }
+        assert sum(len(group) for group in grouped.values()) == len(dates)
+        assert not any(
+            left & right
+            for index, left in enumerate(grouped.values())
+            for right in list(grouped.values())[index + 1 :]
+        )
+
+
+def test_walk_forward_rejects_duplicate_or_insufficient_dates():
+    dates = [
+        (date(2020, 1, 1) + timedelta(days=offset)).strftime("%Y%m%d")
+        for offset in range(450)
+    ]
+    with pytest.raises(
+        FoundationReturnDatasetError,
+        match="FOUNDATION_SPLIT_DATES_INVALID",
+    ):
+        build_foundation_walk_forward_splits([*dates, dates[-1]], test_sessions=63)
+    with pytest.raises(
+        FoundationReturnDatasetError,
+        match="FOUNDATION_SPLIT_SUPPORT_INSUFFICIENT",
+    ):
+        build_foundation_walk_forward_splits(dates[:440], test_sessions=63)
 
 
 def test_verification_rejects_tampered_virtual_database(

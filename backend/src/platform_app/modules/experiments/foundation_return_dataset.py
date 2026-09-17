@@ -23,6 +23,12 @@ DEFAULT_HISTORY_SESSIONS = 90
 MINIMUM_HISTORY_SESSIONS = 60
 MAXIMUM_HISTORY_SESSIONS = 120
 REFERENCE_NOTIONAL_CNY = Decimal("100000")
+FOLD_COUNT = 5
+PROBABILITY_CALIBRATION_SESSIONS = 63
+CONFORMAL_CALIBRATION_SESSIONS = 63
+PURGE_SESSIONS = 5
+EMBARGO_SESSIONS = 5
+TEST_SESSIONS = 252
 
 FEATURE_SCHEMA = {
     "schemaVersion": FEATURE_SCHEMA_VERSION,
@@ -108,6 +114,109 @@ CREATE TABLE IF NOT EXISTS foundation_dataset_statistics (
 
 class FoundationReturnDatasetError(ValueError):
     pass
+
+
+def build_foundation_walk_forward_splits(
+    decision_dates: list[str],
+    *,
+    fold_count: int = FOLD_COUNT,
+    probability_calibration_sessions: int = PROBABILITY_CALIBRATION_SESSIONS,
+    conformal_calibration_sessions: int = CONFORMAL_CALIBRATION_SESSIONS,
+    purge_sessions: int = PURGE_SESSIONS,
+    embargo_sessions: int = EMBARGO_SESSIONS,
+    test_sessions: int = TEST_SESSIONS,
+) -> list[dict]:
+    dates = sorted(set(decision_dates))
+    if dates != decision_dates or any(
+        re.fullmatch(r"\d{8}", value) is None for value in dates
+    ):
+        raise FoundationReturnDatasetError("FOUNDATION_SPLIT_DATES_INVALID")
+    parameters = (
+        fold_count,
+        probability_calibration_sessions,
+        conformal_calibration_sessions,
+        purge_sessions,
+        embargo_sessions,
+        test_sessions,
+    )
+    if any(value <= 0 for value in parameters) or fold_count != FOLD_COUNT:
+        raise FoundationReturnDatasetError("FOUNDATION_SPLIT_POLICY_INVALID")
+    first_test_index = len(dates) - fold_count * test_sessions
+    minimum_prefix = (
+        probability_calibration_sessions
+        + conformal_calibration_sessions
+        + purge_sessions
+        + embargo_sessions
+        + 1
+    )
+    if first_test_index < minimum_prefix:
+        raise FoundationReturnDatasetError("FOUNDATION_SPLIT_SUPPORT_INSUFFICIENT")
+
+    folds = []
+    for fold in range(1, fold_count + 1):
+        test_start_index = first_test_index + (fold - 1) * test_sessions
+        test_end_index = test_start_index + test_sessions - 1
+        conformal_end_index = test_start_index - embargo_sessions - 1
+        conformal_start_index = (
+            conformal_end_index - conformal_calibration_sessions + 1
+        )
+        probability_end_index = conformal_start_index - 1
+        probability_start_index = (
+            probability_end_index - probability_calibration_sessions + 1
+        )
+        train_end_index = probability_start_index - purge_sessions - 1
+        if train_end_index < 0:
+            raise FoundationReturnDatasetError(
+                "FOUNDATION_SPLIT_SUPPORT_INSUFFICIENT",
+            )
+        fold_payload = {
+            "fold": fold,
+            "trainStart": dates[0],
+            "trainEnd": dates[train_end_index],
+            "probabilityCalibrationStart": dates[probability_start_index],
+            "probabilityCalibrationEnd": dates[probability_end_index],
+            "conformalCalibrationStart": dates[conformal_start_index],
+            "conformalCalibrationEnd": dates[conformal_end_index],
+            "testStart": dates[test_start_index],
+            "testEnd": dates[test_end_index],
+            "trainSessions": train_end_index + 1,
+            "probabilityCalibrationSessions": probability_calibration_sessions,
+            "conformalCalibrationSessions": conformal_calibration_sessions,
+            "testSessions": test_sessions,
+            "purgeSessions": purge_sessions,
+            "embargoSessions": embargo_sessions,
+        }
+        folds.append(fold_payload)
+    return folds
+
+
+def walk_forward_partition(
+    decision_date: str,
+    fold: dict,
+) -> str:
+    if decision_date > fold["testEnd"]:
+        return "FUTURE_HOLDOUT"
+    if decision_date <= fold["trainEnd"]:
+        return "TRAIN"
+    if decision_date < fold["probabilityCalibrationStart"]:
+        return "PURGE"
+    if (
+        fold["probabilityCalibrationStart"]
+        <= decision_date
+        <= fold["probabilityCalibrationEnd"]
+    ):
+        return "PROBABILITY_CALIBRATION"
+    if (
+        fold["conformalCalibrationStart"]
+        <= decision_date
+        <= fold["conformalCalibrationEnd"]
+    ):
+        return "CONFORMAL_CALIBRATION"
+    if decision_date < fold["testStart"]:
+        return "EMBARGO"
+    if fold["testStart"] <= decision_date <= fold["testEnd"]:
+        return "TEST"
+    raise FoundationReturnDatasetError("FOUNDATION_SPLIT_DATE_UNCLASSIFIED")
 
 
 def _now() -> str:
