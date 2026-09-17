@@ -24,6 +24,7 @@ research = [
     "catboost>=1.2,<2",
     "tabm==0.0.3",
     "torch>=2.13,<2.14",
+    "xgboost==3.4.1",
 ]
 
 [project.scripts]
