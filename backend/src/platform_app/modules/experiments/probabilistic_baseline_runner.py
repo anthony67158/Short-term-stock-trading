@@ -7,7 +7,9 @@ from typing import Any
 
 import catboost
 import numpy as np
+import xgboost
 from catboost import CatBoostClassifier, CatBoostRegressor
+from xgboost import XGBClassifier, XGBRegressor
 
 from platform_app.modules.experiments.foundation_return_contract import (
     DEFAULT_QUANTILES,
@@ -33,6 +35,7 @@ VALID_BOARDS = ("MAIN", "CHINEXT", "STAR", "BEIJING")
 BASELINE_SEED = 20260917
 DEFAULT_ITERATIONS = 120
 CATBOOST_FAMILY = "catboost-multiquantile-v1"
+XGBOOST_FAMILY = "xgboost-quantile-v1"
 PARTITION_RANGES = {
     "train": ("trainStart", "trainEnd", "trainSelected"),
     "probabilityCalibration": (
@@ -169,10 +172,61 @@ def fit_catboost_baseline(
     )
 
 
+def fit_xgboost_baseline(
+    training: BaselinePartition,
+    *,
+    iterations: int = DEFAULT_ITERATIONS,
+    threads: int = 4,
+) -> BaselineModelBundle:
+    if iterations <= 0 or threads <= 0:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_TRAINING_CONFIG_INVALID",
+        )
+    weights = normalized_weights(training.sample_weight)
+    common = {
+        "n_estimators": iterations,
+        "learning_rate": 0.05,
+        "max_depth": 6,
+        "min_child_weight": 100.0,
+        "reg_lambda": 3.0,
+        "subsample": 1.0,
+        "colsample_bytree": 1.0,
+        "tree_method": "hist",
+        "max_bin": 63,
+        "random_state": BASELINE_SEED,
+        "n_jobs": threads,
+        "verbosity": 0,
+    }
+    classifier = XGBClassifier(
+        objective="binary:logistic",
+        eval_metric="logloss",
+        **common,
+    ).fit(
+        training.x,
+        training.direction,
+        sample_weight=weights,
+    )
+    quantile_model = XGBRegressor(
+        objective="reg:quantileerror",
+        quantile_alpha=np.asarray(DEFAULT_QUANTILES),
+        **common,
+    ).fit(
+        training.x,
+        training.target_return,
+        sample_weight=weights,
+    )
+    return BaselineModelBundle(
+        family=XGBOOST_FAMILY,
+        classifier=classifier,
+        quantile_model=quantile_model,
+    )
+
+
 def baseline_library_versions() -> dict[str, str]:
     return {
         "catboost": catboost.__version__,
         "numpy": np.__version__,
+        "xgboost": xgboost.__version__,
     }
 
 
