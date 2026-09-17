@@ -71,6 +71,17 @@ def _sealed_market(tmp_path):
         instrument["sourceRowSha256"] = canonical_sha256(instrument)
     with MarketDataset(root, dataset_id="market-v1", source="SYNTHETIC") as market:
         market.write_instruments(instruments)
+        alias = {
+            "sourceCode": "000042.SZ",
+            "instrumentId": "SZ.000002",
+            "effectiveFrom": dates[0],
+            "effectiveTo": "20260101",
+            "reason": "SECURITY_CODE_CHANGE",
+            "source": "SYNTHETIC",
+            "availableAt": "2025-06-30T16:30:00+08:00",
+        }
+        alias["sourceRowSha256"] = canonical_sha256(alias)
+        market.write_aliases([alias])
         market.write_facts(
             "trade_calendar",
             [
@@ -442,7 +453,11 @@ def test_verification_rejects_tampered_virtual_database(
 
 def _daily_basic_rows(trade_date, index):
     rows = []
-    for code, base in (("000001.SZ", Decimal("10")), ("000002.SZ", Decimal("20"))):
+    for code, base in (
+        ("000001.SZ", Decimal("10")),
+        ("000042.SZ", Decimal("20")),
+        ("000002.SZ", Decimal("20")),
+    ):
         close = base + Decimal(index) / 100
         rows.append(
             {
