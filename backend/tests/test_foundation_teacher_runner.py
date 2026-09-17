@@ -21,6 +21,7 @@ from platform_app.modules.experiments.foundation_teacher_runner import (
     evaluate_teacher_test,
     fee_adjusted_returns,
     load_teacher_forecast,
+    price_forecasts_to_fee_adjusted_returns,
     select_forecast_steps,
 )
 
@@ -124,6 +125,35 @@ def test_teacher_fee_returns_match_frozen_decimal_policy():
     np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=0)
 
 
+def test_price_forecasts_convert_to_frozen_fee_adjusted_returns():
+    predicted_prices = np.array(
+        [
+            [105.0, 110.0],
+            [49.0, 50.0],
+        ]
+    )
+    reference_close = np.array([100.0, 50.0])
+    boards = np.array([0, 3])
+    executions = np.array([20210104, 20220428])
+    terminals = np.array([20210111, 20230828])
+
+    actual = price_forecasts_to_fee_adjusted_returns(
+        predicted_prices,
+        reference_close,
+        boards,
+        executions,
+        terminals,
+    )
+    expected = fee_adjusted_returns(
+        np.array([0.05, 0.10, -0.02, 0.0]),
+        np.array(["MAIN", "MAIN", "BEIJING", "BEIJING"]),
+        np.array(["20210104", "20210104", "20220428", "20220428"]),
+        np.array(["20210111", "20210111", "20230828", "20230828"]),
+    ).reshape(2, 2)
+
+    np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=0)
+
+
 def test_adjusted_close_context_ends_on_reference_close():
     context, reference_close = _adjusted_close_context(
         HistoryReader(),
@@ -205,6 +235,23 @@ def test_ttm_quantiles_use_calibration_residuals_only():
     )
 
 
+def test_native_quantiles_receive_calibration_median_residual():
+    predicted = common_quantile_predictions(
+        model_name="timesfm-2.5",
+        selected_point=np.array([0.1]),
+        selected_native_quantiles=np.array([[0.02, 0.05, 0.09]]),
+        native_levels=(0.1, 0.5, 0.9),
+        calibration_residual_quantiles=np.array(
+            [-0.05, -0.02, 0.01, 0.03, 0.08]
+        ),
+    )
+
+    np.testing.assert_allclose(
+        predicted[0],
+        np.array([0.03, 0.04125, 0.06, 0.085, 0.10]),
+    )
+
+
 def test_teacher_evaluation_uses_calibration_and_test_partitions():
     contexts = np.ones((8, DEFAULT_CONTEXT_LENGTH), dtype=np.float32)
     dataset = TeacherDataset(
@@ -245,7 +292,10 @@ def test_teacher_evaluation_uses_calibration_and_test_partitions():
             dtype="S24",
         ),
     )
-    point = np.tile(np.arange(5, dtype=np.float32) / 100, (8, 1))
+    point = np.tile(
+        1.0 + np.arange(5, dtype=np.float32) / 100,
+        (8, 1),
+    )
     raw = TeacherRawForecast(
         point=point,
         quantiles=np.empty((8, 5, 0), dtype=np.float32),
@@ -269,6 +319,7 @@ def test_teacher_evaluation_uses_calibration_and_test_partitions():
         "instruments",
         "actualReturn",
         "sampleWeight",
+        "pointNetProxy",
         "pWin",
         "q10",
         "q25",

@@ -257,6 +257,44 @@ def fee_adjusted_returns(
     ) / (REFERENCE_NOTIONAL_CNY + buy_fees)
 
 
+def price_forecasts_to_fee_adjusted_returns(
+    predicted_prices: np.ndarray,
+    reference_close: np.ndarray,
+    boards: np.ndarray,
+    execution_dates: np.ndarray,
+    terminal_dates: np.ndarray,
+) -> np.ndarray:
+    prices = np.asarray(predicted_prices, dtype=np.float64)
+    reference = np.asarray(reference_close, dtype=np.float64)
+    board_codes = np.asarray(boards)
+    execution = np.asarray(execution_dates).astype("U8")
+    terminal = np.asarray(terminal_dates).astype("U8")
+    if (
+        prices.ndim not in (1, 2)
+        or prices.shape[0] != len(reference)
+        or len({len(reference), len(board_codes), len(execution), len(terminal)})
+        != 1
+        or not np.all(np.isfinite(prices))
+        or not np.all(np.isfinite(reference))
+        or np.any(prices <= 0)
+        or np.any(reference <= 0)
+        or not np.all(np.isin(board_codes, tuple(BOARD_NAMES)))
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_PRICE_FORECAST_INVALID",
+        )
+    columns = 1 if prices.ndim == 1 else prices.shape[1]
+    gross = prices / reference.reshape((-1,) + (1,) * (prices.ndim - 1)) - 1.0
+    board_names = np.asarray([BOARD_NAMES[int(code)] for code in board_codes])
+    adjusted = fee_adjusted_returns(
+        gross.reshape(-1),
+        np.repeat(board_names, columns),
+        np.repeat(execution, columns),
+        np.repeat(terminal, columns),
+    )
+    return adjusted.reshape(prices.shape)
+
+
 def _score(fold: int, partition: str, date: str, instrument: str) -> bytes:
     return hashlib.sha256(
         f"foundation-teacher-v4:{fold}:{partition}:{date}:{instrument}".encode(),
@@ -668,6 +706,7 @@ def common_quantile_predictions(
                 for level in SCREENING_QUANTILES
             ]
         )
+        result += calibration_residual_quantiles[2]
     return np.sort(result, axis=1).astype(np.float32)
 
 
@@ -734,11 +773,28 @@ def evaluate_teacher_test(
         raise FoundationTeacherError(
             "FOUNDATION_TEACHER_EVALUATION_PARTITION_MISSING",
         )
-    selected_point = select_forecast_steps(raw.point, dataset.forecast_steps)
+    selected_point_price = select_forecast_steps(
+        raw.point,
+        dataset.forecast_steps,
+    )
+    selected_point = price_forecasts_to_fee_adjusted_returns(
+        selected_point_price,
+        dataset.reference_close,
+        dataset.boards,
+        dataset.execution_dates,
+        dataset.terminal_dates,
+    )
     if raw.quantiles.shape[2]:
-        selected_native = select_forecast_steps(
+        selected_native_price = select_forecast_steps(
             raw.quantiles,
             dataset.forecast_steps,
+        )
+        selected_native = price_forecasts_to_fee_adjusted_returns(
+            selected_native_price,
+            dataset.reference_close,
+            dataset.boards,
+            dataset.execution_dates,
+            dataset.terminal_dates,
         )
     else:
         selected_native = np.empty((len(dataset.contexts), 0))
@@ -813,10 +869,16 @@ def evaluate_teacher_test(
         "probabilityCalibration": (
             "WEIGHTED_EMPIRICAL_POINT_RESIDUAL_CDF"
         ),
+        "pointForecastProxy": (
+            "FIFTH_ADJUSTED_CLOSE_OVER_DECISION_ADJUSTED_CLOSE_FEE_ADJUSTED"
+        ),
         "quantilePolicy": (
             "WEIGHTED_EMPIRICAL_POINT_RESIDUALS"
             if model_name == "ttm-r2.1"
-            else "NATIVE_WITHIN_RANGE_LINEAR_INTERPOLATION"
+            else (
+                "NATIVE_WITHIN_RANGE_LINEAR_INTERPOLATION_PLUS_"
+                "WEIGHTED_MEDIAN_POINT_RESIDUAL"
+            )
         ),
     }
     predictions = {
@@ -824,6 +886,7 @@ def evaluate_teacher_test(
         "instruments": dataset.instruments[test],
         "actualReturn": dataset.actual_return[test],
         "sampleWeight": dataset.sample_weight[test],
+        "pointNetProxy": selected_point[test].astype(np.float32),
         "pWin": probability[test].astype(np.float32),
         **{
             f"q{round(level * 100):02d}": quantiles[test, index]
@@ -1063,6 +1126,8 @@ def run_teacher_inference(
         "model": model_name,
         "modelSpec": MODEL_SPECS[model_name],
         "datasetSha256": data_manifest["dataSha256"],
+        "forecastUnit": "ADJUSTED_PRICE",
+        "forecastTarget": data_manifest["forecastTarget"],
         "rows": len(dataset.contexts),
         "batchSize": batch_size,
         "device": resolved_device,
