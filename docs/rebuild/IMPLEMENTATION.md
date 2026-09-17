@@ -1417,3 +1417,22 @@ GitHub Actions 自动运行验收（2026-09-17 22:21）：
   `SKIPPED_INSUFFICIENT_MATURED_DATA`，`productionPointerChanged=false`。
   线上 `stockpick/ranking-score-snapshot.json` 的最后修改时间早于本次运行，
   确认 Actions 未切换生产模型。
+
+生产保障加固（2026-09-17）：
+- FC `learning-settlement-timer` 从单次 17:20 调整为工作日 17:20 与 17:35 两次
+  幂等运行，后一次作为结算和训练视图发布重试。GitHub Actions 的脱敏视图下载、
+  challenger 训练和不可变上传各自最多尝试 3 次；上传遇到 OSS 409 时回读字节，
+  内容相同视为幂等成功，不同内容按不可变冲突失败。
+- Actions 获得最小 `issues: write` 权限。重试耗尽后按北京时间日期创建
+  `[daily-learning] YYYY-MM-DD failed` Issue；同日再次失败只追加运行链接，不暴露
+  账号、训练行或密钥。GitHub 原生失败状态仍保留。
+- 训练下载器按北京时间计算应存在的最近工作日结算日期。最新 manifest 早于该日期、
+  manifest/view 日期不一致、路径越出 `learning/v1/views/`、规范化内容哈希不匹配
+  时均失败关闭，不再静默复用陈旧或被修改的训练视图。
+- 选股 T+5 标签升级为 `stock-pick-t5-fee-v2`：复用
+  `A_SHARE_STANDARD_V1`，以 100 股标准手数计算买入与卖出双边佣金、印花税和过户费；
+  `returnPct`、MFE、MAE、方向命中和 +2% 路径命中均使用费后现金流。训练视图仅接收
+  `feeAdjusted=true` 的 v2 结果，旧毛收益事件保留审计但不参与训练，并可由新事件 ID
+  重新结算为 v2。
+- 验证：全量 Node `2449/2449`、Python 学习管道 `4/4`、Vite 生产构建、FC 打包和
+  YAML 解析均通过；生产 OSS 最新 manifest/view 已完成只读新鲜度与哈希冒烟验证。
