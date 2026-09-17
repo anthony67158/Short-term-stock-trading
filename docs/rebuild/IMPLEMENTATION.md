@@ -1253,3 +1253,11 @@ Python3.12及依赖由`backend/uv.lock`锁定。云端已建立按量Serverless 
 
 S1（已完成）：`shared/appShell.js` today 段 label/shortLabel 改"选股"、描述改为全市场扫描召回；`src/App.jsx` 子视图改"选股结果/盘面研究"。内部路由 key `today` 保留（深链/快捷键/历史栈不受影响）。`app-shell`、`mobile-navigation` 测试通过；无测试断言旧文案。今日作战指令中心 UI 随 S5 新选股结果视图一并替换。
 
+S2（已完成，commit 36c63fe）：`/api/stock_pick` 召回服务。`shared/stockPick.js` 合同（规则召回分/候选归一化/模型优先排序/不可用降级）；`api/_stock_pick_recall.js` 复用 `fetchTailPickRealtimePool` 全池扫描→规则预筛(取Top72)→`scoreCandidatesWithDecisionModel` 取排序分(缺失回落规则分并标注)→归一化快照；`api/_stock_pick_store.js` OSS+内存回退+单飞锁；`api/stock_pick.js` GET读快照/POST run。测试 `stock-pick-contract`(5) + `stock-pick-recall`(4) 通过。
+
+S4（已完成，commit 66485f5）：Agent 精选。`shared/stockPickAgent.js` 合同逐项复校——只能选候选池内 code、买入价须落当日高低价带(否则回落现价)、仓位≤10%、不生成成交、无有效选择降级 NO_SELECTION。`api/_stock_pick_agent.js` runner 组装盘面(market_snapshot)+三级资金(_stock_fund)+公告新闻(_ai_search,过滤未来时间)→调 assistant LLM(700token/90s/json)精选，输出买入策略(entryPrice/positionPctMax/plan)+时机(trigger/window/nextSession)+反方+失效。`stock_pick.js` action:'agent' 路由，Agent不选/不可用时返回 Top 候选参考(标注未经精选)。测试 `stock-pick-agent`(5)+`stock-pick-agent-runner`(5) 通过。
+
+S5（已完成，commit 98ac4c4）：前端选股结果视图。`src/stockPickClient.js`；`src/components/StockPickTab.jsx`(全市场召回+Agent精选按钮/精选卡/Top候选参考态/候选池表)；`src/App.jsx` 选股结果子视图改由 StockPickTab 渲染，移除旧 AdaptiveWorkbench(TodayTab) 死导入；`precision.css` 选股样式+移动端单列。vite build 通过；93 项相关测试通过(含 ui-quality-contract 无回归)。
+
+待续：S3 离线 LightGBM 排序模型(用 backend py3.12+现成 ranking_* 骨架, 费后 walk-forward, 产真实模型分)；S6 零消费者删旧候选池 Agent 后端(opportunity_agent_selection*/OpportunityRadar*/TodayTab, 注意 opportunity_radar 账本族是训练标签来源)；S7 全量验证+浏览器走查+验收记录。
+
