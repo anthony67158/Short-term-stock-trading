@@ -30,8 +30,12 @@ class FoundationReturnContractError(ValueError):
 class FoundationDatasetContract(Contract):
     dataset_id: Identifier
     database_sha256: Sha256
+    market_cap_database_sha256: Sha256
+    sampling_database_sha256: Sha256
+    split_manifest_sha256: Sha256
     feature_schema_sha256: Sha256
     label_policy_sha256: Sha256
+    sampling_policy_sha256: Sha256
     fee_policy_version: Identifier
     execution_policy_version: Identifier
     target: Literal["r_net_5d"] = "r_net_5d"
