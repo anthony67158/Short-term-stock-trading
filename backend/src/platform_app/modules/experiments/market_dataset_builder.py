@@ -196,11 +196,13 @@ def _filter_post_delisting_facts(
     for raw, normalized in zip(raw_rows, normalized_rows, strict=True):
         instrument_id = normalized["instrument_id"]
         lifecycle = lifecycles.get(instrument_id)
-        if (
-            instrument_id not in eligible_ids
-            and lifecycle
-            and lifecycle["delist_date"]
-            and trade_date >= lifecycle["delist_date"]
+        # 宇宙外的标的其事实不应保留：
+        # 1) 有 lifecycle 且已过退市日 —— 退市后的脏事实；
+        # 2) 无 lifecycle（退市日早于窗口起点，已被移出宇宙）—— 同为宇宙外脏事实。
+        # 两种情况都丢弃，避免上游镜像对已退市股仍返回复权因子/停牌时误判为“超出宇宙”。
+        if instrument_id not in eligible_ids and (
+            not lifecycle
+            or (lifecycle["delist_date"] and trade_date >= lifecycle["delist_date"])
         ):
             discarded.append(raw)
         else:
