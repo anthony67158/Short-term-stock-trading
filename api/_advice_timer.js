@@ -73,6 +73,13 @@ export function opportunityRadarTimerBody(event, cronKey) {
   return { scheduled: true };
 }
 
+export function learningTimerBody(event, cronKey) {
+  if (!cronKey || !event || typeof event !== 'object') return null;
+  if (event.triggerName !== 'learning-settlement-timer') return null;
+  if (String(event.payload || '') !== String(cronKey)) return null;
+  return { scheduled: true };
+}
+
 export function preCatalystTimerBody(event, cronKey) {
   if (!cronKey || !event || typeof event !== 'object') return null;
   if (![

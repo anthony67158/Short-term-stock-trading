@@ -1116,6 +1116,7 @@ export default async function handler(req, res) {
       return finishDecision(await runDecision({
         req,
         book: accountAuth.account.data,
+        accountScope: accountAuth.account.nick,
         code: String(body?.payload?.code || ''),
         signal: req.signal,
         onProgress: (text, key) => {

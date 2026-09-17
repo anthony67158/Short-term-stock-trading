@@ -20,39 +20,20 @@ test('所有Python Actions共享精确版本依赖并包含TestClient运行时',
   assert.doesNotMatch(retrain, /pip install "fastapi/)
 })
 
-test('日线辅助模型与决策模型分离运行且每日流程不依赖Tushare', () => {
-  assert.match(retrain, /^\s{2}verify:/m)
-  assert.match(retrain, /^\s{2}stock-retrain:/m)
-  assert.match(retrain, /^\s{2}opportunity-retrain:/m)
-  assert.doesNotMatch(retrain, /^\s{2}sector-retrain:/m)
+test('每日学习只消费脱敏视图并训练三种子challenger', () => {
+  assert.match(retrain, /^\s{2}train:/m)
   assert.doesNotMatch(retrain, /TUSHARE_TOKEN:/)
-  assert.match(retrain, /needs:\s*verify/)
-  assert.match(retrain, /OSS_ALLOW_PUBLIC_NETWORK:\s*"true"/)
-  assert.match(
-    retrain,
-    /OSS_ENDPOINT:\s*https:\/\/oss-cn-hangzhou\.aliyuncs\.com/,
-  )
-  assert.match(retrain, /Verify stock model OSS connectivity/)
-  assert.match(retrain, /Collect mature opportunity outcomes/)
-  assert.match(retrain, /Run three-seed LightGBM and CatBoost walk-forward/)
-  assert.match(retrain, /Train and evaluate opportunity challenger/)
-  assert.match(retrain, /Download current production decision model as champion/)
-  assert.match(retrain, /Select improved decision heads and validate the whole model/)
-  assert.match(retrain, /Publish selected decision release atomically/)
-  assert.match(retrain, /--activate-baseline/)
-  assert.match(
-    retrain,
-    /if: steps\.opportunity-selection\.outputs\.publish == 'true'/,
-  )
-  assert.match(retrain, /Archive latest completed market day from public sources/)
-  assert.match(retrain, /archive-market-day/)
+  assert.match(retrain, /learning_pipeline\.py download/)
+  assert.match(retrain, /learning_pipeline\.py train/)
+  assert.match(retrain, /learning_pipeline\.py upload/)
+  assert.match(retrain, /Verify immutable learning contracts/)
+  assert.doesNotMatch(retrain, /accounts\//)
+  assert.doesNotMatch(retrain, /promote|activate-baseline|production pointer/i)
 })
 
-test('Actions总是保留诊断产物且发布报告失败不遮蔽训练结果', () => {
+test('Actions总是保留诊断产物且不提供生产发布步骤', () => {
   assert.match(harness, /if-no-files-found:\s*warn/)
   assert.match(retrain, /if-no-files-found:\s*warn/)
-  assert.match(
-    retrain,
-    /Publish decision-model result to in-app quant report[\s\S]*continue-on-error:\s*true/,
-  )
+  assert.match(retrain, /learning-artifacts\/run\/report\.json/)
+  assert.doesNotMatch(retrain, /Publish selected decision release atomically/)
 })

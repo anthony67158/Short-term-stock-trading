@@ -1455,7 +1455,10 @@ async function runJobGen(
   }
   const startedAt = Date.now();
   const result = await runDecision({
-    book: data, code, signal,
+    book: data,
+    code,
+    accountScope: acc.nick,
+    signal,
     reviewEvent,
     onProgress: (phase, stage) => onProgress?.({
       phase, stage,

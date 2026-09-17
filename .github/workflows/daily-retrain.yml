@@ -1,612 +1,48 @@
-# 每日量化增量训练（公开行情归档 + 成熟样本重训 + 三种子回测）
-# 触发：北京时间周一至周六 01:15（UTC 前一日 17:15）+ 手动。
-# 机制：国内FC归档公开行情→成熟样本压实→决策模型重训→成员级冠军对照→整体门禁→选择性更新DIRECT版本。
-#       量化服务 model_lib 每 1h 从 OSS 热更新，故上传即上线，无需重部署 FC。
-name: daily-retrain
+name: daily-learning-challengers
 
 on:
   schedule:
-    # UTC 周日至周五 17:15 = 北京时间周一至周六 01:15。
-    # 周六凌晨处理周五收盘数据；保留周一的既有补齐时段。
-    # 避开整点和半点，降低 GitHub Actions 定时任务拥堵延迟。
+    # UTC Sunday-Friday 17:15 = Beijing Monday-Saturday 01:15.
     - cron: "15 17 * * 0-5"
-  workflow_dispatch: {}       # 支持手动触发
+  workflow_dispatch: {}
 
 concurrency:
-  group: daily-retrain
+  group: daily-learning-challengers
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  verify:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: qlib-service
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_DEFAULT_TIMEOUT: "90"
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Use Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: qlib-service/requirements-ci.txt
-
-      - name: Install locked training dependencies
-        run: |
-          python -m pip install --retries 5 -r requirements-ci.txt
-          python -m pip check
-
-      - name: Verify incremental training and forecast contracts
-        shell: bash
-        run: |
-          mkdir -p ../test-artifacts
-          set -o pipefail
-          python -m unittest \
-            test_retrain_daily.py \
-            test_build_dataset_forecast.py \
-            test_production_backtest.py \
-            test_app_forecast.py \
-            test_publish_retrain_report.py \
-            test_model_lib_dense_runtime.py \
-            test_model_release.py \
-            tests/test_factor_research_v2.py \
-            test_sector_factors.py \
-            test_sector_model.py \
-            test_train_sector_model.py \
-            test_build_sector_dataset.py \
-            test_sector_app.py \
-            tests/test_decision_contract.py \
-            tests/test_decision_review_dataset.py \
-            tests/test_decision_review_inference.py \
-            tests/test_alpha158_features.py \
-            tests/test_alpha158_mainboard.py \
-            tests/test_alpha158_market_history.py \
-            tests/test_alpha158_snapshot.py \
-            tests/test_review_release.py \
-            tests/test_review_schema_migration.py \
-            tests/test_review_model_upload.py \
-            tests/test_decision_dataset.py \
-            tests/test_decision_evaluation.py \
-            tests/test_decision_backtest_dataset.py \
-            tests/test_decision_bakeoff.py \
-            tests/test_decision_ensemble_evaluation.py \
-            tests/test_decision_stability.py \
-            tests/test_decision_trainer.py \
-            tests/test_decision_engine.py \
-            tests/test_decision_app.py \
-            tests/test_decision_release_upload.py \
-            tests/test_fuyao_data.py \
-            tests/test_collect_opportunity_outcomes.py \
-            tests/test_opportunity_history.py \
-            tests/test_opportunity_market_archive.py \
-            tests/test_archive_public_market_day.py \
-            tests/test_archive_minute_fallback.py \
-            tests/test_opportunity_pattern_snapshot.py \
-            tests/test_pattern_snapshot_memory.py \
-            tests/test_validate_market_archive_report.py \
-            tests/test_opportunity_sector_archive.py \
-            tests/test_archive_tushare_market_day.py \
-            tests/test_decision_release_download.py \
-            tests/test_decision_release.py \
-            tests/test_promote_decision_model.py \
-            tests/test_publish_opportunity_training_status.py \
-            tests/test_publish_model_retrain_report.py \
-            2>&1 | tee ../test-artifacts/retrain-contract-tests.log
-
-      - name: Upload contract diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: retrain-contract-tests-${{ github.run_id }}
-          path: test-artifacts/
-          if-no-files-found: warn
-
-  stock-retrain:
-    needs: verify
-    continue-on-error: true
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    defaults:
-      run:
-        working-directory: qlib-service
-    env:
-      PYTHONUNBUFFERED: "1"
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_DEFAULT_TIMEOUT: "90"
-      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
-      OSS_ALLOW_PUBLIC_NETWORK: "true"
-      OSS_REGION: oss-cn-hangzhou
-      QUANT_MODEL_PREFIX: quantmodel/
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Use Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: qlib-service/requirements-ci.txt
-
-      - name: Install locked training dependencies
-        run: |
-          python -m pip install --retries 5 -r requirements-ci.txt
-          python -m pip check
-
-      - name: Verify required OSS configuration
-        run: |
-          missing=0
-          for name in \
-            OSS_ACCESS_KEY_ID \
-            OSS_ACCESS_KEY_SECRET \
-            OSS_BUCKET
-          do
-            if [ -z "${!name}" ]; then
-              echo "::error title=Missing Actions secret::$name 未配置"
-              missing=1
-            fi
-          done
-          exit "$missing"
-
-      - name: Verify stock model OSS connectivity
-        run: |
-          python - <<'PY'
-          from upload_model import bucket
-          meta = bucket().head_object("quantmodel/meta.json")
-          if int(meta.content_length or 0) <= 0:
-              raise RuntimeError("quantmodel/meta.json is empty")
-          print("[preflight] stock model OSS reachable")
-          PY
-
-      - name: Preflight - 行情数据源连通性自检
-        id: preflight
-        run: |
-          python - <<'PY'
-          import urllib.request
-          H={'User-Agent':'Mozilla/5.0','Referer':'https://finance.sina.com.cn/'}
-          def ok(u):
-              try:
-                  return len(urllib.request.urlopen(urllib.request.Request(u,headers=H),timeout=20).read())>50
-              except Exception as e:
-                  print('  probe fail:', u.split('?')[0], repr(e)); return False
-          sina=ok('https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodeData?page=1&num=3&sort=amount&asc=0&node=hs_a')
-          tx=ok('https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=sh600000,day,,,60,qfq')
-          print(f'[preflight] sina={sina}(仅参考) tencent={tx}(硬性)')
-          open('preflight.txt','w').write('ok' if tx else 'skip')
-          PY
-          echo "reachable=$(cat preflight.txt)" >> "$GITHUB_OUTPUT"
-
-      - name: Run champion-challenger retrain
-        id: stock-training
-        if: steps.preflight.outputs.reachable == 'ok'
-        continue-on-error: true
-        run: python retrain_daily.py --pool 600 --bars 700 --horizon 5
-
-      - name: Skip notice (数据源不可达)
-        if: steps.preflight.outputs.reachable != 'ok'
-        run: echo "::warning::行情数据源(新浪/腾讯 CN)在本次 CI 出口 IP 下不可达,已跳过当日重训(线上保持冠军不变,非代码故障)。"
-
-      - name: Record auxiliary retrain failure
-        if: always() && steps.stock-training.outcome == 'failure'
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          import time
-
-          path = "retrain_history.jsonl"
-          has_record = False
-          if os.path.isfile(path):
-              with open(path, encoding="utf-8") as handle:
-                  has_record = any(line.strip() for line in handle)
-          if not has_record:
-              record = {
-                  "decision": "error",
-                  "stage": "github-actions",
-                  "reason": "auxiliary_stock_retrain_failed",
-                  "error": (
-                      "36因子日线辅助模型训练进程异常退出；"
-                      "决策模型主训练继续运行"
-                  ),
-                  "occurredAt": int(time.time()),
-              }
-              with open(path, "a", encoding="utf-8") as handle:
-                  handle.write(
-                      json.dumps(record, ensure_ascii=False) + "\n"
-                  )
-          print(
-              "::warning title=Auxiliary stock retrain failed::"
-              "36因子辅助模型本轮失败，已保留现役版本并写入审计；"
-              "决策模型主训练不受影响"
-          )
-          PY
-
-      - name: Publish retrain decision
-        if: always()
-        run: |
-          python - <<'PY'
-          import json
-          import os
-
-          history = "retrain_history.jsonl"
-          summary = os.environ["GITHUB_STEP_SUMMARY"]
-          if not os.path.exists(history):
-              lines = [
-                  "## 每日重训结果",
-                  "",
-                  "本次未生成训练审计记录。若 Preflight 显示数据源不可达，则本次为安全跳过。",
-              ]
-          else:
-              with open(history, encoding="utf-8") as fh:
-                  records = [json.loads(line) for line in fh if line.strip()]
-              rec = records[-1]
-              fields = [
-                  ("决策", rec.get("decision", "unknown")),
-                  ("原因", rec.get("reason", "-")),
-                  ("失败阶段", rec.get("stage", "-")),
-                  ("错误详情", rec.get("error", "-")),
-                  ("样本数", rec.get("n_samples", "-")),
-                  ("冠军 AUC", rec.get("champ_baseline_auc", "-")),
-                  ("挑战者 AUC", rec.get("chall_holdout_auc", "-")),
-                  ("增量适配样本", rec.get("adapt_n", "-")),
-                  ("独立盲测样本", rec.get("blind_n", "-")),
-                  ("晋级增益", "、".join((rec.get("metric_gate") or {}).get("improvements") or []) or "-"),
-                  ("OSS 已上传", rec.get("oss_uploaded", "-")),
-                  ("信号头决策", rec.get("signal_decision", "-")),
-              ]
-              lines = ["## 每日重训结果", "", "| 项目 | 结果 |", "|---|---|"]
-              lines.extend(f"| {name} | {value} |" for name, value in fields)
-              print(json.dumps(rec, ensure_ascii=False))
-          with open(summary, "a", encoding="utf-8") as fh:
-              fh.write("\n".join(lines) + "\n")
-          PY
-
-      - name: Upload stock retrain diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: stock-retrain-${{ github.run_id }}
-          path: |
-            qlib-service/retrain_history.jsonl
-            qlib-service/dataset_build_meta.json
-            qlib-service/production_accuracy.json
-          if-no-files-found: warn
-
-  opportunity-retrain:
-    needs:
-      - verify
-      - market-data-archive
-    if: >-
-      ${{
-        always()
-        && needs.verify.result == 'success'
-        && needs.market-data-archive.result == 'success'
-      }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 90
-    defaults:
-      run:
-        working-directory: qlib-service
-    env:
-      PYTHONUNBUFFERED: "1"
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_DEFAULT_TIMEOUT: "90"
-      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
-      OSS_ALLOW_PUBLIC_NETWORK: "true"
-      OSS_REGION: oss-cn-hangzhou
-      OPPORTUNITY_MODEL_PREFIX: opportunitymodel/
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Use Python 3.11
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: qlib-service/requirements-ci.txt
-
-      - name: Install locked training dependencies
-        run: |
-          python -m pip install --retries 5 -r requirements-ci.txt
-          python -m pip check
-
-      - name: Verify required OSS configuration
-        run: |
-          missing=0
-          for name in \
-            OSS_ACCESS_KEY_ID \
-            OSS_ACCESS_KEY_SECRET \
-            OSS_BUCKET
-          do
-            if [ -z "${!name}" ]; then
-              echo "::error title=Missing Actions secret::$name 未配置"
-              missing=1
-            fi
-          done
-          exit "$missing"
-
-      - name: Download current production decision model as champion
-        run: |
-          python download_decision_release.py \
-            --output opportunity-model/champion \
-            --prefix opportunitymodel/
-
-      - name: Download current production review model as champion
-        run: |
-          python download_review_release.py \
-            --output opportunity-model/review-champion \
-            --prefix opportunitymodel/review/
-
-      - name: Collect mature opportunity outcomes
-        run: |
-          python collect_opportunity_outcomes.py \
-            --export opportunity-outcomes.json \
-            --dataset opportunity-dataset.npz
-
-      - name: Compact mature outcomes into versioned training baseline
-        run: |
-          python publish_opportunity_history.py \
-            --input opportunity-outcomes.json
-
-      - name: Train and publish Alpha158 continuous feature snapshot
-        id: alpha158-training
-        continue-on-error: true
-        run: |
-          mkdir -p opportunity-model/alpha158
-          python alpha158_market_history.py \
-            --output opportunity-model/alpha158/daily.json.gz \
-            --minimum-days 120
-          python -m decision_engine.training.alpha158_mainboard \
-            --daily opportunity-model/alpha158/daily.json.gz \
-            --panel opportunity-model/alpha158/panel.npz \
-            --output opportunity-model/alpha158/walkforward.json \
-            --universe-size 1000 \
-            --top-n 1000 \
-            --threads 4 \
-            --rebuild
-          python alpha158_snapshot.py \
-            --walkforward opportunity-model/alpha158/walkforward.json \
-            --output opportunity-model/alpha158/snapshot.json \
-            --publish
-
-      - name: Run three-seed LightGBM and CatBoost walk-forward
-        run: |
-          mkdir -p opportunity-model/stability
-          for seed in 42 7 2026; do
-            python -m decision_engine.training.bakeoff \
-              --input opportunity-outcomes.json \
-              --output-dir "opportunity-model/seed-${seed}" \
-              --families lightgbm,catboost \
-              --folds 3 \
-              --estimators 180 \
-              --threads 4 \
-              --seed "$seed"
-          done
-          python -m decision_engine.training.stability \
-            opportunity-model/seed-42/report.json \
-            opportunity-model/seed-7/report.json \
-            opportunity-model/seed-2026/report.json \
-            --output-dir opportunity-model/stability
-          python -m decision_engine.training.ensemble_evaluation \
-            --input opportunity-outcomes.json \
-            --output-dir opportunity-model/seed-ensemble \
-            --seeds 42,7,2026 \
-            --folds 3 \
-            --estimators 180 \
-            --threads 4
-
-      - name: Evaluate trigger-review model families
-        run: |
-          for seed in 42 7 2026; do
-            python -m decision_engine.training.review_bakeoff \
-              --input opportunity-outcomes.json \
-              --output-dir "opportunity-model/review-seed-${seed}" \
-              --seed "$seed" \
-              --estimators 180 \
-              --threads 4 \
-              --feature-schema v4
-          done
-
-      - name: Train trigger-review action-value ensemble
-        run: |
-          python -m decision_engine.training.review_ensemble \
-            --input opportunity-outcomes.json \
-            --output-dir opportunity-model/review-release \
-            --seeds 42,7,2026 \
-            --estimators 180 \
-            --threads 4 \
-            --feature-schema v4
-
-      - name: Compare trigger-review challenger with production
-        id: review-selection
-        run: |
-          champion_schema=$(python - <<'PY'
-          import json
-          with open(
-              "opportunity-model/review-champion/review_meta.json",
-              encoding="utf-8",
-          ) as handle:
-              print(json.load(handle).get("featureSchemaVersion", ""))
-          PY
-          )
-          if [ "$champion_schema" = "opportunity-review-feature.v3" ]; then
-            python -m decision_engine.training.review_schema_migration \
-              --dataset opportunity-outcomes.json \
-              --champion opportunity-model/review-champion \
-              --challenger opportunity-model/review-release \
-              --decision-output opportunity-model/review-release-decision.json
-          else
-            python -m decision_engine.training.review_release \
-              --dataset opportunity-outcomes.json \
-              --champion opportunity-model/review-champion \
-              --challenger opportunity-model/review-release \
-              --decision-output opportunity-model/review-release-decision.json
-          fi
-          publish=$(python - <<'PY'
-          import json
-          with open(
-              "opportunity-model/review-release-decision.json",
-              encoding="utf-8",
-          ) as handle:
-              decision = json.load(handle)
-          print(
-              "true"
-              if decision.get("action") == "PUBLISH"
-              and decision.get("eligible") is True
-              else "false"
-          )
-          PY
-          )
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
-
-      - name: Record trigger-review final confirmation once
-        run: |
-          python upload_review_model.py \
-            --directory opportunity-model/review-release \
-            --prefix opportunitymodel/review/ \
-            --record-only
-
-      - name: Publish trigger-review ensemble atomically
-        id: review-production
-        if: steps.review-selection.outputs.publish == 'true'
-        run: |
-          python upload_review_model.py \
-            --directory opportunity-model/review-release \
-            --prefix opportunitymodel/review/ \
-            --release-decision opportunity-model/review-release-decision.json
-          echo "published=true" >> "$GITHUB_OUTPUT"
-
-      - name: Train and evaluate opportunity challenger
-        run: |
-          python -m decision_engine.training.ensemble \
-            --dataset opportunity-dataset.npz \
-            --output opportunity-model \
-            --seeds 42,7,2026 \
-            --poc-report opportunity-model/seed-ensemble/report.json
-
-      - name: Select improved decision heads and validate the whole model
-        id: opportunity-selection
-        run: |
-          python -m decision_engine.training.release \
-            --dataset opportunity-dataset.npz \
-            --champion opportunity-model/champion \
-            --challenger opportunity-model/shadow \
-            --output opportunity-model/release \
-            --decision-output opportunity-model/release_decision.json
-          publish=$(python - <<'PY'
-          import json
-          with open(
-              "opportunity-model/release_decision.json",
-              encoding="utf-8",
-          ) as handle:
-              decision = json.load(handle)
-          print(
-              "true"
-              if decision.get("action") == "PUBLISH"
-              and decision.get("eligible") is True
-              else "false"
-          )
-          PY
-          )
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
-
-      - name: Publish selected decision release atomically
-        id: opportunity-production
-        if: steps.opportunity-selection.outputs.publish == 'true'
-        run: |
-          python upload_decision_model.py \
-            --directory opportunity-model/release \
-            --prefix opportunitymodel/ \
-            --activate-baseline \
-            --release-decision opportunity-model/release_decision.json
-          echo "published=true" >> "$GITHUB_OUTPUT"
-
-      - name: Publish decision-model readiness to the workbench
-        if: always()
-        run: |
-          if [ -f opportunity-model/opportunity_training_report.json ]; then
-            python publish_opportunity_training_status.py \
-              --report opportunity-model/opportunity_training_report.json \
-              --promotion opportunity-model/release_decision.json \
-              --prefix opportunitymodel/
-          else
-            echo "::warning::Opportunity training report is missing; status was not updated."
-          fi
-
-      - name: Publish decision-model result to in-app quant report
-        if: always()
-        continue-on-error: true
-        env:
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SHA: ${{ github.sha }}
-          RETRAIN_JOB_STATUS: ${{ job.status }}
-          RETRAIN_PUBLISHED: ${{ steps.opportunity-production.outputs.published }}
-        run: |
-          python publish_model_retrain_report.py \
-            --model opportunity \
-            --report opportunity-model/opportunity_training_report.json \
-            --promotion opportunity-model/release_decision.json
-
-      - name: Upload opportunity diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: opportunity-retrain-${{ github.run_id }}
-          path: |
-            qlib-service/opportunity-model/opportunity_training_report.json
-            qlib-service/opportunity-model/opportunity_trials.jsonl
-            qlib-service/opportunity-model/release_decision.json
-            qlib-service/opportunity-model/stability/
-            qlib-service/opportunity-model/seed-42/report.json
-            qlib-service/opportunity-model/seed-7/report.json
-            qlib-service/opportunity-model/seed-2026/report.json
-            qlib-service/opportunity-model/review-seed-42/report.json
-            qlib-service/opportunity-model/review-seed-7/report.json
-            qlib-service/opportunity-model/review-seed-2026/report.json
-            qlib-service/opportunity-model/review-release/
-            qlib-service/opportunity-model/review-release-decision.json
-            qlib-service/opportunity-model/alpha158/walkforward.json
-            qlib-service/opportunity-model/alpha158/snapshot.json
-            qlib-service/opportunity-outcomes.json
-          if-no-files-found: warn
-
-  market-data-archive:
-    needs: verify
+  train:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    defaults:
-      run:
-        working-directory: qlib-service
     env:
-      PYTHONUNBUFFERED: "1"
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PIP_DEFAULT_TIMEOUT: "90"
-      QUANT_KEY: ${{ secrets.QUANT_KEY }}
+      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
-      OSS_ALLOW_PUBLIC_NETWORK: "true"
-      OSS_REGION: oss-cn-hangzhou
     steps:
       - uses: actions/checkout@v6
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Verify immutable learning contracts
+        run: |
+          node --test \
+            test/learning-store.test.js \
+            test/learning-capture.test.js \
+            test/learning-settlement.test.js \
+            test/learning-training-view.test.js
 
       - name: Use Python 3.11
         uses: actions/setup-python@v6
@@ -615,79 +51,43 @@ jobs:
           cache: pip
           cache-dependency-path: qlib-service/requirements-ci.txt
 
-      - name: Install locked archive dependencies
+      - name: Install locked training dependencies
+        working-directory: qlib-service
         run: |
           python -m pip install --retries 5 -r requirements-ci.txt
           python -m pip check
 
-      - name: Verify archive storage configuration
+      - name: Verify challenger training gates
+        working-directory: qlib-service
+        run: python -m unittest test_learning_pipeline.py
+
+      - name: Download latest redacted training view
+        working-directory: qlib-service
         run: |
-          missing=0
-          for name in \
-            QUANT_KEY \
-            OSS_ACCESS_KEY_ID \
-            OSS_ACCESS_KEY_SECRET \
-            OSS_BUCKET
-          do
-            if [ -z "${!name}" ]; then
-              echo "::error title=Missing Actions secret::$name 未配置"
-              missing=1
-            fi
-          done
-          exit "$missing"
+          mkdir -p ../learning-artifacts
+          python learning_pipeline.py download \
+            --output ../learning-artifacts/training-view.json
 
-      - name: Archive latest completed market day from public sources
-        id: public-archive
+      - name: Train and gate challengers
+        working-directory: qlib-service
         run: |
-          curl --fail --silent --show-error \
-            --retry 2 --retry-all-errors --max-time 590 \
-            -X POST \
-            -H "Content-Type: application/json" \
-            -H "X-API-Key: $QUANT_KEY" \
-            -d '{"universeSize":1000,"workers":12}' \
-            https://quant-score-nlxgclpdbu.cn-hangzhou.fcapp.run/archive-market-day \
-            > market-archive-report.json
+          python learning_pipeline.py train \
+            --view ../learning-artifacts/training-view.json \
+            --output ../learning-artifacts/run
+          cat ../learning-artifacts/run/report.json
 
-      - name: Validate archive status and OSS artifact
+      - name: Upload immutable challenger run
+        working-directory: qlib-service
         run: |
-          python validate_market_archive_report.py \
-            --report market-archive-report.json \
-            --event "${{ github.event_name }}" \
-            --output market-archive-validation.json
+          python learning_pipeline.py upload \
+            --directory ../learning-artifacts/run
 
-      - name: Refresh online five-day fund history
-        continue-on-error: true
-        run: python publish_recent_fund_history.py
-
-      - name: Publish archive summary
-        if: always()
-        run: |
-          if [ -f market-archive-report.json ]; then
-            {
-              echo "## 决策模型市场数据归档"
-              echo
-              echo '```json'
-              cat market-archive-report.json
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-          if [ -f market-archive-validation.json ]; then
-            {
-              echo
-              echo "### OSS 完整性校验"
-              echo
-              echo '```json'
-              cat market-archive-validation.json
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Upload archive diagnostics
+      - name: Upload diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: market-data-archive-${{ github.run_id }}
+          name: learning-challenger-${{ github.run_id }}
           path: |
-            qlib-service/market-archive-report.json
-            qlib-service/market-archive-validation.json
+            learning-artifacts/run/report.json
           if-no-files-found: warn
+          retention-days: 30

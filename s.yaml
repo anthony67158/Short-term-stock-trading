@@ -154,6 +154,13 @@ resources:
             cronExpression: "CRON_TZ=Asia/Shanghai 0 10 17 * * 1-5"
             enable: true
             payload: ${env('CRON_KEY')}
+        # 每日学习闭环：压实T+5选股结果与真实人工成交归因，发布脱敏训练视图。
+        - triggerName: learning-settlement-timer
+          triggerType: timer
+          triggerConfig:
+            cronExpression: "CRON_TZ=Asia/Shanghai 0 20 17 * * 1-5"
+            enable: true
+            payload: ${env('CRON_KEY')}
         # 预催化发现：交易时段低频读取新增公告，收盘后补齐当日披露。
         - triggerName: pre-catalyst-scan-timer
           triggerType: timer

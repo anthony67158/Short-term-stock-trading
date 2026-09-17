@@ -527,6 +527,13 @@ export function compileDecisionPlan({
     advice,
     payload,
   )
+  const selectedEntryPrice = positive(
+    payload.decisionPricePlan?.entryPlan?.price,
+  )
+  if (riskIncreasing && selectedEntryPrice != null) {
+    referencePrice = selectedEntryPrice
+    requestedReferencePrice = selectedEntryPrice
+  }
   const stopPrice = positive(advice.stopPrice)
   const targetPrice = positive(advice.targetPrice)
   const requestedLots = requestedLotsFor(governedAction, advice)
@@ -561,16 +568,19 @@ export function compileDecisionPlan({
     priceContract,
   })
   if (conditionalEntry) {
+    const trustedEntryPrice = deterministicPolicy
+      ? selectedEntryPrice
+      : null
     const preferredKey = tactical.timing?.state === 'WAIT_BREAKOUT'
       ? 'watch_breakout'
       : 'watch_pullback'
     const observation = observationLevels.find((item) => item.key === preferredKey)
       || observationLevels[0]
-    referencePrice = positive(observation?.price)
+    referencePrice = trustedEntryPrice
+      ?? positive(observation?.price)
       ?? positive(priceContract.levels.find((item) =>
         ['entry', 'add'].includes(item.key) && item.strict === true,
       )?.price)
-      ?? (deterministicPolicy ? positive(payload.decisionPricePlan?.entryPlan?.price) : null)
     requestedReferencePrice = referencePrice
   }
   const blockedReasons = []

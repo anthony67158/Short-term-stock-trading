@@ -21,6 +21,7 @@ import {
   dailyReportTimerBody,
   dailyReportWorkerBody,
   formulaSelectionTimerBody,
+  learningTimerBody,
   opportunityRadarTimerBody,
   portfolioAnalysisTimerBody,
   portfolioAnalysisWorkerBody,
@@ -349,6 +350,10 @@ async function handleRequest(req, res) {
       event,
       process.env.CRON_KEY,
     );
+    const learningBody = learningTimerBody(
+      event,
+      process.env.CRON_KEY,
+    );
     const preCatalystBody = preCatalystTimerBody(
       event,
       process.env.CRON_KEY,
@@ -375,6 +380,7 @@ async function handleRequest(req, res) {
       !adviceBody
       && !dailyReportBody
       && !opportunityRadarBody
+      && !learningBody
       && !preCatalystBody
       && !alertBody
       && !reviewBody
@@ -387,6 +393,7 @@ async function handleRequest(req, res) {
     req.body = adviceBody
       || dailyReportBody
       || opportunityRadarBody
+      || learningBody
       || preCatalystBody
       || alertBody
       || reviewBody
@@ -405,6 +412,8 @@ async function handleRequest(req, res) {
           ? 'cron_daily_report'
           : opportunityRadarBody
             ? 'cron_opportunity_radar'
+            : learningBody
+              ? 'cron_learning'
             : preCatalystBody
               ? 'pre_catalyst'
               : alertBody

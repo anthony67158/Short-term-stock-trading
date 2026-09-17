@@ -32,14 +32,13 @@ test('Transformer V2与V2.1运行时入口已完全下线', () => {
   assert.doesNotMatch(runtimePackage, /@alicloud\/eas20210701/)
 })
 
-test('每日训练继续保留决策模型三种子集成与直接发布', () => {
+test('每日训练保留三种子门禁且不再直接发布生产模型', () => {
   const workflow = read('.github/workflows/daily-retrain.yml')
-  assert.match(workflow, /decision_engine\.training\.ensemble/)
-  assert.match(
-    workflow,
-    /decision_engine\.training\.ensemble_evaluation/,
-  )
-  assert.match(workflow, /--activate-baseline/)
+  const trainer = read('qlib-service/learning_pipeline.py')
+  assert.match(trainer, /SEEDS = \(17, 41, 97\)/)
+  assert.match(workflow, /learning_pipeline\.py train/)
+  assert.doesNotMatch(workflow, /--activate-baseline/)
+  assert.doesNotMatch(workflow, /promote_decision_model/)
   assert.doesNotMatch(
     workflow,
     /train_intraday|intraday_v21|predict-v2/,
