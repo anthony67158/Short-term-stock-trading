@@ -372,6 +372,21 @@ def download_latest(
     return output
 
 
+def _put_immutable(bucket, key: str, payload: bytes) -> None:
+    try:
+        bucket.put_object(key, payload, headers={
+            "x-oss-forbid-overwrite": "true",
+        })
+    except Exception as error:
+        if int(getattr(error, "status", 0) or 0) != 409:
+            raise
+        existing = bucket.get_object(key).read()
+        if existing != payload:
+            raise RuntimeError(
+                f"immutable training artifact conflict: {key}"
+            ) from error
+
+
 def upload_run(directory: Path) -> str:
     bucket = _bucket()
     report = json.loads((directory / "report.json").read_text(encoding="utf-8"))
@@ -381,9 +396,7 @@ def upload_run(directory: Path) -> str:
     prefix = f"learning/v1/training-runs/{report['generatedAt'][:10]}/{run_hash}/"
     for path in sorted(directory.iterdir()):
         if path.is_file():
-            bucket.put_object(prefix + path.name, path.read_bytes(), headers={
-                "x-oss-forbid-overwrite": "true",
-            })
+            _put_immutable(bucket, prefix + path.name, path.read_bytes())
     return prefix
 
 

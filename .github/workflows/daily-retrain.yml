@@ -19,6 +19,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   train:
@@ -71,14 +72,30 @@ jobs:
       - name: Download latest redacted training view
         working-directory: qlib-service
         run: |
+          retry() {
+            local attempt=1
+            until "$@"; do
+              if [ "$attempt" -ge 3 ]; then return 1; fi
+              sleep $((attempt * 15))
+              attempt=$((attempt + 1))
+            done
+          }
           mkdir -p ../learning-artifacts
-          python learning_pipeline.py download \
+          retry python learning_pipeline.py download \
             --output ../learning-artifacts/training-view.json
 
       - name: Train and gate challengers
         working-directory: qlib-service
         run: |
-          python learning_pipeline.py train \
+          retry() {
+            local attempt=1
+            until "$@"; do
+              if [ "$attempt" -ge 3 ]; then return 1; fi
+              sleep $((attempt * 15))
+              attempt=$((attempt + 1))
+            done
+          }
+          retry python learning_pipeline.py train \
             --view ../learning-artifacts/training-view.json \
             --output ../learning-artifacts/run
           cat ../learning-artifacts/run/report.json
@@ -86,7 +103,15 @@ jobs:
       - name: Upload immutable challenger run
         working-directory: qlib-service
         run: |
-          python learning_pipeline.py upload \
+          retry() {
+            local attempt=1
+            until "$@"; do
+              if [ "$attempt" -ge 3 ]; then return 1; fi
+              sleep $((attempt * 15))
+              attempt=$((attempt + 1))
+            done
+          }
+          retry python learning_pipeline.py upload \
             --directory ../learning-artifacts/run
 
       - name: Upload diagnostics
@@ -98,3 +123,22 @@ jobs:
             learning-artifacts/run/report.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Report daily learning failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          day="$(TZ=Asia/Shanghai date +%F)"
+          title="[daily-learning] ${day} failed"
+          body="Daily learning failed after retries. Run: ${RUN_URL}. Event: ${{ github.event_name }}. Commit: ${{ github.sha }}."
+          existing="$(gh issue list --state open --limit 100 \
+            --json number,title \
+            --jq ".[] | select(.title == \"${title}\") | .number" \
+            | head -n 1)"
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from learning_pipeline import (
+    _put_immutable,
     expected_settlement_date,
     train,
     validate_training_view,
@@ -13,6 +14,31 @@ from learning_pipeline import (
 
 
 class LearningPipelineTest(unittest.TestCase):
+    def test_immutable_upload_retry_accepts_only_identical_content(self):
+        class Conflict(Exception):
+            status = 409
+
+        class Stored:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def read(self):
+                return self.payload
+
+        class Bucket:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def put_object(self, *_args, **_kwargs):
+                raise Conflict()
+
+            def get_object(self, _key):
+                return Stored(self.payload)
+
+        _put_immutable(Bucket(b"same"), "run/report.json", b"same")
+        with self.assertRaisesRegex(RuntimeError, "immutable.*conflict"):
+            _put_immutable(Bucket(b"different"), "run/report.json", b"same")
+
     def test_expected_settlement_date_skips_weekend(self):
         self.assertEqual(
             expected_settlement_date(

@@ -22,10 +22,14 @@ test('所有Python Actions共享精确版本依赖并包含TestClient运行时',
 
 test('每日学习只消费脱敏视图并训练三种子challenger', () => {
   assert.match(retrain, /^\s{2}train:/m)
+  assert.match(retrain, /issues:\s*write/)
   assert.doesNotMatch(retrain, /TUSHARE_TOKEN:/)
   assert.match(retrain, /learning_pipeline\.py download/)
   assert.match(retrain, /learning_pipeline\.py train/)
   assert.match(retrain, /learning_pipeline\.py upload/)
+  assert.match(retrain, /Report daily learning failure/)
+  assert.match(retrain, /gh issue (create|comment)/)
+  assert.match(retrain, /if \[ "\$attempt" -ge 3 \]/)
   assert.match(retrain, /Verify immutable learning contracts/)
   assert.doesNotMatch(retrain, /accounts\//)
   assert.doesNotMatch(retrain, /promote|activate-baseline|production pointer/i)
