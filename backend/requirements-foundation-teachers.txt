@@ -1,0 +1,5 @@
+# Isolated Python 3.11/3.12 runtime for free-GPU teacher screening.
+granite-tsfm==0.2.28
+timesfm[torch]==2.0.2
+chronos-forecasting==2.3.2
+pyarrow==21.0.0
