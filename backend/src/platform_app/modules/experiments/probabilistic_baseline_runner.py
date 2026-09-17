@@ -784,10 +784,25 @@ def _require_development_freeze(output_root: Path, protocol_path: Path) -> None:
         or frozen.get("protocolSha256") != _file_sha256(protocol_path)
         or frozen.get("completedDevelopmentFolds") != [1, 2, 3, 4]
         or frozen.get("families") != list(MODEL_FAMILIES)
+        or frozen.get("rawBaselineCalibration") != "NONE"
+        or frozen.get("task7SelectionRestriction")
+        != "DEVELOPMENT_FOLDS_ONLY"
     ):
         raise ProbabilisticBaselineError(
             "PROBABILISTIC_BASELINE_CONFIRMATION_LOCKED",
         )
+    for name, key in (
+        ("development-oof-audit.json", "oofAuditSha256"),
+        ("development-summary.json", "developmentSummarySha256"),
+    ):
+        path = output_root / name
+        if (
+            not path.is_file()
+            or _file_sha256(path) != frozen.get(key)
+        ):
+            raise ProbabilisticBaselineError(
+                "PROBABILISTIC_BASELINE_CONFIRMATION_LOCKED",
+            )
     for key, expected_hash in frozen.get("receiptSha256", {}).items():
         fold, family = key.split(":", 1)
         receipt_path = output_root / f"fold-{fold}" / family / "receipt.json"
@@ -1001,6 +1016,167 @@ def run_baseline_fold(
     )[family]
 
 
+def _audit_development_oof(output_root: Path) -> dict:
+    fold_ranges = []
+    family_rows = {family: 0 for family in MODEL_FAMILIES}
+    for fold in range(1, 5):
+        reference_path = (
+            output_root
+            / f"fold-{fold}"
+            / HISTORICAL_FAMILY
+            / "test.npz"
+        )
+        with np.load(reference_path, allow_pickle=False) as saved:
+            reference = {
+                name: saved[name].copy()
+                for name in (
+                    "dates",
+                    "instruments",
+                    "actualReturn",
+                    "actualDirection",
+                    "sampleWeight",
+                )
+            }
+        dates = reference["dates"]
+        instruments = reference["instruments"]
+        if (
+            len(dates) == 0
+            or not np.all(dates[:-1] <= dates[1:])
+            or not np.all(np.isfinite(reference["actualReturn"]))
+            or not np.all(np.isfinite(reference["sampleWeight"]))
+            or np.any(reference["sampleWeight"] <= 0)
+        ):
+            raise ProbabilisticBaselineError(
+                "PROBABILISTIC_BASELINE_OOF_INVALID",
+            )
+        unique_dates, starts, counts = np.unique(
+            dates,
+            return_index=True,
+            return_counts=True,
+        )
+        for start, count in zip(starts, counts, strict=True):
+            values = instruments[start : start + count]
+            if len(np.unique(values)) != count:
+                raise ProbabilisticBaselineError(
+                    "PROBABILISTIC_BASELINE_OOF_DUPLICATE",
+                )
+        current_range = (int(unique_dates[0]), int(unique_dates[-1]))
+        if fold_ranges and current_range[0] <= fold_ranges[-1][1]:
+            raise ProbabilisticBaselineError(
+                "PROBABILISTIC_BASELINE_OOF_OVERLAP",
+            )
+        fold_ranges.append(current_range)
+
+        for family in MODEL_FAMILIES:
+            root = output_root / f"fold-{fold}" / family
+            receipt = _receipt_is_valid(root)
+            if receipt is None:
+                raise ProbabilisticBaselineError(
+                    "PROBABILISTIC_BASELINE_DEVELOPMENT_INCOMPLETE",
+                )
+            with np.load(root / "test.npz", allow_pickle=False) as saved:
+                if any(
+                    not np.array_equal(saved[name], expected)
+                    for name, expected in reference.items()
+                ):
+                    raise ProbabilisticBaselineError(
+                        "PROBABILISTIC_BASELINE_OOF_ALIGNMENT_INVALID",
+                    )
+                quantiles = np.column_stack(
+                    [
+                        saved[f"q{round(alpha * 100):02d}"]
+                        for alpha in DEFAULT_QUANTILES
+                    ]
+                )
+                if (
+                    not np.all(np.isfinite(saved["pWin"]))
+                    or np.any(saved["pWin"] < 0)
+                    or np.any(saved["pWin"] > 1)
+                    or not np.all(np.isfinite(quantiles))
+                    or np.any(np.diff(quantiles, axis=1) < 0)
+                ):
+                    raise ProbabilisticBaselineError(
+                        "PROBABILISTIC_BASELINE_OOF_PREDICTION_INVALID",
+                    )
+            family_rows[family] += len(dates)
+    return {
+        "schemaVersion": "foundation-probabilistic-baseline-oof-audit.v1",
+        "folds": [
+            {"fold": fold, "testStart": start, "testEnd": end}
+            for fold, (start, end) in enumerate(fold_ranges, 1)
+        ],
+        "rowsByFamily": family_rows,
+        "uniqueKey": ["decisionDate", "instrumentId"],
+        "duplicateRows": 0,
+        "overlappingFoldRows": 0,
+        "crossFamilyAlignment": "EXACT",
+        "releaseStatus": "UNAVAILABLE",
+    }
+
+
+def _development_metrics(output_root: Path) -> dict:
+    summary = {}
+    sample_metrics = (
+        "brier",
+        "logLoss",
+        "meanPinball",
+        "weightedIntervalScore",
+        "interval80Coverage",
+        "interval80MeanWidth",
+    )
+    ranking_metrics = (
+        "meanDailyRankIc",
+        "medianDailyRankIc",
+        "top10MeanNetReturn",
+        "marketMeanNetReturn",
+        "top10NetReturnIncrement",
+    )
+    for family in MODEL_FAMILIES:
+        folds = []
+        for fold in range(1, 5):
+            path = output_root / f"fold-{fold}" / family / "evaluation.json"
+            try:
+                evaluation = json.loads(path.read_text())
+                test = evaluation["partitions"]["test"]
+            except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+                raise ProbabilisticBaselineError(
+                    "PROBABILISTIC_BASELINE_EVALUATION_INVALID",
+                ) from exc
+            folds.append({"fold": fold, **test})
+        samples = np.asarray([item["samples"] for item in folds], dtype=np.float64)
+        dates = np.asarray([item["dates"] for item in folds], dtype=np.float64)
+        summary[family] = {
+            "testRows": int(samples.sum()),
+            "testDates": int(dates.sum()),
+            "sampleWeighted": {
+                name: float(
+                    np.average(
+                        [item[name] for item in folds],
+                        weights=samples,
+                    )
+                )
+                for name in sample_metrics
+            },
+            "dateWeightedRanking": {
+                name: float(
+                    np.average(
+                        [item["ranking"][name] for item in folds],
+                        weights=dates,
+                    )
+                )
+                for name in ranking_metrics
+            },
+            "folds": folds,
+        }
+    return {
+        "schemaVersion": "foundation-probabilistic-baseline-development-summary.v1",
+        "folds": [1, 2, 3, 4],
+        "selectionUse": "NONE_METRICS_REPORTED_WITHOUT_HYPERPARAMETER_TUNING",
+        "families": summary,
+        "releaseStatus": "UNAVAILABLE",
+    }
+
+
 def freeze_development_configuration(output_root: Path) -> dict:
     protocol_path = output_root / "protocol.json"
     try:
@@ -1026,6 +1202,8 @@ def freeze_development_configuration(output_root: Path) -> dict:
                 or receipt.get("fold") != fold
                 or receipt.get("family") != family
                 or receipt.get("usage") != "FULL_OOF"
+                or receipt.get("protocolSha256")
+                != _file_sha256(protocol_path)
             ):
                 raise ProbabilisticBaselineError(
                     "PROBABILISTIC_BASELINE_DEVELOPMENT_INCOMPLETE",
@@ -1033,14 +1211,31 @@ def freeze_development_configuration(output_root: Path) -> dict:
             receipts[f"{fold}:{family}"] = _file_sha256(
                 root / "receipt.json",
             )
+    audit = _audit_development_oof(output_root)
+    audit_path = output_root / "development-oof-audit.json"
+    _write_json(audit_path, audit, immutable=True)
+    summary = _development_metrics(output_root)
+    summary_path = output_root / "development-summary.json"
+    _write_json(summary_path, summary, immutable=True)
     payload = {
         "schemaVersion": "foundation-probabilistic-baseline-development-freeze.v1",
         "protocolSha256": _file_sha256(protocol_path),
         "completedDevelopmentFolds": [1, 2, 3, 4],
         "families": list(MODEL_FAMILIES),
         "receiptSha256": receipts,
+        "oofAuditSha256": _file_sha256(audit_path),
+        "developmentSummarySha256": _file_sha256(summary_path),
         "hyperparametersFrozen": True,
-        "calibrationMethodFrozen": True,
+        "rawBaselineCalibration": "NONE",
+        "task7CalibrationMethodSetFrozen": [
+            "BETA",
+            "SIGMOID",
+            "ISOTONIC",
+            "SPLIT_CQR",
+            "ROLLING_CQR",
+            "ACI",
+        ],
+        "task7SelectionRestriction": "DEVELOPMENT_FOLDS_ONLY",
         "confirmationFold": 5,
         "releaseStatus": "UNAVAILABLE",
     }
