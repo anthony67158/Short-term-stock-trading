@@ -58,8 +58,34 @@ test('选股样本必须观察满五个后续交易日才成熟', () => {
     ],
   })
   assert.equal(result.maturity, 'MATURED')
-  assert.equal(result.returnPct, 7)
+  assert.equal(result.feeAdjusted, true)
+  assert.equal(result.feePolicyId, 'A_SHARE_STANDARD_V1')
+  assert.equal(result.quantity, 100)
+  assert.equal(result.grossReturnPct, 7)
+  assert.equal(result.totalFees, 10.56)
+  assert.equal(result.returnPct, 5.9144)
+  assert.equal(result.mfePct, 6.9094)
+  assert.equal(result.maePct, -2.0408)
   assert.equal(result.positive2PctHit, true)
+})
+
+test('选股方向命中使用双边费用后的净收益', () => {
+  const result = settleStockPickCandidate({
+    prediction: { tradeDate: '2026-09-10' },
+    candidate: { price: 10 },
+    bars: [
+      { date: '2026-09-11', high: 10.08, low: 9.98, close: 10.02 },
+      { date: '2026-09-14', high: 10.08, low: 9.98, close: 10.03 },
+      { date: '2026-09-15', high: 10.08, low: 9.98, close: 10.04 },
+      { date: '2026-09-16', high: 10.08, low: 9.98, close: 10.05 },
+      { date: '2026-09-17', high: 10.08, low: 9.98, close: 10.06 },
+    ],
+  })
+
+  assert.equal(result.grossReturnPct, 0.6)
+  assert.ok(result.returnPct < 0)
+  assert.equal(result.directionHit, false)
+  assert.equal(result.positive2PctHit, false)
 })
 
 test('账户学习只采集人工执行和已完成实际归因', async () => {

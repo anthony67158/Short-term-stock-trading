@@ -1,3 +1,8 @@
+import {
+  A_SHARE_STANDARD_FEE_POLICY,
+  tradeFees,
+} from './ashareStrategyExecution.js'
+
 function finite(value) {
   const number = Number(value)
   return Number.isFinite(number) ? number : null
@@ -11,14 +16,35 @@ function price(row, key) {
   return finite(row?.[key])
 }
 
+function feeAdjustedReturnPct({
+  entryPrice,
+  exitPrice,
+  quantity,
+  feePolicy,
+}) {
+  const entryGross = entryPrice * quantity
+  const exitGross = exitPrice * quantity
+  const entryFees = tradeFees('BUY', entryGross, feePolicy)
+  const exitFees = tradeFees('SELL', exitGross, feePolicy)
+  const entryCash = entryGross + entryFees.total
+  const exitCash = exitGross - exitFees.total
+  return {
+    returnPct: (exitCash / entryCash - 1) * 100,
+    totalFees: entryFees.total + exitFees.total,
+  }
+}
+
 export function settleStockPickCandidate({
   prediction,
   candidate,
   bars = [],
   evaluatedAt = Date.now(),
+  quantity = 100,
+  feePolicy = A_SHARE_STANDARD_FEE_POLICY,
 } = {}) {
   const tradeDate = day(prediction?.tradeDate)
   const referencePrice = finite(candidate?.price)
+  const assumedQuantity = finite(quantity)
   const future = (Array.isArray(bars) ? bars : [])
     .filter((bar) => day(bar?.date ?? bar?.tradeDate) > tradeDate)
     .sort((left, right) =>
@@ -26,12 +52,18 @@ export function settleStockPickCandidate({
         .localeCompare(day(right?.date ?? right?.tradeDate))
     )
     .slice(0, 5)
-  if (!(referencePrice > 0) || future.length < 5) {
+  if (
+    !(referencePrice > 0)
+    || !(Number.isInteger(assumedQuantity) && assumedQuantity > 0)
+    || future.length < 5
+  ) {
     return {
       maturity: 'PENDING',
       reasonCode: !(referencePrice > 0)
         ? 'REFERENCE_PRICE_MISSING'
-        : 'T5_NOT_MATURED',
+        : !(Number.isInteger(assumedQuantity) && assumedQuantity > 0)
+          ? 'ASSUMED_QUANTITY_INVALID'
+          : 'T5_NOT_MATURED',
       observedTradingDays: future.length,
       evaluatedAt,
     }
@@ -54,9 +86,25 @@ export function settleStockPickCandidate({
     }
   }
   const close = closes.at(-1)
-  const returnPct = (close / referencePrice - 1) * 100
-  const mfePct = (Math.max(...highs) / referencePrice - 1) * 100
-  const maePct = (Math.min(...lows) / referencePrice - 1) * 100
+  const grossReturnPct = (close / referencePrice - 1) * 100
+  const settled = feeAdjustedReturnPct({
+    entryPrice: referencePrice,
+    exitPrice: close,
+    quantity: assumedQuantity,
+    feePolicy,
+  })
+  const favorable = feeAdjustedReturnPct({
+    entryPrice: referencePrice,
+    exitPrice: Math.max(...highs),
+    quantity: assumedQuantity,
+    feePolicy,
+  })
+  const adverse = feeAdjustedReturnPct({
+    entryPrice: referencePrice,
+    exitPrice: Math.min(...lows),
+    quantity: assumedQuantity,
+    feePolicy,
+  })
   return {
     maturity: 'MATURED',
     horizonTradingDays: 5,
@@ -65,11 +113,16 @@ export function settleStockPickCandidate({
     ),
     referencePrice,
     closePrice: close,
-    returnPct: +returnPct.toFixed(4),
-    mfePct: +mfePct.toFixed(4),
-    maePct: +maePct.toFixed(4),
-    directionHit: returnPct > 0,
-    positive2PctHit: mfePct >= 2,
+    quantity: assumedQuantity,
+    feePolicyId: String(feePolicy?.policyId || ''),
+    feeAdjusted: true,
+    totalFees: +settled.totalFees.toFixed(2),
+    grossReturnPct: +grossReturnPct.toFixed(4),
+    returnPct: +settled.returnPct.toFixed(4),
+    mfePct: +favorable.returnPct.toFixed(4),
+    maePct: +adverse.returnPct.toFixed(4),
+    directionHit: settled.returnPct > 0,
+    positive2PctHit: favorable.returnPct >= 2,
     evaluatedAt,
   }
 }
