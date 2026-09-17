@@ -8,6 +8,9 @@ import {
 import {
   learningStore,
 } from './_learning_store.js'
+import {
+  positionOutcomeFromAttribution,
+} from '../shared/learningSettlement.js'
 
 function finite(value) {
   const number = Number(value)
@@ -171,4 +174,70 @@ export async function capturePositionPrediction({
       agentModel: text(guidance.agentModel, 120),
     },
   }))
+}
+
+export async function captureAccountLearningEvents(account, {
+  store = learningStore,
+  now = Date.now(),
+} = {}) {
+  const accountScope = account?.nick || ''
+  if (!accountScope) return { executions: 0, outcomes: 0 }
+  const data = account?.data || {}
+  let executions = 0
+  let outcomes = 0
+  for (const execution of (data.decisionLog || [])) {
+    if (
+      execution?.kind !== 'execution'
+      || execution?.source === 'simulation'
+      || !execution?.id
+      || !/^\d{6}$/.test(String(execution.code || ''))
+    ) continue
+    const occurredAt = Number(execution.at) || Number(now)
+    await store.saveEvent(buildLearningEvent({
+      kind: LEARNING_EVENT_KIND.EXECUTION,
+      sourceId: String(execution.id),
+      tradeDate: eventDate('', occurredAt),
+      accountScope,
+      occurredAt,
+      payload: {
+        code: String(execution.code),
+        side: text(execution.side, 10),
+        price: finite(execution.price),
+        lots: finite(execution.qty ?? execution.lots),
+        tradeIntent: text(execution.tradeIntent, 30),
+        manuallyRecorded: execution.source === 'manual',
+        linkedRecommendationId: text(
+          execution.linkedRecommendationId,
+          180,
+        ),
+        transactionId: text(execution.transactionId, 180),
+      },
+    }))
+    executions += 1
+  }
+  for (const attribution of (data.executionAttributions || [])) {
+    const outcome = positionOutcomeFromAttribution(attribution)
+    if (!outcome) continue
+    const occurredAt = Number(attribution.updatedAt) || Number(now)
+    await store.saveEvent(buildLearningEvent({
+      kind: LEARNING_EVENT_KIND.OUTCOME,
+      eventId: `position-outcome:${outcome.planId}`,
+      sourceId: outcome.planId,
+      tradeDate: eventDate('', occurredAt),
+      accountScope,
+      occurredAt,
+      payload: {
+        outcomeType: 'POSITION_ACTUAL',
+        ...outcome,
+      },
+      lineage: {
+        decisionId: outcome.decisionId,
+        transactionIds: (attribution.transactionIds || [])
+          .map((value) => text(value, 180))
+          .filter(Boolean),
+      },
+    }))
+    outcomes += 1
+  }
+  return { executions, outcomes }
 }
