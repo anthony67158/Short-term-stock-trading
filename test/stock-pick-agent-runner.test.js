@@ -6,6 +6,7 @@ import {
   generateStockPickAgentSelection,
 } from '../api/_stock_pick_agent.js'
 import {
+  handleNextDaySelection,
   handleNextDayRecalculation,
   handleStockPickAgent,
 } from '../api/stock_pick.js'
@@ -282,6 +283,23 @@ test('handler agent：三模式结果与运行轨迹独立保存', async () => {
     )).status,
     'DONE',
   )
+})
+
+test('次日关注名单只保存当前候选且与账号隔离', async () => {
+  const store = memoryStore()
+  await store.saveLatest(snapshot)
+  const result = await handleNextDaySelection({
+    store,
+    scope: 'alice',
+    codes: ['600000', '999999'],
+    now: () => 123,
+  })
+  assert.equal(result.ok, true)
+  assert.deepEqual(
+    result.nextDaySelection.items.map((item) => item.code),
+    ['600000'],
+  )
+  assert.equal(await store.readNextDaySelection('bob'), null)
 })
 
 test('首报价自动复算只允许人工保存名单且对交易日幂等', async () => {
