@@ -1377,13 +1377,13 @@ Agent 采用一个选股 runtime 与一个独立端点的三种严格模式；�
   `CHALLENGER_REJECTED`。训练产物只写
   `learning/v1/training-runs/`，报告固定
   `productionPointerChanged=false`，不存在生产模型指针更新步骤。
-- 本地验收：学习合同/采集/结算/训练视图与调度专项 Node 33 项通过；Python 训练
-  门禁 1 项通过；Vite 生产构建通过。完整 Node 测试和 FC 打包结果在本节后续补记。
-- GitHub 自动训练前置尚未完成：GitHub 仓库需配置
-  `LEARNING_PIPELINE_URL`、`LEARNING_CRON_KEY` 及四个最小权限
-  `LEARNING_OSS_*` secrets；OSS RAM 账号应限制为读取 manifests/views、写入
-  training-runs，不得授予 `accounts/` 读取权限。首个真实日批已人工执行，Actions
-  自动运行尚未发生。
+- 验收：学习合同/采集/结算/训练视图与调度专项、Python 训练门禁均通过；全量
+  Node `2429/2429`、Vite 生产构建和 FC 打包通过。
+- GitHub Actions 复用默认分支已有的 `OSS_BUCKET`、`OSS_ACCESS_KEY_ID` 和
+  `OSS_ACCESS_KEY_SECRET`，不再依赖新增 secrets；训练下载器将读取路径硬限制为
+  `learning/v1/manifests/` 与 `learning/v1/views/`，上传路径硬限制为
+  `learning/v1/training-runs/`。后续仍建议将现有 OSS 凭据轮换为等价前缀最小权限
+  RAM 身份。工作流尚未进入默认分支，因此自动运行尚未发生。
 
 恢复与首轮生产验收（2026-09-17 21:46）：
 - 确认此前没有训练进程卡死；新 `daily-learning-challengers` 工作流仅存在于本地

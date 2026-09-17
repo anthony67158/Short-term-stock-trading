@@ -69,8 +69,8 @@ test('每日重训工作流只上传脱敏challenger报告且不改生产指针'
   const trainer = read('qlib-service/learning_pipeline.py')
 
   assert.match(workflow, /learning_pipeline\.py upload/)
-  assert.match(workflow, /LEARNING_OSS_ACCESS_KEY_ID/)
-  assert.match(workflow, /LEARNING_OSS_ACCESS_KEY_SECRET/)
+  assert.match(workflow, /secrets\.OSS_ACCESS_KEY_ID/)
+  assert.match(workflow, /secrets\.OSS_ACCESS_KEY_SECRET/)
   assert.match(trainer, /learning\/v1\/training-runs\//)
   assert.match(trainer, /productionPointerChanged": False/)
   assert.doesNotMatch(workflow, /upload_decision_model|activate-baseline/)

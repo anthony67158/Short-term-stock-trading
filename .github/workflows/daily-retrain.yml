@@ -20,10 +20,10 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PIP_DEFAULT_TIMEOUT: "90"
-      OSS_ENDPOINT: ${{ secrets.LEARNING_OSS_ENDPOINT }}
-      OSS_BUCKET: ${{ secrets.LEARNING_OSS_BUCKET }}
-      OSS_ACCESS_KEY_ID: ${{ secrets.LEARNING_OSS_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.LEARNING_OSS_ACCESS_KEY_SECRET }}
+      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
     steps:
       - uses: actions/checkout@v6
 
@@ -61,27 +61,6 @@ jobs:
         working-directory: qlib-service
         run: python -m unittest test_learning_pipeline.py
 
-      - name: Settle matured outcomes and publish redacted view
-        env:
-          LEARNING_PIPELINE_URL: ${{ secrets.LEARNING_PIPELINE_URL }}
-          LEARNING_CRON_KEY: ${{ secrets.LEARNING_CRON_KEY }}
-        run: |
-          test -n "$LEARNING_PIPELINE_URL"
-          test -n "$LEARNING_CRON_KEY"
-          curl --fail --silent --show-error \
-            --retry 2 \
-            --max-time 300 \
-            -X POST \
-            -H "content-type: application/json" \
-            -H "x-cron-key: $LEARNING_CRON_KEY" \
-            "$LEARNING_PIPELINE_URL" \
-            -o learning-settlement.json
-          node -e "
-            const result = require('./learning-settlement.json');
-            if (!result.ok) throw new Error(result.error || 'settlement failed');
-            console.log(JSON.stringify(result.settlement));
-          "
-
       - name: Download latest redacted training view
         working-directory: qlib-service
         run: |
@@ -109,7 +88,6 @@ jobs:
         with:
           name: learning-challenger-${{ github.run_id }}
           path: |
-            learning-settlement.json
             learning-artifacts/run/report.json
           if-no-files-found: warn
           retention-days: 30
