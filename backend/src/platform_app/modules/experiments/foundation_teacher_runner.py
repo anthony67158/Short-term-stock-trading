@@ -21,14 +21,19 @@ from platform_app.modules.experiments.foundation_return_contract import (
     experiment_id,
     load_frozen_experiment,
 )
-SCHEMA_VERSION = "foundation-teacher-screening.v3"
-DATASET_SCHEMA_VERSION = "foundation-teacher-screening-dataset.v3"
+from platform_app.modules.experiments.foundation_return_dataset import (
+    FoundationReturnDatasetReader,
+)
+
+SCHEMA_VERSION = "foundation-teacher-screening.v4"
+DATASET_SCHEMA_VERSION = "foundation-teacher-screening-dataset.v4"
 REFERENCE_NOTIONAL_CNY = 100_000.0
 MARKET_EXIT_SLIPPAGE_RATE = 0.0005
 BOARD_CODES = {"MAIN": 0, "CHINEXT": 1, "STAR": 2, "BEIJING": 3}
+BOARD_NAMES = {code: name for name, code in BOARD_CODES.items()}
 DEFAULT_CONTEXT_LENGTH = 90
 DEFAULT_FORECAST_HORIZON = 5
-DEFAULT_SAMPLES_PER_PARTITION = 12_600
+DEFAULT_SAMPLES_PER_DATE = 50
 MINIMUM_SAMPLES_PER_DATE = 20
 DEFAULT_BATCH_SIZE = 32
 TTM_DAILY_FREQUENCY_TOKEN = 8
@@ -87,8 +92,11 @@ class FoundationTeacherError(ValueError):
 @dataclass(frozen=True)
 class TeacherDataset:
     contexts: np.ndarray
+    reference_close: np.ndarray
     actual_return: np.ndarray
     dates: np.ndarray
+    execution_dates: np.ndarray
+    terminal_dates: np.ndarray
     instruments: np.ndarray
     boards: np.ndarray
     sample_weight: np.ndarray
@@ -104,8 +112,11 @@ class TeacherDataset:
             or any(
                 len(values) != rows
                 for values in (
+                    self.reference_close,
                     self.actual_return,
                     self.dates,
+                    self.execution_dates,
+                    self.terminal_dates,
                     self.instruments,
                     self.boards,
                     self.sample_weight,
@@ -115,10 +126,21 @@ class TeacherDataset:
                 )
             )
             or not np.all(np.isfinite(self.contexts))
+            or not np.all(np.isfinite(self.reference_close))
             or not np.all(np.isfinite(self.actual_return))
+            or np.any(self.contexts <= 0)
+            or np.any(self.reference_close <= 0)
+            or not np.allclose(
+                self.contexts[:, -1],
+                self.reference_close,
+                rtol=1e-6,
+                atol=1e-6,
+            )
+            or np.any(self.execution_dates <= self.dates)
+            or np.any(self.terminal_dates < self.execution_dates)
+            or not np.all(np.isin(self.boards, tuple(BOARD_NAMES)))
             or np.any(self.sample_weight <= 0)
-            or np.any(self.forecast_steps < 1)
-            or np.any(self.forecast_steps > DEFAULT_FORECAST_HORIZON)
+            or np.any(self.forecast_steps != DEFAULT_FORECAST_HORIZON)
         ):
             raise FoundationTeacherError(
                 "FOUNDATION_TEACHER_DATASET_INVALID",
@@ -237,7 +259,7 @@ def fee_adjusted_returns(
 
 def _score(fold: int, partition: str, date: str, instrument: str) -> bytes:
     return hashlib.sha256(
-        f"foundation-teacher-v3:{fold}:{partition}:{date}:{instrument}".encode(),
+        f"foundation-teacher-v4:{fold}:{partition}:{date}:{instrument}".encode(),
     ).digest()
 
 
@@ -262,48 +284,38 @@ def _daily_quotas(
     }
 
 
-def _mature_return_context(
-    ranking: sqlite3.Connection,
+def _adjusted_close_context(
+    reader: FoundationReturnDatasetReader,
     *,
     instrument_id: str,
     decision_date: str,
-    context_length: int = DEFAULT_CONTEXT_LENGTH,
-) -> tuple[np.ndarray, int] | None:
-    rows = ranking.execute(
-        "SELECT decision_date, board, execution_date, terminal_date, "
-        "forward_return_next_open_5 FROM ranking_samples "
-        "WHERE instrument_id = ? AND decision_date < ? AND terminal_date <= ? "
-        "ORDER BY decision_date DESC LIMIT ?",
-        (instrument_id, decision_date, decision_date, context_length),
-    ).fetchall()
-    if len(rows) != context_length:
-        return None
-    rows = list(reversed(rows))
-    values = fee_adjusted_returns(
-        np.asarray([float(row["forward_return_next_open_5"]) for row in rows]),
-        np.asarray([row["board"] for row in rows]),
-        np.asarray([row["execution_date"] for row in rows]),
-        np.asarray([row["terminal_date"] for row in rows]),
+) -> tuple[np.ndarray, float]:
+    history = reader.load_history_sequence(instrument_id, decision_date)
+    values = np.asarray(
+        [float(row["adjustedClose"]) for row in history["rows"]],
+        dtype=np.float32,
     )
-    forecast_step = ranking.execute(
-        "SELECT COUNT(*) FROM ranking_samples "
-        "WHERE instrument_id = ? AND decision_date > ? AND decision_date <= ?",
-        (instrument_id, rows[-1]["decision_date"], decision_date),
-    ).fetchone()[0]
-    if not 1 <= forecast_step <= DEFAULT_FORECAST_HORIZON:
-        return None
-    return values.astype(np.float32), forecast_step
+    if (
+        values.shape != (DEFAULT_CONTEXT_LENGTH,)
+        or not np.all(np.isfinite(values))
+        or np.any(values <= 0)
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_PRICE_CONTEXT_INVALID",
+        )
+    return values, float(values[-1])
 
 
 def _partition_samples(
     ranking: sqlite3.Connection,
+    reader: FoundationReturnDatasetReader,
     *,
     fold: int,
     partition: str,
     start: str,
     end: str,
-    samples: int,
-    minimum_per_date: int = 1,
+    samples_per_date: int = DEFAULT_SAMPLES_PER_DATE,
+    minimum_per_date: int = MINIMUM_SAMPLES_PER_DATE,
 ) -> TeacherDataset:
     dates = [
         row[0]
@@ -313,9 +325,13 @@ def _partition_samples(
             (start, end),
         )
     ]
+    if samples_per_date < minimum_per_date:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_SAMPLE_BUDGET_INVALID",
+        )
     quotas = _daily_quotas(
         dates,
-        samples,
+        len(dates) * samples_per_date,
         minimum_per_date=minimum_per_date,
     )
     records = []
@@ -336,21 +352,18 @@ def _partition_samples(
         )
         selected = []
         for row in candidates:
-            context_result = _mature_return_context(
-                ranking,
+            context, reference_close = _adjusted_close_context(
+                reader,
                 instrument_id=row["instrument_id"],
                 decision_date=date,
             )
-            if context_result is None:
-                continue
-            context, forecast_step = context_result
             target = fee_adjusted_returns(
                 np.asarray([float(row["forward_return_next_open_5"])]),
                 np.asarray([row["board"]]),
                 np.asarray([row["execution_date"]]),
                 np.asarray([row["terminal_date"]]),
             )[0]
-            selected.append((row, context, target, forecast_step))
+            selected.append((row, context, reference_close, target))
             if len(selected) == quotas[date]:
                 break
         if len(selected) != quotas[date]:
@@ -359,13 +372,25 @@ def _partition_samples(
             )
         weight = 1.0 / len(selected)
         records.extend(
-            (row, context, target, weight, forecast_step)
-            for row, context, target, forecast_step in selected
+            (row, context, reference_close, target, weight)
+            for row, context, reference_close, target in selected
         )
     return TeacherDataset(
         contexts=np.stack([item[1] for item in records]),
-        actual_return=np.asarray([item[2] for item in records], dtype=np.float32),
+        reference_close=np.asarray(
+            [item[2] for item in records],
+            dtype=np.float32,
+        ),
+        actual_return=np.asarray([item[3] for item in records], dtype=np.float32),
         dates=np.asarray([int(item[0]["decision_date"]) for item in records]),
+        execution_dates=np.asarray(
+            [int(item[0]["execution_date"]) for item in records],
+            dtype=np.int32,
+        ),
+        terminal_dates=np.asarray(
+            [int(item[0]["terminal_date"]) for item in records],
+            dtype=np.int32,
+        ),
         instruments=np.asarray(
             [item[0]["instrument_id"].encode() for item in records],
             dtype="S9",
@@ -374,8 +399,12 @@ def _partition_samples(
             [BOARD_CODES[item[0]["board"]] for item in records],
             dtype=np.int8,
         ),
-        sample_weight=np.asarray([item[3] for item in records]),
-        forecast_steps=np.asarray([item[4] for item in records], dtype=np.int8),
+        sample_weight=np.asarray([item[4] for item in records]),
+        forecast_steps=np.full(
+            len(records),
+            DEFAULT_FORECAST_HORIZON,
+            dtype=np.int8,
+        ),
         folds=np.full(len(records), fold, dtype=np.int8),
         partitions=np.full(len(records), partition.encode(), dtype="S24"),
     )
@@ -387,8 +416,10 @@ def export_teacher_dataset(
     foundation_root: Path,
     sampling_root: Path,
     ranking_root: Path,
+    market_root: Path,
+    execution_label_root: Path,
     output_root: Path,
-    samples_per_partition: int = DEFAULT_SAMPLES_PER_PARTITION,
+    samples_per_date: int = DEFAULT_SAMPLES_PER_DATE,
 ) -> dict:
     from platform_app.modules.experiments.foundation_return_dataset import (
         _verified_upstream,
@@ -416,30 +447,36 @@ def export_teacher_dataset(
             "FOUNDATION_TEACHER_LINEAGE_MISMATCH",
         )
     folds = {int(item["fold"]): item for item in sampling["folds"]}
-    connection = sqlite3.connect(
-        f"{ranking_database.resolve().as_uri()}?mode=ro&immutable=1",
-        uri=True,
-    )
-    connection.row_factory = sqlite3.Row
     datasets = []
-    try:
-        for fold in SCREENING_FOLDS:
-            contract = folds[fold]
-            for partition in SCREENING_PARTITIONS:
-                start_key, end_key = PARTITION_RANGES[partition]
-                datasets.append(
-                    _partition_samples(
-                        connection,
-                        fold=fold,
-                        partition=partition,
-                        start=contract[start_key],
-                        end=contract[end_key],
-                        samples=samples_per_partition,
-                        minimum_per_date=MINIMUM_SAMPLES_PER_DATE,
+    with FoundationReturnDatasetReader(
+        foundation_root,
+        ranking_dataset_root=ranking_root,
+        market_dataset_root=market_root,
+        execution_label_dataset_root=execution_label_root,
+    ) as reader:
+        connection = sqlite3.connect(
+            f"{ranking_database.resolve().as_uri()}?mode=ro&immutable=1",
+            uri=True,
+        )
+        connection.row_factory = sqlite3.Row
+        try:
+            for fold in SCREENING_FOLDS:
+                contract = folds[fold]
+                for partition in SCREENING_PARTITIONS:
+                    start_key, end_key = PARTITION_RANGES[partition]
+                    datasets.append(
+                        _partition_samples(
+                            connection,
+                            reader,
+                            fold=fold,
+                            partition=partition,
+                            start=contract[start_key],
+                            end=contract[end_key],
+                            samples_per_date=samples_per_date,
+                        )
                     )
-                )
-    finally:
-        connection.close()
+        finally:
+            connection.close()
     combined = TeacherDataset(
         **{
             field: np.concatenate(
@@ -455,8 +492,11 @@ def export_teacher_dataset(
         np.savez_compressed(
             stream,
             contexts=combined.contexts,
+            referenceClose=combined.reference_close,
             actualReturn=combined.actual_return,
             dates=combined.dates,
+            executionDates=combined.execution_dates,
+            terminalDates=combined.terminal_dates,
             instruments=combined.instruments,
             boards=combined.boards,
             sampleWeight=combined.sample_weight,
@@ -472,23 +512,25 @@ def export_teacher_dataset(
         "foundationDatabaseSha256": foundation["databaseSha256"],
         "samplingDatabaseSha256": sampling["databaseSha256"],
         "rankingDatabaseSha256": ranking["databaseSha256"],
+        "marketDatabaseSha256": foundation["marketDataset"]["databaseSha256"],
+        "executionLabelDatabaseSha256": (
+            foundation["executionLabelDataset"]["databaseSha256"]
+        ),
         "data": data_path.name,
         "dataSha256": _file_sha256(data_path),
         "rows": len(combined.contexts),
-        "samplesPerPartition": samples_per_partition,
+        "samplesPerDate": samples_per_date,
         "minimumSamplesPerDate": MINIMUM_SAMPLES_PER_DATE,
         "folds": list(SCREENING_FOLDS),
         "partitions": list(SCREENING_PARTITIONS),
         "contextLength": DEFAULT_CONTEXT_LENGTH,
         "forecastHorizon": DEFAULT_FORECAST_HORIZON,
-        "forecastStepCounts": {
-            str(step): int(np.sum(combined.forecast_steps == step))
-            for step in np.unique(combined.forecast_steps)
-        },
+        "forecastStep": DEFAULT_FORECAST_HORIZON,
         "target": "r_net_5d",
         "contextPolicy": (
-            "LAST_90_MATURED_R_NET_5D_WITH_TERMINAL_DATE_NOT_AFTER_DECISION"
+            "LAST_90_POINT_IN_TIME_ADJUSTED_CLOSE_ENDING_ON_DECISION_DATE"
         ),
+        "forecastTarget": "FIFTH_FUTURE_SESSION_ADJUSTED_CLOSE",
         "selection": "EQUAL_DATE_LOWEST_SHA256_WITHOUT_TARGET_ACCESS",
     }
     _write_json(output_root / "data-manifest.json", manifest, immutable=True)
@@ -514,8 +556,11 @@ def load_teacher_dataset(root: Path) -> tuple[TeacherDataset, dict]:
     with np.load(data_path, allow_pickle=False) as saved:
         dataset = TeacherDataset(
             contexts=saved["contexts"].copy(),
+            reference_close=saved["referenceClose"].copy(),
             actual_return=saved["actualReturn"].copy(),
             dates=saved["dates"].copy(),
+            execution_dates=saved["executionDates"].copy(),
+            terminal_dates=saved["terminalDates"].copy(),
             instruments=saved["instruments"].copy(),
             boards=saved["boards"].copy(),
             sample_weight=saved["sampleWeight"].copy(),
@@ -1136,11 +1181,13 @@ def main() -> None:
     export.add_argument("--foundation-root", type=Path, required=True)
     export.add_argument("--sampling-root", type=Path, required=True)
     export.add_argument("--ranking-root", type=Path, required=True)
+    export.add_argument("--market-root", type=Path, required=True)
+    export.add_argument("--execution-label-root", type=Path, required=True)
     export.add_argument("--output", type=Path, required=True)
     export.add_argument(
-        "--samples-per-partition",
+        "--samples-per-date",
         type=int,
-        default=DEFAULT_SAMPLES_PER_PARTITION,
+        default=DEFAULT_SAMPLES_PER_DATE,
     )
     run = commands.add_parser("run")
     run.add_argument("--dataset-root", type=Path, required=True)
@@ -1164,8 +1211,10 @@ def main() -> None:
             foundation_root=args.foundation_root,
             sampling_root=args.sampling_root,
             ranking_root=args.ranking_root,
+            market_root=args.market_root,
+            execution_label_root=args.execution_label_root,
             output_root=args.output,
-            samples_per_partition=args.samples_per_partition,
+            samples_per_date=args.samples_per_date,
         )
     elif args.command == "run":
         result = run_teacher_inference(

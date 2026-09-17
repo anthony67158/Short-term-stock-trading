@@ -14,8 +14,8 @@ from platform_app.modules.experiments.foundation_teacher_runner import (
     TeacherRawForecast,
     TeacherDataset,
     common_quantile_predictions,
+    _adjusted_close_context,
     _daily_quotas,
-    _mature_return_context,
     _partition_samples,
     _score,
     evaluate_teacher_test,
@@ -23,6 +23,22 @@ from platform_app.modules.experiments.foundation_teacher_runner import (
     load_teacher_forecast,
     select_forecast_steps,
 )
+
+
+class HistoryReader:
+    def load_history_sequence(
+        self,
+        instrument_id: str,
+        decision_date: str,
+    ) -> dict:
+        del instrument_id
+        return {
+            "decisionDate": decision_date,
+            "rows": [
+                {"adjustedClose": str(value)}
+                for value in np.linspace(10.0, 11.0, DEFAULT_CONTEXT_LENGTH)
+            ],
+        }
 
 
 def ranking_database() -> sqlite3.Connection:
@@ -43,8 +59,8 @@ def ranking_database() -> sqlite3.Connection:
                 "000001.SZ",
                 date,
                 "MAIN",
-                date,
-                terminal,
+                "20980101",
+                "20990101" if terminal != "20991231" else terminal,
                 str(index / 10_000),
             )
         )
@@ -108,21 +124,16 @@ def test_teacher_fee_returns_match_frozen_decimal_policy():
     np.testing.assert_allclose(actual, expected, atol=1e-12, rtol=0)
 
 
-def test_mature_context_excludes_unmatured_labels():
-    connection = ranking_database()
-
-    result = _mature_return_context(
-        connection,
+def test_adjusted_close_context_ends_on_reference_close():
+    context, reference_close = _adjusted_close_context(
+        HistoryReader(),
         instrument_id="000001.SZ",
         decision_date="20200528",
     )
 
-    assert result is not None
-    context, forecast_step = result
     assert context.shape == (DEFAULT_CONTEXT_LENGTH,)
     assert np.all(np.isfinite(context))
-    assert forecast_step == 5
-    connection.close()
+    assert reference_close == pytest.approx(context[-1])
 
 
 def test_partition_samples_preserve_decision_date():
@@ -130,16 +141,21 @@ def test_partition_samples_preserve_decision_date():
 
     dataset = _partition_samples(
         connection,
+        HistoryReader(),
         fold=1,
         partition="test",
         start="20200407",
         end="20200407",
-        samples=1,
+        samples_per_date=1,
+        minimum_per_date=1,
     )
 
     assert dataset.dates.tolist() == [20200407]
     assert dataset.partitions.tolist() == [b"test"]
-    assert dataset.forecast_steps.tolist() == [1]
+    assert dataset.forecast_steps.tolist() == [5]
+    assert dataset.reference_close.tolist() == pytest.approx([11.0])
+    assert dataset.execution_dates.tolist() == [20980101]
+    assert dataset.terminal_dates.tolist() == [20991231]
     connection.close()
 
 
@@ -149,13 +165,16 @@ def test_teacher_dataset_rejects_wrong_context_shape():
         match="FOUNDATION_TEACHER_DATASET_INVALID",
     ):
         TeacherDataset(
-            contexts=np.zeros((2, DEFAULT_CONTEXT_LENGTH - 1)),
+            contexts=np.ones((2, DEFAULT_CONTEXT_LENGTH - 1)),
+            reference_close=np.ones(2),
             actual_return=np.zeros(2),
-            dates=np.ones(2),
+            dates=np.array([20200101, 20200101]),
+            execution_dates=np.array([20200102, 20200102]),
+            terminal_dates=np.array([20200108, 20200108]),
             instruments=np.array([b"a", b"b"]),
             boards=np.zeros(2),
             sample_weight=np.ones(2),
-            forecast_steps=np.ones(2),
+            forecast_steps=np.full(2, 5),
             folds=np.ones(2),
             partitions=np.array([b"test", b"test"]),
         )
@@ -187,9 +206,10 @@ def test_ttm_quantiles_use_calibration_residuals_only():
 
 
 def test_teacher_evaluation_uses_calibration_and_test_partitions():
-    contexts = np.zeros((8, DEFAULT_CONTEXT_LENGTH), dtype=np.float32)
+    contexts = np.ones((8, DEFAULT_CONTEXT_LENGTH), dtype=np.float32)
     dataset = TeacherDataset(
         contexts=contexts,
+        reference_close=np.ones(8, dtype=np.float32),
         actual_return=np.array(
             [-0.02, 0.01, 0.03, 0.04, -0.01, 0.02, 0.05, 0.08],
             dtype=np.float32,
@@ -206,13 +226,19 @@ def test_teacher_evaluation_uses_calibration_and_test_partitions():
                 20200202,
             ]
         ),
+        execution_dates=np.array(
+            [20200103] * 4 + [20200203] * 4,
+        ),
+        terminal_dates=np.array(
+            [20200110] * 4 + [20200210] * 4,
+        ),
         instruments=np.asarray(
             [f"{index:06d}.SZ".encode() for index in range(8)],
             dtype="S9",
         ),
         boards=np.zeros(8, dtype=np.int8),
         sample_weight=np.ones(8),
-        forecast_steps=np.array([1, 2, 3, 5, 1, 2, 3, 5]),
+        forecast_steps=np.full(8, 5),
         folds=np.ones(8, dtype=np.int8),
         partitions=np.array(
             [b"probabilityCalibration"] * 4 + [b"test"] * 4,
