@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -318,31 +319,35 @@ def fit_lightgbm_baseline(
         "min_child_samples": 100,
         "reg_lambda": 3.0,
         "random_state": BASELINE_SEED,
-        "n_jobs": threads,
+        "n_jobs": 1,
         "verbosity": -1,
         "deterministic": True,
         "force_col_wise": True,
     }
-    classifier = LGBMClassifier(
-        objective="binary",
-        **common,
-    ).fit(
-        training.x,
-        training.direction,
-        sample_weight=weights,
-    )
-    quantile_models = tuple(
-        LGBMRegressor(
-            objective="quantile",
-            alpha=alpha,
-            **common,
-        ).fit(
+    with ThreadPoolExecutor(max_workers=min(threads, 8)) as executor:
+        classifier_future = executor.submit(
+            LGBMClassifier(objective="binary", **common).fit,
             training.x,
-            training.target_return,
+            training.direction,
             sample_weight=weights,
         )
-        for alpha in DEFAULT_QUANTILES
-    )
+        quantile_futures = [
+            executor.submit(
+                LGBMRegressor(
+                    objective="quantile",
+                    alpha=alpha,
+                    **common,
+                ).fit,
+                training.x,
+                training.target_return,
+                sample_weight=weights,
+            )
+            for alpha in DEFAULT_QUANTILES
+        ]
+        classifier = classifier_future.result()
+        quantile_models = tuple(
+            future.result() for future in quantile_futures
+        )
     return BaselineModelBundle(
         family=LIGHTGBM_FAMILY,
         classifier=classifier,
@@ -642,6 +647,7 @@ def build_baseline_protocol(
     loader: FoundationBaselineDataLoader,
     *,
     iterations: int = DEFAULT_ITERATIONS,
+    threads: int = 4,
     smoke_dates: int | None = None,
 ) -> dict:
     experiment = load_frozen_experiment(experiment_root)
@@ -660,7 +666,11 @@ def build_baseline_protocol(
         raise ProbabilisticBaselineError(
             "PROBABILISTIC_BASELINE_EXPERIMENT_LINEAGE_MISMATCH",
         )
-    if iterations <= 0 or (smoke_dates is not None and smoke_dates <= 0):
+    if (
+        iterations <= 0
+        or threads <= 0
+        or (smoke_dates is not None and smoke_dates <= 0)
+    ):
         raise ProbabilisticBaselineError(
             "PROBABILISTIC_BASELINE_TRAINING_CONFIG_INVALID",
         )
@@ -680,6 +690,33 @@ def build_baseline_protocol(
         "families": list(MODEL_FAMILIES),
         "iterations": iterations,
         "seed": BASELINE_SEED,
+        "hyperparameters": {
+            "common": {
+                "learningRate": 0.05,
+                "maximumDepth": 6,
+                "l2Regularization": 3.0,
+                "randomSampling": False,
+            },
+            "catboost": {
+                "quantileMode": "SINGLE_MULTIQUANTILE_MODEL",
+                "bootstrapType": "No",
+                "randomStrength": 0.0,
+            },
+            "xgboost": {
+                "treeMethod": "hist",
+                "maximumBins": 63,
+                "minimumChildWeight": 100.0,
+                "quantileMode": "SINGLE_MULTI_OUTPUT_MODEL",
+            },
+            "lightgbm": {
+                "numberOfLeaves": 31,
+                "minimumChildSamples": 100,
+                "forceColumnWise": True,
+                "quantileMode": "SEVEN_INDEPENDENT_MODELS",
+                "parallelModelWorkers": min(threads, 8),
+                "threadsPerModel": 1,
+            },
+        },
         "trainingSelection": "DETERMINISTIC_STRATIFIED_SAMPLE",
         "calibrationSelection": "FULL_UNIVERSE",
         "testSelection": "FULL_UNIVERSE",
@@ -790,6 +827,7 @@ def run_baseline_families_fold(
         experiment_root,
         loader,
         iterations=iterations,
+        threads=threads,
         smoke_dates=smoke_dates,
     )
     _write_json(protocol_path, protocol, immutable=True)
