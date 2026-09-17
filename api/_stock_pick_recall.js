@@ -16,6 +16,10 @@ import {
   buildMarketOpportunityContext,
 } from '../shared/marketOpportunityContext.js'
 import {
+  loadRankingScoreSnapshot as loadRankingSnapshot,
+  rankingScoreLookup,
+} from './_ranking_score_snapshot.js'
+import {
   beijingMinutes,
 } from '../shared/tradingCalendar.js'
 import {
@@ -61,6 +65,7 @@ export async function buildStockPickRecall({
   fetchPool = fetchTailPickRealtimePool,
   fetchMarket = fetchMarketSnapshot,
   scoreCandidates = scoreCandidatesWithDecisionModel,
+  loadRankingSnapshot: loadSnapshot = loadRankingSnapshot,
   onProgress = () => {},
 } = {}) {
   let pool
@@ -99,20 +104,39 @@ export async function buildStockPickRecall({
 
   let scoreMap = new Map()
   let modelVersion = ''
+  // 优先：离线发布的排序模型快照（真实 LightGBM 模型分，时间外费后回测已验证）。
   try {
-    const market = await fetchMarket().catch(() => ({}))
-    const marketContext = buildMarketOpportunityContext({ market })
-    const scored = await scoreCandidates(recallPool, {
-      mode: 'INTRADAY',
-      slot: beijingMinutes(now),
-      market,
-      marketContext,
-      now,
-    })
-    scoreMap = modelScoreByCode(scored)
-    modelVersion = [...scoreMap.values()][0]?.modelVersion || ''
+    const snapshot = await loadSnapshot({ now })
+    if (snapshot) {
+      const lookup = rankingScoreLookup(snapshot)
+      for (const row of recallPool) {
+        const score = lookup(String(row.code))
+        if (score) scoreMap.set(String(row.code), score)
+      }
+      if (scoreMap.size) {
+        modelVersion = snapshot.modelVersion || snapshot.bundleId || ''
+      }
+    }
   } catch {
     scoreMap = new Map()
+  }
+  // 次选：现有决策模型服务（若排序快照缺失且 QUANT_URL 已配置）。
+  if (!scoreMap.size) {
+    try {
+      const market = await fetchMarket().catch(() => ({}))
+      const marketContext = buildMarketOpportunityContext({ market })
+      const scored = await scoreCandidates(recallPool, {
+        mode: 'INTRADAY',
+        slot: beijingMinutes(now),
+        market,
+        marketContext,
+        now,
+      })
+      scoreMap = modelScoreByCode(scored)
+      modelVersion = [...scoreMap.values()][0]?.modelVersion || ''
+    } catch {
+      scoreMap = new Map()
+    }
   }
 
   const candidates = recallPool.map((row) =>
