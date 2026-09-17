@@ -383,6 +383,10 @@ def select_stratified_training_rows(
             "FOUNDATION_SAMPLING_DATE_QUOTA_INVALID",
         )
     grouped = _stratify_rows(rows)
+    if quota < len(grouped):
+        raise FoundationSamplingDatasetError(
+            "FOUNDATION_SAMPLING_STRATA_SUPPORT_INSUFFICIENT",
+        )
     allocation = _largest_remainder_allocation(
         {key: len(values) for key, values in grouped.items()},
         quota,
