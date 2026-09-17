@@ -1,5 +1,8 @@
 """Reproducible probabilistic tree baselines on frozen foundation folds."""
 
+import argparse
+import fcntl
+import gc
 import hashlib
 import json
 import os
@@ -148,6 +151,54 @@ class BaselineModelBundle:
             }
         )
         return result
+
+
+@dataclass(frozen=True)
+class HistoricalBaselineModel:
+    probability: float
+    quantile_values: tuple[float, ...]
+    family: str = HISTORICAL_FAMILY
+    quantiles: tuple[float, ...] = DEFAULT_QUANTILES
+
+    def predict(self, x: np.ndarray) -> dict[str, np.ndarray]:
+        predictions = {
+            "pWin": np.full(len(x), self.probability, dtype=np.float32),
+        }
+        predictions.update(
+            {
+                f"q{round(alpha * 100):02d}": np.full(
+                    len(x),
+                    value,
+                    dtype=np.float32,
+                )
+                for alpha, value in zip(
+                    self.quantiles,
+                    self.quantile_values,
+                    strict=True,
+                )
+            }
+        )
+        return predictions
+
+
+def fit_historical_baseline(
+    training: BaselinePartition,
+) -> HistoricalBaselineModel:
+    return HistoricalBaselineModel(
+        probability=float(
+            np.average(
+                training.direction,
+                weights=training.sample_weight,
+            )
+        ),
+        quantile_values=tuple(
+            float(value)
+            for value in weighted_quantiles(
+                training.target_return,
+                sample_weight=training.sample_weight,
+            )
+        ),
+    )
 
 
 def fit_catboost_baseline(
@@ -643,6 +694,240 @@ def build_baseline_protocol(
     }
 
 
+def fit_baseline_model(
+    family: str,
+    training: BaselinePartition,
+    *,
+    iterations: int,
+    threads: int,
+) -> HistoricalBaselineModel | BaselineModelBundle:
+    if family == HISTORICAL_FAMILY:
+        return fit_historical_baseline(training)
+    fitters = {
+        CATBOOST_FAMILY: fit_catboost_baseline,
+        XGBOOST_FAMILY: fit_xgboost_baseline,
+        LIGHTGBM_FAMILY: fit_lightgbm_baseline,
+    }
+    try:
+        fitter = fitters[family]
+    except KeyError as exc:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_FAMILY_INVALID",
+        ) from exc
+    return fitter(training, iterations=iterations, threads=threads)
+
+
+def _receipt_is_valid(root: Path) -> dict | None:
+    receipt_path = root / "receipt.json"
+    try:
+        receipt = json.loads(receipt_path.read_text())
+        files = receipt["files"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return None
+    if not files or any(
+        not (root / name).is_file()
+        or _file_sha256(root / name) != expected_hash
+        for name, expected_hash in files.items()
+    ):
+        return None
+    return receipt
+
+
+def _require_development_freeze(output_root: Path, protocol_path: Path) -> None:
+    freeze_path = output_root / "development-freeze.json"
+    try:
+        frozen = json.loads(freeze_path.read_text())
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_CONFIRMATION_LOCKED",
+        ) from exc
+    if (
+        frozen.get("schemaVersion")
+        != "foundation-probabilistic-baseline-development-freeze.v1"
+        or frozen.get("protocolSha256") != _file_sha256(protocol_path)
+        or frozen.get("completedDevelopmentFolds") != [1, 2, 3, 4]
+        or frozen.get("families") != list(MODEL_FAMILIES)
+    ):
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_CONFIRMATION_LOCKED",
+        )
+    for key, expected_hash in frozen.get("receiptSha256", {}).items():
+        fold, family = key.split(":", 1)
+        receipt_path = output_root / f"fold-{fold}" / family / "receipt.json"
+        if (
+            not receipt_path.is_file()
+            or _file_sha256(receipt_path) != expected_hash
+            or _receipt_is_valid(receipt_path.parent) is None
+        ):
+            raise ProbabilisticBaselineError(
+                "PROBABILISTIC_BASELINE_CONFIRMATION_LOCKED",
+            )
+
+
+def run_baseline_fold(
+    loader: FoundationBaselineDataLoader,
+    *,
+    experiment_root: Path,
+    output_root: Path,
+    fold: int,
+    family: str,
+    iterations: int = DEFAULT_ITERATIONS,
+    threads: int = 4,
+    smoke_dates: int | None = None,
+) -> dict:
+    if fold not in loader.folds or family not in MODEL_FAMILIES:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_RUN_CONFIG_INVALID",
+        )
+    output_root.mkdir(parents=True, exist_ok=True)
+    protocol_path = output_root / "protocol.json"
+    protocol = build_baseline_protocol(
+        experiment_root,
+        loader,
+        iterations=iterations,
+        smoke_dates=smoke_dates,
+    )
+    _write_json(protocol_path, protocol, immutable=True)
+    if fold == 5 and smoke_dates is None:
+        _require_development_freeze(output_root, protocol_path)
+
+    root = output_root / f"fold-{fold}" / family
+    root.mkdir(parents=True, exist_ok=True)
+    existing = _receipt_is_valid(root)
+    if existing is not None:
+        return existing
+
+    training = loader.load_partition(
+        fold,
+        "train",
+        maximum_dates=smoke_dates,
+    )
+    training_summary = {
+        "rows": len(training.x),
+        "dates": int(len(np.unique(training.dates))),
+        "startDate": str(training.dates.min()),
+        "endDate": str(training.dates.max()),
+    }
+    model = fit_baseline_model(
+        family,
+        training,
+        iterations=iterations,
+        threads=threads,
+    )
+    model_path = root / "model.joblib"
+    _write_joblib(model_path, model)
+    del training
+    gc.collect()
+
+    metrics = {}
+    prediction_paths = {}
+    for partition_name in (
+        "probabilityCalibration",
+        "conformalCalibration",
+        "test",
+    ):
+        partition = loader.load_partition(
+            fold,
+            partition_name,
+            maximum_dates=smoke_dates,
+        )
+        if int(training_summary["endDate"]) >= int(partition.dates.min()):
+            raise ProbabilisticBaselineError(
+                "PROBABILISTIC_BASELINE_TRAIN_TEST_OVERLAP",
+            )
+        predictions = model.predict(partition.x)
+        metrics[partition_name] = evaluate_predictions(
+            partition,
+            predictions,
+        )
+        prediction_path = root / f"{partition_name}.npz"
+        _write_predictions(prediction_path, partition, predictions)
+        prediction_paths[prediction_path.name] = _file_sha256(prediction_path)
+        del partition, predictions
+        gc.collect()
+
+    evaluation_path = root / "evaluation.json"
+    _write_json(
+        evaluation_path,
+        {
+            "schemaVersion": "foundation-probabilistic-baseline-evaluation.v1",
+            "fold": fold,
+            "family": family,
+            "usage": "SMOKE_ONLY" if smoke_dates is not None else "FULL_OOF",
+            "training": training_summary,
+            "partitions": metrics,
+            "releaseStatus": "UNAVAILABLE",
+        },
+        immutable=True,
+    )
+    receipt = {
+        "schemaVersion": "foundation-probabilistic-baseline-receipt.v1",
+        "fold": fold,
+        "family": family,
+        "usage": "SMOKE_ONLY" if smoke_dates is not None else "FULL_OOF",
+        "protocolSha256": _file_sha256(protocol_path),
+        "files": {
+            "model.joblib": _file_sha256(model_path),
+            "evaluation.json": _file_sha256(evaluation_path),
+            **prediction_paths,
+        },
+        "releaseStatus": "UNAVAILABLE",
+    }
+    _write_json(root / "receipt.json", receipt, immutable=True)
+    return receipt
+
+
+def freeze_development_configuration(output_root: Path) -> dict:
+    protocol_path = output_root / "protocol.json"
+    try:
+        protocol = json.loads(protocol_path.read_text())
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_PROTOCOL_INVALID",
+        ) from exc
+    if (
+        protocol.get("schemaVersion") != SCHEMA_VERSION
+        or not protocol.get("fullUniverseEvaluation")
+    ):
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_DEVELOPMENT_INCOMPLETE",
+        )
+    receipts = {}
+    for fold in range(1, 5):
+        for family in MODEL_FAMILIES:
+            root = output_root / f"fold-{fold}" / family
+            receipt = _receipt_is_valid(root)
+            if (
+                receipt is None
+                or receipt.get("fold") != fold
+                or receipt.get("family") != family
+                or receipt.get("usage") != "FULL_OOF"
+            ):
+                raise ProbabilisticBaselineError(
+                    "PROBABILISTIC_BASELINE_DEVELOPMENT_INCOMPLETE",
+                )
+            receipts[f"{fold}:{family}"] = _file_sha256(
+                root / "receipt.json",
+            )
+    payload = {
+        "schemaVersion": "foundation-probabilistic-baseline-development-freeze.v1",
+        "protocolSha256": _file_sha256(protocol_path),
+        "completedDevelopmentFolds": [1, 2, 3, 4],
+        "families": list(MODEL_FAMILIES),
+        "receiptSha256": receipts,
+        "hyperparametersFrozen": True,
+        "calibrationMethodFrozen": True,
+        "confirmationFold": 5,
+        "releaseStatus": "UNAVAILABLE",
+    }
+    _write_json(
+        output_root / "development-freeze.json",
+        payload,
+        immutable=True,
+    )
+    return payload
+
+
 def _round_cny(values: np.ndarray) -> np.ndarray:
     cents = np.nextafter(values * 100.0 + 0.5, np.inf)
     return np.floor(cents) / 100.0
@@ -939,3 +1224,65 @@ def evaluate_predictions(
         ),
         "ranking": _ranking_metrics(partition, predictions["q50"]),
     }
+
+
+def _run_command(args: argparse.Namespace) -> dict:
+    output_root = args.output.expanduser().resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    lock_path = output_root / "run.lock"
+    with lock_path.open("w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise ProbabilisticBaselineError(
+                "PROBABILISTIC_BASELINE_ALREADY_RUNNING",
+            ) from exc
+        with FoundationBaselineDataLoader(
+            args.foundation_root,
+            args.sampling_root,
+            args.ranking_root,
+        ) as loader:
+            return run_baseline_fold(
+                loader,
+                experiment_root=args.experiment_root,
+                output_root=output_root,
+                fold=args.fold,
+                family=args.family,
+                iterations=args.iterations,
+                threads=args.threads,
+                smoke_dates=args.smoke_dates,
+            )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    run_parser = subparsers.add_parser("run")
+    run_parser.add_argument("--experiment-root", type=Path, required=True)
+    run_parser.add_argument("--foundation-root", type=Path, required=True)
+    run_parser.add_argument("--sampling-root", type=Path, required=True)
+    run_parser.add_argument("--ranking-root", type=Path, required=True)
+    run_parser.add_argument("--output", type=Path, required=True)
+    run_parser.add_argument("--fold", type=int, required=True)
+    run_parser.add_argument("--family", choices=MODEL_FAMILIES, required=True)
+    run_parser.add_argument(
+        "--iterations",
+        type=int,
+        default=DEFAULT_ITERATIONS,
+    )
+    run_parser.add_argument("--threads", type=int, default=4)
+    run_parser.add_argument("--smoke-dates", type=int)
+    freeze_parser = subparsers.add_parser("freeze-development")
+    freeze_parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    if args.command == "freeze-development":
+        result = freeze_development_configuration(
+            args.output.expanduser().resolve(),
+        )
+    else:
+        result = _run_command(args)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

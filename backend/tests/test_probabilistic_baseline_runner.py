@@ -21,8 +21,10 @@ from platform_app.modules.experiments.probabilistic_baseline_runner import (
     evaluate_predictions,
     fee_adjusted_returns,
     fit_catboost_baseline,
+    fit_historical_baseline,
     fit_lightgbm_baseline,
     fit_xgboost_baseline,
+    freeze_development_configuration,
     historical_baseline_predictions,
     normalized_weights,
     weighted_quantiles,
@@ -191,6 +193,17 @@ def test_historical_baseline_repeats_frozen_training_distribution():
     assert list(predictions) == ["pWin", "q10", "q50", "q90"]
 
 
+def test_fitted_historical_model_is_reusable():
+    training = partition()
+
+    model = fit_historical_baseline(training)
+
+    expected = historical_baseline_predictions(training, 3)
+    actual = model.predict(np.zeros((3, 2), dtype=np.float32))
+    for name in expected:
+        np.testing.assert_array_equal(actual[name], expected[name])
+
+
 def test_partition_loader_uses_full_date_features_then_training_selection():
     ranking, sampling = baseline_databases()
     contract = {
@@ -330,6 +343,22 @@ def test_artifact_writes_are_atomic_and_immutable(tmp_path):
         np.testing.assert_array_equal(saved["dates"], data.dates)
         np.testing.assert_array_equal(saved["actualReturn"], data.target_return)
         np.testing.assert_array_equal(saved["pWin"], predictions["pWin"])
+
+
+def test_development_freeze_rejects_smoke_protocol(tmp_path):
+    _write_json(
+        tmp_path / "protocol.json",
+        {
+            "schemaVersion": "foundation-probabilistic-baselines.v1",
+            "fullUniverseEvaluation": False,
+        },
+    )
+
+    with pytest.raises(
+        ProbabilisticBaselineError,
+        match="PROBABILISTIC_BASELINE_DEVELOPMENT_INCOMPLETE",
+    ):
+        freeze_development_configuration(tmp_path)
 
 
 def test_baseline_primitives_reject_invalid_inputs():
