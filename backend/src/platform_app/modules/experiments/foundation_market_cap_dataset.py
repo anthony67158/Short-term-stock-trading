@@ -83,6 +83,15 @@ CREATE TABLE IF NOT EXISTS market_cap_rows (
 ) STRICT, WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS market_cap_rows_date_idx
 ON market_cap_rows(decision_date, board);
+CREATE TABLE IF NOT EXISTS market_cap_quality_flags (
+    decision_date TEXT NOT NULL,
+    instrument_id TEXT NOT NULL,
+    flag TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    PRIMARY KEY (decision_date, instrument_id, flag),
+    FOREIGN KEY (instrument_id, decision_date)
+        REFERENCES market_cap_rows(instrument_id, decision_date)
+) STRICT, WITHOUT ROWID;
 """
 
 
@@ -239,9 +248,18 @@ def _market_cap_row(
         row.get("circ_mv"),
         "MARKET_CAP_FLOAT_VALUE_INVALID",
     ) * UNIT_MULTIPLIER
+    quality_flags = []
     if float_shares > total_shares or float_market_cap > total_market_cap:
-        raise FoundationMarketCapDatasetError(
-            "MARKET_CAP_FLOAT_EXCEEDS_TOTAL",
+        quality_flags.append(
+            {
+                "flag": "SOURCE_FLOAT_EXCEEDS_TOTAL",
+                "details": {
+                    "totalShares": _text(total_shares),
+                    "floatShares": _text(float_shares),
+                    "totalMarketCapCny": _text(total_market_cap),
+                    "floatMarketCapCny": _text(float_market_cap),
+                },
+            }
         )
     expected_total = close * total_shares
     expected_float = close * float_shares
@@ -276,6 +294,7 @@ def _market_cap_row(
         "asOf": published_at,
         "availabilityMethod": "CONSERVATIVE_SESSION_CLOSE_ASSUMPTION",
         "sourceRowSha256": canonical_sha256(source),
+        "qualityFlags": quality_flags,
     }
 
 
@@ -529,6 +548,19 @@ class FoundationMarketCapDataset:
                     for row in normalized
                 ],
             )
+            self.db.executemany(
+                "INSERT INTO market_cap_quality_flags VALUES (?, ?, ?, ?)",
+                [
+                    (
+                        row["decisionDate"],
+                        row["instrumentId"],
+                        flag["flag"],
+                        canonical_json(flag["details"]),
+                    )
+                    for row in normalized
+                    for flag in row["qualityFlags"]
+                ],
+            )
             self.db.commit()
         except Exception:
             self.db.rollback()
@@ -679,6 +711,13 @@ class FoundationMarketCapDataset:
                 "SELECT board, COUNT(*) AS count FROM market_cap_rows GROUP BY board",
             )
         }
+        quality_flags = {
+            row["flag"]: row["count"]
+            for row in self.db.execute(
+                "SELECT flag, COUNT(*) AS count "
+                "FROM market_cap_quality_flags GROUP BY flag",
+            )
+        }
         self.db.commit()
         self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         if self.db.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
@@ -705,6 +744,7 @@ class FoundationMarketCapDataset:
             "partitions": completed_partitions,
             "rows": completed_rows,
             "rowsByBoard": boards,
+            "qualityFlags": quality_flags,
             "startDate": bounds["start_date"],
             "endDate": bounds["end_date"],
         }

@@ -561,7 +561,7 @@ def test_market_cap_dataset_is_resumable_and_covers_reference_samples(
     assert row[6] == row[5]
 
 
-def test_market_cap_partition_rejects_missing_or_invalid_rows(
+def test_market_cap_partition_rejects_missing_and_flags_source_anomaly(
     tmp_path,
     sealed_sources,
 ):
@@ -585,12 +585,31 @@ def test_market_cap_partition_rejects_missing_or_invalid_rows(
 
         invalid = _daily_basic_rows(trade_date, dates.index(trade_date))
         invalid[0]["float_share"] = "101"
-        invalid[0]["circ_mv"] = invalid[0]["total_mv"]
+        invalid[0]["circ_mv"] = str(
+            Decimal(invalid[0]["close"]) * Decimal("101")
+        )
+        completed = dataset.ingest_partition(trade_date, invalid)
+        flags = [
+            row["flag"]
+            for row in dataset.db.execute(
+                "SELECT flag FROM market_cap_quality_flags",
+            )
+        ]
+
+        assert completed["status"] == "COMPLETED"
+        assert flags == ["SOURCE_FLOAT_EXCEEDS_TOTAL"]
+
+        next_date = dataset.pending_dates()[0]
+        invalid_number = _daily_basic_rows(
+            next_date,
+            dates.index(next_date),
+        )
+        invalid_number[0]["total_mv"] = "-1"
         with pytest.raises(
             FoundationMarketCapDatasetError,
-            match="MARKET_CAP_FLOAT_EXCEEDS_TOTAL",
+            match="MARKET_CAP_TOTAL_VALUE_INVALID",
         ):
-            dataset.ingest_partition(trade_date, invalid)
+            dataset.ingest_partition(next_date, invalid_number)
 
         with pytest.raises(
             FoundationMarketCapDatasetError,
