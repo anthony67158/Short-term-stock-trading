@@ -22,6 +22,7 @@ from platform_app.modules.experiments.foundation_return_contract import (
     load_frozen_experiment,
 )
 from platform_app.modules.experiments.foundation_return_dataset import (
+    FoundationReturnDatasetError,
     FoundationReturnDatasetReader,
 )
 
@@ -327,8 +328,13 @@ def _adjusted_close_context(
     *,
     instrument_id: str,
     decision_date: str,
-) -> tuple[np.ndarray, float]:
-    history = reader.load_history_sequence(instrument_id, decision_date)
+) -> tuple[np.ndarray, float] | None:
+    try:
+        history = reader.load_history_sequence(instrument_id, decision_date)
+    except FoundationReturnDatasetError as exc:
+        if str(exc) == "FOUNDATION_HISTORY_SEQUENCE_INCOMPLETE":
+            return None
+        raise
     values = np.asarray(
         [float(row["adjustedClose"]) for row in history["rows"]],
         dtype=np.float32,
@@ -390,11 +396,14 @@ def _partition_samples(
         )
         selected = []
         for row in candidates:
-            context, reference_close = _adjusted_close_context(
+            context_result = _adjusted_close_context(
                 reader,
                 instrument_id=row["instrument_id"],
                 decision_date=date,
             )
+            if context_result is None:
+                continue
+            context, reference_close = context_result
             target = fee_adjusted_returns(
                 np.asarray([float(row["forward_return_next_open_5"])]),
                 np.asarray([row["board"]]),

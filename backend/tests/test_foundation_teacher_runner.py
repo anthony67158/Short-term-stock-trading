@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from platform_app.modules.experiments.foundation_return_dataset import (
+    FoundationReturnDatasetError,
     reference_full_fill_net_return,
 )
 from platform_app.modules.experiments.foundation_teacher_runner import (
@@ -40,6 +41,18 @@ class HistoryReader:
                 for value in np.linspace(10.0, 11.0, DEFAULT_CONTEXT_LENGTH)
             ],
         }
+
+
+class IncompleteHistoryReader:
+    def load_history_sequence(
+        self,
+        instrument_id: str,
+        decision_date: str,
+    ) -> dict:
+        del instrument_id, decision_date
+        raise FoundationReturnDatasetError(
+            "FOUNDATION_HISTORY_SEQUENCE_INCOMPLETE",
+        )
 
 
 def ranking_database() -> sqlite3.Connection:
@@ -164,6 +177,17 @@ def test_adjusted_close_context_ends_on_reference_close():
     assert context.shape == (DEFAULT_CONTEXT_LENGTH,)
     assert np.all(np.isfinite(context))
     assert reference_close == pytest.approx(context[-1])
+
+
+def test_adjusted_close_context_skips_incomplete_market_history():
+    assert (
+        _adjusted_close_context(
+            IncompleteHistoryReader(),
+            instrument_id="000001.SZ",
+            decision_date="20200528",
+        )
+        is None
+    )
 
 
 def test_partition_samples_preserve_decision_date():
