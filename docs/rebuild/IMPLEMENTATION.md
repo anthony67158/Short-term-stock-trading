@@ -1437,3 +1437,14 @@ GitHub Actions 自动运行验收（2026-09-17 22:21）：
   重新结算为 v2。
 - 验证：全量 Node `2449/2449`、Python 学习管道 `4/4`、Vite 生产构建、FC 打包和
   YAML 解析均通过；生产 OSS 最新 manifest/view 已完成只读新鲜度与哈希冒烟验证。
+- PR #4 已以 commit `2d61838` 合并到 `main`。合并触发的
+  `daily-learning-challengers`
+  [run #35237807902](https://github.com/anthony67158/Short-term-stock-trading/actions/runs/35237807902)
+  成功，`train` job `105258129102` 用时 52 秒；最新不可变报告为
+  `learning/v1/training-runs/2026-09-17/b8eedb063aa34b8a04af/report.json`，
+  两路均因 0 条合法关联样本安全跳过，且 `productionPointerChanged=false`。
+- FC 已重新部署，远端触发器回读确认
+  `CRON_TZ=Asia/Shanghai 0 20,35 17 * * 1-5`。部署后受保护结算实测成功：
+  只读扫描 4 个账户，导出 64 条人工执行、识别 6 条成熟实际归因；因这些历史归因
+  没有可验证的预测 `decisionId`，最新训练视图仍为选股 0 行、持仓 0 行，没有强行
+  配对或伪造训练样本。
