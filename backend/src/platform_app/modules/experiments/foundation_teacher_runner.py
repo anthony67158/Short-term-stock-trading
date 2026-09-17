@@ -30,8 +30,8 @@ from platform_app.modules.experiments.ranking_model_trainer import (
     _verified_ranking_database,
 )
 
-SCHEMA_VERSION = "foundation-teacher-screening.v1"
-DATASET_SCHEMA_VERSION = "foundation-teacher-screening-dataset.v1"
+SCHEMA_VERSION = "foundation-teacher-screening.v2"
+DATASET_SCHEMA_VERSION = "foundation-teacher-screening-dataset.v2"
 DEFAULT_CONTEXT_LENGTH = 90
 DEFAULT_FORECAST_HORIZON = 5
 DEFAULT_SAMPLES_PER_PARTITION = 2_048
@@ -93,6 +93,7 @@ class TeacherDataset:
     instruments: np.ndarray
     boards: np.ndarray
     sample_weight: np.ndarray
+    forecast_steps: np.ndarray
     folds: np.ndarray
     partitions: np.ndarray
 
@@ -109,6 +110,7 @@ class TeacherDataset:
                     self.instruments,
                     self.boards,
                     self.sample_weight,
+                    self.forecast_steps,
                     self.folds,
                     self.partitions,
                 )
@@ -116,6 +118,8 @@ class TeacherDataset:
             or not np.all(np.isfinite(self.contexts))
             or not np.all(np.isfinite(self.actual_return))
             or np.any(self.sample_weight <= 0)
+            or np.any(self.forecast_steps < 1)
+            or np.any(self.forecast_steps > DEFAULT_FORECAST_HORIZON)
         ):
             raise FoundationTeacherError(
                 "FOUNDATION_TEACHER_DATASET_INVALID",
@@ -148,7 +152,7 @@ def _write_json(path: Path, payload: dict, *, immutable: bool = False) -> None:
 
 def _score(fold: int, partition: str, date: str, instrument: str) -> bytes:
     return hashlib.sha256(
-        f"foundation-teacher-v1:{fold}:{partition}:{date}:{instrument}".encode(),
+        f"foundation-teacher-v2:{fold}:{partition}:{date}:{instrument}".encode(),
     ).digest()
 
 
@@ -170,9 +174,9 @@ def _mature_return_context(
     instrument_id: str,
     decision_date: str,
     context_length: int = DEFAULT_CONTEXT_LENGTH,
-) -> np.ndarray | None:
+) -> tuple[np.ndarray, int] | None:
     rows = ranking.execute(
-        "SELECT board, execution_date, terminal_date, "
+        "SELECT decision_date, board, execution_date, terminal_date, "
         "forward_return_next_open_5 FROM ranking_samples "
         "WHERE instrument_id = ? AND decision_date < ? AND terminal_date <= ? "
         "ORDER BY decision_date DESC LIMIT ?",
@@ -187,7 +191,14 @@ def _mature_return_context(
         np.asarray([row["execution_date"] for row in rows]),
         np.asarray([row["terminal_date"] for row in rows]),
     )
-    return values.astype(np.float32)
+    forecast_step = ranking.execute(
+        "SELECT COUNT(*) FROM ranking_samples "
+        "WHERE instrument_id = ? AND decision_date > ? AND decision_date <= ?",
+        (instrument_id, rows[-1]["decision_date"], decision_date),
+    ).fetchone()[0]
+    if not 1 <= forecast_step <= DEFAULT_FORECAST_HORIZON:
+        return None
+    return values.astype(np.float32), forecast_step
 
 
 def _partition_samples(
@@ -226,20 +237,21 @@ def _partition_samples(
         )
         selected = []
         for row in candidates:
-            context = _mature_return_context(
+            context_result = _mature_return_context(
                 ranking,
                 instrument_id=row["instrument_id"],
                 decision_date=date,
             )
-            if context is None:
+            if context_result is None:
                 continue
+            context, forecast_step = context_result
             target = fee_adjusted_returns(
                 np.asarray([float(row["forward_return_next_open_5"])]),
                 np.asarray([row["board"]]),
                 np.asarray([row["execution_date"]]),
                 np.asarray([row["terminal_date"]]),
             )[0]
-            selected.append((row, context, target))
+            selected.append((row, context, target, forecast_step))
             if len(selected) == quotas[date]:
                 break
         if len(selected) != quotas[date]:
@@ -248,8 +260,8 @@ def _partition_samples(
             )
         weight = 1.0 / len(selected)
         records.extend(
-            (row, context, target, weight)
-            for row, context, target in selected
+            (row, context, target, weight, forecast_step)
+            for row, context, target, forecast_step in selected
         )
     return TeacherDataset(
         contexts=np.stack([item[1] for item in records]),
@@ -264,6 +276,7 @@ def _partition_samples(
             dtype=np.int8,
         ),
         sample_weight=np.asarray([item[3] for item in records]),
+        forecast_steps=np.asarray([item[4] for item in records], dtype=np.int8),
         folds=np.full(len(records), fold, dtype=np.int8),
         partitions=np.full(len(records), partition.encode(), dtype="S24"),
     )
@@ -336,6 +349,7 @@ def export_teacher_dataset(
             instruments=combined.instruments,
             boards=combined.boards,
             sampleWeight=combined.sample_weight,
+            forecastSteps=combined.forecast_steps,
             folds=combined.folds,
             partitions=combined.partitions,
         )
@@ -355,6 +369,10 @@ def export_teacher_dataset(
         "partitions": list(SCREENING_PARTITIONS),
         "contextLength": DEFAULT_CONTEXT_LENGTH,
         "forecastHorizon": DEFAULT_FORECAST_HORIZON,
+        "forecastStepCounts": {
+            str(step): int(np.sum(combined.forecast_steps == step))
+            for step in np.unique(combined.forecast_steps)
+        },
         "target": "r_net_5d",
         "contextPolicy": (
             "LAST_90_MATURED_R_NET_5D_WITH_TERMINAL_DATE_NOT_AFTER_DECISION"
@@ -389,6 +407,7 @@ def load_teacher_dataset(root: Path) -> tuple[TeacherDataset, dict]:
             instruments=saved["instruments"].copy(),
             boards=saved["boards"].copy(),
             sample_weight=saved["sampleWeight"].copy(),
+            forecast_steps=saved["forecastSteps"].copy(),
             folds=saved["folds"].copy(),
             partitions=saved["partitions"].copy(),
         )

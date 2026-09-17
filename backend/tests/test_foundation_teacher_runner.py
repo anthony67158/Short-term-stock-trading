@@ -65,15 +65,17 @@ def test_daily_quotas_are_equal_and_deterministic():
 def test_mature_context_excludes_unmatured_labels():
     connection = ranking_database()
 
-    context = _mature_return_context(
+    result = _mature_return_context(
         connection,
         instrument_id="000001.SZ",
         decision_date="20200528",
     )
 
-    assert context is not None
+    assert result is not None
+    context, forecast_step = result
     assert context.shape == (DEFAULT_CONTEXT_LENGTH,)
     assert np.all(np.isfinite(context))
+    assert forecast_step == 5
     connection.close()
 
 
@@ -91,6 +93,7 @@ def test_partition_samples_preserve_decision_date():
 
     assert dataset.dates.tolist() == [20200407]
     assert dataset.partitions.tolist() == [b"test"]
+    assert dataset.forecast_steps.tolist() == [1]
     connection.close()
 
 
@@ -106,6 +109,7 @@ def test_teacher_dataset_rejects_wrong_context_shape():
             instruments=np.array([b"a", b"b"]),
             boards=np.zeros(2),
             sample_weight=np.ones(2),
+            forecast_steps=np.ones(2),
             folds=np.ones(2),
             partitions=np.array([b"test", b"test"]),
         )
