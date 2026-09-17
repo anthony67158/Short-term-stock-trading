@@ -721,7 +721,7 @@ def _seal_sampling(tmp_path, sealed_sources, foundation_root, market_cap_root):
         foundation_dataset_root=foundation_root,
         ranking_dataset_root=ranking_root,
         market_cap_dataset_root=market_cap_root,
-        maximum_windows_per_fold=40,
+        maximum_windows_per_fold=80,
         sampling_seed=17,
         folds=folds,
     ) as dataset:
@@ -771,6 +771,17 @@ def test_stratified_selection_is_deterministic_and_weighted():
         probability = Decimal(stratum["samplingProbability"])
         weight = Decimal(stratum["inverseProbabilityWeight"])
         assert probability * weight == 1
+    with pytest.raises(
+        FoundationSamplingDatasetError,
+        match="FOUNDATION_SAMPLING_STRATA_SUPPORT_INSUFFICIENT",
+    ):
+        select_stratified_training_rows(
+            rows,
+            fold=1,
+            decision_date="20250101",
+            quota=1,
+            sampling_seed=17,
+        )
 
 
 def test_sampling_dataset_keeps_full_evaluation_and_all_training_dates(
@@ -794,7 +805,7 @@ def test_sampling_dataset_keeps_full_evaluation_and_all_training_dates(
 
     assert len(manifest["folds"]) == 5
     assert manifest["fullUniverseEvaluation"] is True
-    assert all(fold["trainSelected"] <= 40 for fold in manifest["folds"])
+    assert all(fold["trainSelected"] <= 80 for fold in manifest["folds"])
     assert all(fold["testRows"] == 6 for fold in manifest["folds"])
     assert all(
         fold["trainingSelection"] == "DETERMINISTIC_STRATIFIED_SAMPLE"

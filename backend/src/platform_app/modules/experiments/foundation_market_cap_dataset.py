@@ -773,6 +773,7 @@ def main() -> None:
     parser.add_argument("--market-root", type=Path, required=True)
     parser.add_argument("--maximum-partitions", type=int)
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--progress-every", type=int, default=100)
     parser.add_argument("--seal", action="store_true")
     args = parser.parse_args()
     with FoundationMarketCapDataset(
@@ -782,12 +783,19 @@ def main() -> None:
         ranking_dataset_root=args.ranking_root,
         market_dataset_root=args.market_root,
     ) as dataset:
-        for result in dataset.build(
-            TushareClient(),
-            maximum_partitions=args.maximum_partitions,
-            workers=args.workers,
+        for index, result in enumerate(
+            dataset.build(
+                TushareClient(),
+                maximum_partitions=args.maximum_partitions,
+                workers=args.workers,
+            ),
+            1,
         ):
-            print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+            if args.progress_every <= 0 or index % args.progress_every == 0:
+                print(
+                    json.dumps(result, ensure_ascii=False, sort_keys=True),
+                    flush=True,
+                )
         if args.seal:
             print(
                 json.dumps(dataset.seal(), ensure_ascii=False, sort_keys=True),
