@@ -577,6 +577,44 @@ def test_market_cap_partition_rejects_missing_or_invalid_rows(
             dataset.seal()
 
 
+def test_market_cap_parallel_build_commits_each_completed_partition(
+    tmp_path,
+    sealed_sources,
+):
+    market_root, ranking_root, _labels_root, dates = sealed_sources
+    foundation_root, _manifest = _seal_foundation(tmp_path, sealed_sources)
+
+    class FakeClient:
+        def rows(self, api_name, params, fields):
+            assert api_name == "daily_basic"
+            assert "total_mv" in fields
+            trade_date = params["trade_date"]
+            return _daily_basic_rows(trade_date, dates.index(trade_date))
+
+    root = tmp_path / "parallel-market-cap"
+    with FoundationMarketCapDataset(
+        root,
+        dataset_id="parallel-market-cap-v1",
+        foundation_dataset_root=foundation_root,
+        ranking_dataset_root=ranking_root,
+        market_dataset_root=market_root,
+    ) as dataset:
+        results = list(
+            dataset.build(
+                FakeClient(),
+                maximum_partitions=4,
+                workers=2,
+            )
+        )
+        stored = dataset.db.execute(
+            "SELECT COUNT(*) FROM market_cap_partitions",
+        ).fetchone()[0]
+
+    assert len(results) == 4
+    assert stored == 4
+    assert all(result["status"] == "COMPLETED" for result in results)
+
+
 def _seal_market_cap(tmp_path, sealed_sources, foundation_root):
     market_root, ranking_root, _labels_root, dates = sealed_sources
     root = tmp_path / "market-cap"

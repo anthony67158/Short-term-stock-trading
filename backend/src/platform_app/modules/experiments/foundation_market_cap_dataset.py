@@ -1,6 +1,7 @@
 """Resumable point-in-time market-cap data for foundation-model sampling."""
 
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -500,6 +501,20 @@ class FoundationMarketCapDataset:
         *,
         maximum_attempts: int = 5,
     ) -> dict:
+        rows = self.fetch_source_rows(
+            decision_date,
+            client,
+            maximum_attempts=maximum_attempts,
+        )
+        return self.ingest_partition(decision_date, rows)
+
+    @staticmethod
+    def fetch_source_rows(
+        decision_date: str,
+        client: TushareClient,
+        *,
+        maximum_attempts: int = 5,
+    ) -> list[dict]:
         retryable = {
             "MARKET_DATA_RATE_LIMITED",
             "MARKET_DATA_UPSTREAM_FAILED",
@@ -511,7 +526,7 @@ class FoundationMarketCapDataset:
                     {"trade_date": decision_date},
                     SOURCE_FIELDS,
                 )
-                return self.ingest_partition(decision_date, rows)
+                return rows
             except HistoricalMarketError as exc:
                 if str(exc) not in retryable or attempt == maximum_attempts:
                     raise
@@ -523,6 +538,7 @@ class FoundationMarketCapDataset:
         client: TushareClient,
         *,
         maximum_partitions: int | None = None,
+        workers: int = 1,
     ):
         pending = self.pending_dates()
         if maximum_partitions is not None:
@@ -531,8 +547,47 @@ class FoundationMarketCapDataset:
                     "MARKET_CAP_MAXIMUM_PARTITIONS_INVALID",
                 )
             pending = pending[:maximum_partitions]
-        for decision_date in pending:
-            yield self.fetch_partition(decision_date, client)
+        if workers < 1 or workers > 8:
+            raise FoundationMarketCapDatasetError(
+                "MARKET_CAP_WORKER_COUNT_INVALID",
+            )
+        if workers == 1:
+            for decision_date in pending:
+                yield self.fetch_partition(decision_date, client)
+            return
+
+        pending_iterator = iter(pending)
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=workers,
+            thread_name_prefix="foundation-market-cap",
+        ) as executor:
+            active = {}
+            for _ in range(workers):
+                decision_date = next(pending_iterator, None)
+                if decision_date is None:
+                    break
+                future = executor.submit(
+                    self.fetch_source_rows,
+                    decision_date,
+                    client,
+                )
+                active[future] = decision_date
+            while active:
+                done, _pending = concurrent.futures.wait(
+                    active,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    decision_date = active.pop(future)
+                    yield self.ingest_partition(decision_date, future.result())
+                    next_date = next(pending_iterator, None)
+                    if next_date is not None:
+                        next_future = executor.submit(
+                            self.fetch_source_rows,
+                            next_date,
+                            client,
+                        )
+                        active[next_future] = next_date
 
     def seal(self) -> dict:
         expected_partitions = self.ranking.execute(
@@ -621,6 +676,7 @@ def main() -> None:
     parser.add_argument("--ranking-root", type=Path, required=True)
     parser.add_argument("--market-root", type=Path, required=True)
     parser.add_argument("--maximum-partitions", type=int)
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--seal", action="store_true")
     args = parser.parse_args()
     with FoundationMarketCapDataset(
@@ -633,6 +689,7 @@ def main() -> None:
         for result in dataset.build(
             TushareClient(),
             maximum_partitions=args.maximum_partitions,
+            workers=args.workers,
         ):
             print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
         if args.seal:
