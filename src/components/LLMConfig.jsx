@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Icon from './Icon'
-import { llmConfigStore } from '../llmConfigStore'
+import ModelTrainingCenter from './ModelTrainingCenter'
+import {
+  llmConfigStore,
+  useLLMConfigView,
+} from '../llmConfigStore'
 import { api } from '../apiBase'
 import { accountRequestHeaders } from '../quantModel'
 
@@ -105,6 +109,7 @@ function healthLabel(health) {
 }
 
 export default function LLMConfig() {
+  const view = useLLMConfigView()
   const [busy, setBusy] = useState(false)
   const [roles, setRoles] = useState({})
   const [roleSlots, setRoleSlots] = useState({})
@@ -139,8 +144,8 @@ export default function LLMConfig() {
   }, [])
 
   useEffect(() => {
-    loadCurrent()
-  }, [loadCurrent])
+    if (view === 'endpoints') loadCurrent()
+  }, [loadCurrent, view])
 
   const poolById = useMemo(
     () => Object.fromEntries((pool || []).map((item) => [item.id, item])),
@@ -323,6 +328,20 @@ export default function LLMConfig() {
     }
   }
 
+  const handleTabsKeyDown = (event) => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+      return
+    }
+    event.preventDefault()
+    const nextView = event.key === 'ArrowRight' || event.key === 'End'
+      ? 'training'
+      : 'endpoints'
+    llmConfigStore.setView(nextView)
+    event.currentTarget
+      .querySelector(`[data-view="${nextView}"]`)
+      ?.focus()
+  }
+
   const renderEndpoint = (role, endpoint, index) => {
     const key = endpointKey(role, index)
     const status = testing[key] || {}
@@ -470,15 +489,17 @@ export default function LLMConfig() {
         <div className="modal-bar">
           <div className="modal-title">
             <Icon name="brain" size={18} />
-            模型角色与端点
-            <span className="llm-role-count">
-              {ROLE_ORDER.length} 个角色 · {
-                ROLE_ORDER.reduce(
-                  (sum, role) => sum + Math.max(1, Number(roleSlots?.[role]) || 1),
-                  0,
-                )
-              } 个端点
-            </span>
+            模型设置
+            {view === 'endpoints' && (
+              <span className="llm-role-count">
+                {ROLE_ORDER.length} 个角色 · {
+                  ROLE_ORDER.reduce(
+                    (sum, role) => sum + Math.max(1, Number(roleSlots?.[role]) || 1),
+                    0,
+                  )
+                } 个端点
+              </span>
+            )}
           </div>
           <button
             type="button"
@@ -490,59 +511,113 @@ export default function LLMConfig() {
           </button>
         </div>
 
-        <div className="llm-body llm-role-list">
-          {busy && !Object.keys(roleEndpoints).length ? (
-            <div className="llm-testing">
-              <Icon name="refresh" size={14} className="spin" />
-              正在读取角色端点
-            </div>
-          ) : ROLE_ORDER.map((role) => {
-            const meta = ROLE_META[role] || ROLE_META.assistant
-            const endpoints = roleEndpoints[role] || []
-            return (
-              <section className="llm-role-group" key={role}>
-                <header>
-                  <span className="llm-role-icon">
-                    <Icon name={meta.icon} size={14} />
-                  </span>
-                  <strong>{roles[role]?.label || meta.label}</strong>
-                  <small>{meta.badge}</small>
-                </header>
-                <div className={'llm-role-endpoints' + (
-                  endpoints.length > 1 ? ' dual' : ''
-                )}>
-                  {endpoints.map((endpoint, index) =>
-                    renderEndpoint(role, endpoint, index)
-                  )}
-                </div>
-              </section>
-            )
-          })}
-          {error && <div className="err llm-msg">{error}</div>}
-          {notice && <div className="llm-msg ok">{notice}</div>}
+        <div
+          className="llm-tabs"
+          role="tablist"
+          aria-label="模型设置视图"
+          onKeyDown={handleTabsKeyDown}
+        >
+          <button
+            type="button"
+            role="tab"
+            id="model-settings-tab-endpoints"
+            data-view="endpoints"
+            aria-controls="model-settings-panel-endpoints"
+            aria-selected={view === 'endpoints'}
+            tabIndex={view === 'endpoints' ? 0 : -1}
+            className={view === 'endpoints' ? 'active' : ''}
+            onClick={() => llmConfigStore.setView('endpoints')}
+          >
+            <Icon name="brain" size={14} />
+            模型角色与端点
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="model-settings-tab-training"
+            data-view="training"
+            aria-controls="model-settings-panel-training"
+            aria-selected={view === 'training'}
+            tabIndex={view === 'training' ? 0 : -1}
+            className={view === 'training' ? 'active' : ''}
+            onClick={() => llmConfigStore.setView('training')}
+          >
+            <Icon name="gauge" size={14} />
+            训练中心
+          </button>
         </div>
 
-        <div className="llm-actions">
-          <button
-            type="button"
-            className="btn"
-            disabled={busy}
-            onClick={testAll}
+        {view === 'training' ? (
+          <div
+            id="model-settings-panel-training"
+            className="llm-body llm-training-body"
+            role="tabpanel"
+            aria-labelledby="model-settings-tab-training"
           >
-            <Icon name={busy ? 'refresh' : 'gauge'} size={14}
-              className={busy ? 'spin' : ''} />
-            验证全部
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy}
-            onClick={save}
-          >
-            <Icon name="check" size={14} />
-            保存配置
-          </button>
-        </div>
+            <ModelTrainingCenter />
+          </div>
+        ) : (
+          <>
+            <div
+              id="model-settings-panel-endpoints"
+              className="llm-body llm-role-list"
+              role="tabpanel"
+              aria-labelledby="model-settings-tab-endpoints"
+            >
+              {busy && !Object.keys(roleEndpoints).length ? (
+                <div className="llm-testing">
+                  <Icon name="refresh" size={14} className="spin" />
+                  正在读取角色端点
+                </div>
+              ) : ROLE_ORDER.map((role) => {
+                const meta = ROLE_META[role] || ROLE_META.assistant
+                const endpoints = roleEndpoints[role] || []
+                return (
+                  <section className="llm-role-group" key={role}>
+                    <header>
+                      <span className="llm-role-icon">
+                        <Icon name={meta.icon} size={14} />
+                      </span>
+                      <strong>{roles[role]?.label || meta.label}</strong>
+                      <small>{meta.badge}</small>
+                    </header>
+                    <div className={'llm-role-endpoints' + (
+                      endpoints.length > 1 ? ' dual' : ''
+                    )}>
+                      {endpoints.map((endpoint, index) =>
+                        renderEndpoint(role, endpoint, index)
+                      )}
+                    </div>
+                  </section>
+                )
+              })}
+              {error && <div className="err llm-msg">{error}</div>}
+              {notice && <div className="llm-msg ok">{notice}</div>}
+            </div>
+
+            <div className="llm-actions">
+              <button
+                type="button"
+                className="btn"
+                disabled={busy}
+                onClick={testAll}
+              >
+                <Icon name={busy ? 'refresh' : 'gauge'} size={14}
+                  className={busy ? 'spin' : ''} />
+                验证全部
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy}
+                onClick={save}
+              >
+                <Icon name="check" size={14} />
+                保存配置
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

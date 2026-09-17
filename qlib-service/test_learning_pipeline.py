@@ -143,6 +143,38 @@ class LearningPipelineTest(unittest.TestCase):
                 "SKIPPED_INSUFFICIENT_MATURED_DATA",
             )
             self.assertFalse(report["productionPointerChanged"])
+            self.assertEqual(
+                report["stockPick"]["training"]["labelVersion"],
+                "stock-pick-t5-fee-v2",
+            )
+            self.assertEqual(
+                report["stockPick"]["training"]["data"],
+                {
+                    "samples": 1,
+                    "dates": 1,
+                    "startDate": "2026-09-10",
+                    "endDate": "2026-09-10",
+                    "trainSamples": 0,
+                    "testSamples": 1,
+                    "trainDates": 0,
+                    "testDates": 1,
+                },
+            )
+            self.assertEqual(
+                report["position"]["training"]["features"],
+                [
+                    "actionCode",
+                    "referencePrice",
+                    "entryPrice",
+                    "stopLoss",
+                    "takeProfit",
+                    "pFill",
+                    "pWinGivenFill",
+                    "expectedNetR",
+                ],
+            )
+            self.assertEqual(report["stockPick"]["seedMetrics"], [])
+            self.assertEqual(report["position"]["artifacts"], [])
             self.assertTrue((output / "report.json").exists())
             self.assertFalse(
                 (output / "stock-pick-challenger.pkl").exists()
