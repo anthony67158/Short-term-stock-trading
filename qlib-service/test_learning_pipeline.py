@@ -55,9 +55,17 @@ class LearningPipelineTest(unittest.TestCase):
 
     def test_training_view_rejects_stale_date_and_hash_mismatch(self):
         now = datetime(2026, 9, 17, 17, 15, tzinfo=timezone.utc)
+        generated_at = int(datetime(
+            2026,
+            9,
+            17,
+            9,
+            20,
+            tzinfo=timezone.utc,
+        ).timestamp() * 1000)
         view = {
             "schemaVersion": "learning-training-view.v1",
-            "generatedAt": 1,
+            "generatedAt": generated_at,
             "date": "2026-09-17",
             "stockPick": [],
             "position": [],
@@ -71,6 +79,7 @@ class LearningPipelineTest(unittest.TestCase):
         view["contentHash"] = content_hash
         manifest = {
             "schemaVersion": "learning-manifest.v1",
+            "generatedAt": generated_at,
             "date": "2026-09-17",
             "viewHash": content_hash,
         }
@@ -84,6 +93,21 @@ class LearningPipelineTest(unittest.TestCase):
         invalid_view = {**view, "stockPick": [{"sampleId": "tampered"}]}
         with self.assertRaisesRegex(RuntimeError, "content hash mismatch"):
             validate_training_view(manifest, invalid_view, now)
+
+        before_close = int(datetime(
+            2026,
+            9,
+            17,
+            8,
+            59,
+            tzinfo=timezone.utc,
+        ).timestamp() * 1000)
+        with self.assertRaisesRegex(RuntimeError, "not generated after close"):
+            validate_training_view(
+                {**manifest, "generatedAt": before_close},
+                view,
+                now,
+            )
 
     def test_insufficient_samples_skip_without_model_artifacts(self):
         with tempfile.TemporaryDirectory() as directory:

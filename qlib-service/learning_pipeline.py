@@ -81,18 +81,37 @@ def validate_training_view(
     view: dict,
     now: datetime | None = None,
 ) -> None:
+    current = (now or datetime.now(timezone.utc)).astimezone(BEIJING_TIMEZONE)
     if manifest.get("schemaVersion") != "learning-manifest.v1":
         raise RuntimeError("unsupported learning manifest")
     manifest_date = str(manifest.get("date") or "")
-    expected_date = expected_settlement_date(now)
+    expected_date = expected_settlement_date(current)
     if manifest_date < expected_date:
         raise RuntimeError(
             f"stale learning manifest: {manifest_date} < {expected_date}"
         )
+    if manifest_date > current.date().isoformat():
+        raise RuntimeError("learning manifest date is in the future")
+    try:
+        generated_at = datetime.fromtimestamp(
+            float(manifest["generatedAt"]) / 1000,
+            timezone.utc,
+        ).astimezone(BEIJING_TIMEZONE)
+    except (KeyError, TypeError, ValueError, OSError):
+        raise RuntimeError("learning manifest timestamp is invalid") from None
+    if (
+        generated_at.date().isoformat() != manifest_date
+        or generated_at.hour < 17
+    ):
+        raise RuntimeError("learning manifest was not generated after close")
+    if generated_at > current + timedelta(minutes=5):
+        raise RuntimeError("learning manifest timestamp is in the future")
     if view.get("schemaVersion") != "learning-training-view.v1":
         raise RuntimeError("unsupported learning training view")
     if str(view.get("date") or "") != manifest_date:
         raise RuntimeError("learning manifest and view dates differ")
+    if int(view.get("generatedAt") or 0) != int(manifest["generatedAt"]):
+        raise RuntimeError("learning manifest and view timestamps differ")
     declared_hash = str(view.get("contentHash") or "")
     content = {key: value for key, value in view.items() if key != "contentHash"}
     actual_hash = _canonical_hash(content)
