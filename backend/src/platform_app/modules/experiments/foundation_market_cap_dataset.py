@@ -428,7 +428,7 @@ class FoundationMarketCapDataset:
             if row["decision_date"] not in completed
         ]
 
-    def _source_code_map(self, decision_date: str) -> dict[str, str]:
+    def _source_code_map(self, decision_date: str) -> dict[str, tuple[str, int]]:
         current_by_instrument = {
             row["instrument_id"]: row["source_code"]
             for row in self.market.execute(
@@ -448,18 +448,18 @@ class FoundationMarketCapDataset:
                     "MARKET_CAP_ACTIVE_ALIAS_DUPLICATE",
                 )
             active_aliases[instrument_id] = row["source_code"]
-        active_by_instrument = {
-            instrument_id: active_aliases.get(instrument_id, source_code)
+        resolution = {
+            source_code: (instrument_id, 1)
             for instrument_id, source_code in current_by_instrument.items()
         }
-        if len(set(active_by_instrument.values())) != len(active_by_instrument):
-            raise FoundationMarketCapDatasetError(
-                "MARKET_CAP_ACTIVE_SOURCE_CODE_DUPLICATE",
-            )
-        return {
-            source_code: instrument_id
-            for instrument_id, source_code in active_by_instrument.items()
-        }
+        for instrument_id, source_code in active_aliases.items():
+            existing = resolution.get(source_code)
+            if existing and existing[0] != instrument_id:
+                raise FoundationMarketCapDatasetError(
+                    "MARKET_CAP_ACTIVE_SOURCE_CODE_DUPLICATE",
+                )
+            resolution[source_code] = (instrument_id, 0)
+        return resolution
 
     def ingest_partition(self, decision_date: str, source_rows: list[dict]) -> dict:
         if re.fullmatch(r"\d{8}", decision_date) is None:
@@ -493,6 +493,7 @@ class FoundationMarketCapDataset:
             )
         source_codes = self._source_code_map(decision_date)
         accepted = {}
+        accepted_priorities = {}
         seen_source_codes = set()
         for source_row in source_rows:
             source_code = str(source_row.get("ts_code") or "").upper()
@@ -501,19 +502,28 @@ class FoundationMarketCapDataset:
                     "MARKET_CAP_SOURCE_DUPLICATE",
                 )
             seen_source_codes.add(source_code)
-            instrument_id = source_codes.get(source_code)
+            resolved = source_codes.get(source_code)
+            if resolved is None:
+                continue
+            instrument_id, priority = resolved
             if instrument_id not in expected:
                 continue
             if instrument_id in accepted:
-                raise FoundationMarketCapDatasetError(
-                    "MARKET_CAP_INSTRUMENT_DUPLICATE",
-                )
+                if priority < accepted_priorities[instrument_id]:
+                    pass
+                elif priority > accepted_priorities[instrument_id]:
+                    continue
+                else:
+                    raise FoundationMarketCapDatasetError(
+                        "MARKET_CAP_INSTRUMENT_DUPLICATE",
+                    )
             accepted[instrument_id] = _market_cap_row(
                 source_row,
                 instrument_id=instrument_id,
                 board=expected[instrument_id],
                 decision_date=decision_date,
             )
+            accepted_priorities[instrument_id] = priority
         missing = sorted(set(expected) - set(accepted))
         if missing:
             raise FoundationMarketCapDatasetError(

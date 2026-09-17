@@ -549,6 +549,10 @@ def test_market_cap_dataset_is_resumable_and_covers_reference_samples(
             "float_market_cap_cny, effective_at, published_at, as_of "
             "FROM market_cap_rows ORDER BY decision_date, instrument_id LIMIT 1",
         ).fetchone()
+        aliased_source = database.execute(
+            "SELECT DISTINCT source_code FROM market_cap_rows "
+            "WHERE instrument_id = 'SZ.000002'",
+        ).fetchone()[0]
     assert row[0:2] == ("1000000", "800000")
     assert Decimal(row[2]) == Decimal("1000000") * Decimal(
         _daily_basic_rows(manifest["startDate"], dates.index(manifest["startDate"]))[
@@ -559,6 +563,7 @@ def test_market_cap_dataset_is_resumable_and_covers_reference_samples(
     assert row[4].endswith("T15:00:00+08:00")
     assert row[5].endswith("T18:00:00+08:00")
     assert row[6] == row[5]
+    assert aliased_source == "000042.SZ"
 
 
 def test_market_cap_partition_rejects_missing_and_flags_source_anomaly(
