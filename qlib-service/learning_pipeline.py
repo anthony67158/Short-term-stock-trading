@@ -197,6 +197,44 @@ class Gate:
     status: str
     reasons: list[str]
     metrics: dict[str, float]
+    seedMetrics: list[dict[str, float]]
+
+
+def _training_contract(
+    rows: list[dict],
+    *,
+    algorithm: str,
+    objective: str,
+    features: tuple[str, ...],
+    label: str,
+    label_version: str,
+    minimum_samples: int,
+    minimum_dates: int,
+) -> dict:
+    dates = _dates(rows)
+    train_rows, test_rows = _split(rows) if dates else ([], [])
+    return {
+        "algorithm": algorithm,
+        "objective": objective,
+        "features": list(features),
+        "label": label,
+        "labelVersion": label_version,
+        "data": {
+            "samples": len(rows),
+            "dates": len(dates),
+            "startDate": dates[0] if dates else None,
+            "endDate": dates[-1] if dates else None,
+            "trainSamples": len(train_rows),
+            "testSamples": len(test_rows),
+            "trainDates": len(_dates(train_rows)),
+            "testDates": len(_dates(test_rows)),
+        },
+        "gate": {
+            "minimumSamples": minimum_samples,
+            "minimumDates": minimum_dates,
+            "allSeedsMustNotRegress": True,
+        },
+    }
 
 
 def train_stock_pick(rows: list[dict], output: Path) -> Gate:
@@ -210,12 +248,12 @@ def train_stock_pick(rows: list[dict], output: Path) -> Gate:
         return Gate(False, "SKIPPED_INSUFFICIENT_MATURED_DATA", reasons, {
             "samples": float(len(rows)),
             "dates": float(len(dates)),
-        })
+        }, [])
     train, test = _split(rows)
     if len(_dates(train)) < 6 or len(_dates(test)) < 3:
         return Gate(False, "SKIPPED_INSUFFICIENT_MATURED_DATA", [
             "stock_pick_walk_forward_split_insufficient"
-        ], {"samples": float(len(rows)), "dates": float(len(dates))})
+        ], {"samples": float(len(rows)), "dates": float(len(dates))}, [])
     baseline = np.asarray([_number(row.get("rankingScore")) for row in test])
     baseline_top5 = _topk_mean(test, baseline)
     seed_metrics = []
@@ -257,6 +295,10 @@ def train_stock_pick(rows: list[dict], output: Path) -> Gate:
             "challengerTop5ReturnPct": challenger,
             "minimumSeedTop5ReturnPct": minimum_seed,
         },
+        [
+            {"seed": float(seed), "top5ReturnPct": metric}
+            for seed, metric in zip(SEEDS, seed_metrics, strict=True)
+        ],
     )
 
 
@@ -272,7 +314,7 @@ def train_position(rows: list[dict], output: Path) -> Gate:
         return Gate(False, "SKIPPED_INSUFFICIENT_MATURED_DATA", reasons, {
             "samples": float(len(rows)),
             "dates": float(len(dates)),
-        })
+        }, [])
     train, test = _split(rows)
     baseline = np.asarray([
         _number(row.get("expectedNetR")) for row in test
@@ -316,6 +358,10 @@ def train_position(rows: list[dict], output: Path) -> Gate:
             "challengerMaeR": challenger_mae,
             "maximumSeedMaeR": maximum_seed_mae,
         },
+        [
+            {"seed": float(seed), "maeR": metric}
+            for seed, metric in zip(SEEDS, seed_metrics, strict=True)
+        ],
     )
 
 
@@ -327,6 +373,38 @@ def train(view_path: Path, output: Path) -> dict:
     stock = train_stock_pick(list(view.get("stockPick") or []), output)
     position = train_position(list(view.get("position") or []), output)
     generated_at = datetime.now(timezone.utc).isoformat()
+    stock_report = {
+        **asdict(stock),
+        "training": _training_contract(
+            list(view.get("stockPick") or []),
+            algorithm="LightGBM LGBMRanker",
+            objective="lambdarank",
+            features=STOCK_FEATURES,
+            label="T+5双边费后收益同日排序",
+            label_version="stock-pick-t5-fee-v2",
+            minimum_samples=60,
+            minimum_dates=12,
+        ),
+        "artifacts": (
+            ["stock-pick-challenger.pkl"] if stock.eligible else []
+        ),
+    }
+    position_report = {
+        **asdict(position),
+        "training": _training_contract(
+            list(view.get("position") or []),
+            algorithm="LightGBM LGBMRegressor",
+            objective="huber",
+            features=POSITION_FEATURES,
+            label="人工实际执行费后 realizedNetR",
+            label_version="position-actual-net-r.v1",
+            minimum_samples=30,
+            minimum_dates=10,
+        ),
+        "artifacts": (
+            ["position-challenger.pkl"] if position.eligible else []
+        ),
+    }
     report = {
         "schemaVersion": "learning-training-run.v1",
         "generatedAt": generated_at,
@@ -334,8 +412,8 @@ def train(view_path: Path, output: Path) -> dict:
         "sourceViewHash": hashlib.sha256(view_path.read_bytes()).hexdigest(),
         "seeds": list(SEEDS),
         "productionPointerChanged": False,
-        "stockPick": asdict(stock),
-        "position": asdict(position),
+        "stockPick": stock_report,
+        "position": position_report,
         "overallStatus": (
             "CHALLENGERS_READY_FOR_REVIEW"
             if stock.eligible or position.eligible
