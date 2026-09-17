@@ -8,7 +8,7 @@ import json
 import os
 import pickle
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +40,7 @@ POSITION_FEATURES = (
     "expectedNetR",
 )
 SEEDS = (17, 41, 97)
+BEIJING_TIMEZONE = timezone(timedelta(hours=8))
 
 
 def _number(value: Any) -> float:
@@ -55,6 +56,69 @@ def _matrix(rows: list[dict], features: tuple[str, ...]) -> np.ndarray:
         [[_number(row.get(name)) for name in features] for row in rows],
         dtype=np.float64,
     )
+
+
+def expected_settlement_date(now: datetime | None = None) -> str:
+    current = (now or datetime.now(timezone.utc)).astimezone(BEIJING_TIMEZONE)
+    expected = current.date() - timedelta(days=1)
+    while expected.weekday() >= 5:
+        expected -= timedelta(days=1)
+    return expected.isoformat()
+
+
+def _canonical_hash(value: dict) -> str:
+    payload = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def validate_training_view(
+    manifest: dict,
+    view: dict,
+    now: datetime | None = None,
+) -> None:
+    current = (now or datetime.now(timezone.utc)).astimezone(BEIJING_TIMEZONE)
+    if manifest.get("schemaVersion") != "learning-manifest.v1":
+        raise RuntimeError("unsupported learning manifest")
+    manifest_date = str(manifest.get("date") or "")
+    expected_date = expected_settlement_date(current)
+    if manifest_date < expected_date:
+        raise RuntimeError(
+            f"stale learning manifest: {manifest_date} < {expected_date}"
+        )
+    if manifest_date > current.date().isoformat():
+        raise RuntimeError("learning manifest date is in the future")
+    try:
+        generated_at = datetime.fromtimestamp(
+            float(manifest["generatedAt"]) / 1000,
+            timezone.utc,
+        ).astimezone(BEIJING_TIMEZONE)
+    except (KeyError, TypeError, ValueError, OSError):
+        raise RuntimeError("learning manifest timestamp is invalid") from None
+    if (
+        generated_at.date().isoformat() != manifest_date
+        or generated_at.hour < 17
+    ):
+        raise RuntimeError("learning manifest was not generated after close")
+    if generated_at > current + timedelta(minutes=5):
+        raise RuntimeError("learning manifest timestamp is in the future")
+    if view.get("schemaVersion") != "learning-training-view.v1":
+        raise RuntimeError("unsupported learning training view")
+    if str(view.get("date") or "") != manifest_date:
+        raise RuntimeError("learning manifest and view dates differ")
+    if int(view.get("generatedAt") or 0) != int(manifest["generatedAt"]):
+        raise RuntimeError("learning manifest and view timestamps differ")
+    declared_hash = str(view.get("contentHash") or "")
+    content = {key: value for key, value in view.items() if key != "contentHash"}
+    actual_hash = _canonical_hash(content)
+    if not declared_hash or declared_hash != actual_hash:
+        raise RuntimeError("learning view content hash mismatch")
+    if str(manifest.get("viewHash") or "") != declared_hash:
+        raise RuntimeError("learning manifest view hash mismatch")
 
 
 def _position_rows(rows: list[dict]) -> list[dict]:
@@ -297,7 +361,10 @@ def _bucket():
     return oss2.Bucket(auth, endpoint, bucket_name)
 
 
-def download_latest(output: Path) -> Path:
+def download_latest(
+    output: Path,
+    now: datetime | None = None,
+) -> Path:
     import oss2
 
     bucket = _bucket()
@@ -316,9 +383,27 @@ def download_latest(output: Path) -> Path:
     view_path = str(manifest["viewPath"])
     if not view_path.startswith("learning/v1/views/"):
         raise RuntimeError("manifest points outside redacted learning views")
+    view_bytes = bucket.get_object(view_path).read()
+    view = json.loads(view_bytes)
+    validate_training_view(manifest, view, now)
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(bucket.get_object(view_path).read())
+    output.write_bytes(view_bytes)
     return output
+
+
+def _put_immutable(bucket, key: str, payload: bytes) -> None:
+    try:
+        bucket.put_object(key, payload, headers={
+            "x-oss-forbid-overwrite": "true",
+        })
+    except Exception as error:
+        if int(getattr(error, "status", 0) or 0) != 409:
+            raise
+        existing = bucket.get_object(key).read()
+        if existing != payload:
+            raise RuntimeError(
+                f"immutable training artifact conflict: {key}"
+            ) from error
 
 
 def upload_run(directory: Path) -> str:
@@ -330,9 +415,7 @@ def upload_run(directory: Path) -> str:
     prefix = f"learning/v1/training-runs/{report['generatedAt'][:10]}/{run_hash}/"
     for path in sorted(directory.iterdir()):
         if path.is_file():
-            bucket.put_object(prefix + path.name, path.read_bytes(), headers={
-                "x-oss-forbid-overwrite": "true",
-            })
+            _put_immutable(bucket, prefix + path.name, path.read_bytes())
     return prefix
 
 

@@ -51,6 +51,7 @@ export async function settleLearningEvents({
   const settledIds = new Set(existingOutcomes
     .filter((event) =>
       event?.payload?.outcomeType === 'STOCK_PICK_T5'
+      && event?.payload?.feeAdjusted === true
     )
     .map((event) => String(event.sourceId || '')))
   const work = predictions.flatMap((prediction) => {
@@ -86,12 +87,13 @@ export async function settleLearningEvents({
     }
     await store.saveEvent(buildLearningEvent({
       kind: LEARNING_EVENT_KIND.OUTCOME,
-      eventId: `stock-pick-outcome:${item.sourceId}`,
+      eventId: `stock-pick-outcome-fee-v2:${item.sourceId}`,
       sourceId: item.sourceId,
       tradeDate: item.prediction.tradeDate,
       occurredAt: now,
       payload: {
         outcomeType: 'STOCK_PICK_T5',
+        labelVersion: 'stock-pick-t5-fee-v2',
         code: item.candidate.code,
         rankingScore: item.candidate.rankingScore,
         pct: item.candidate.pct,

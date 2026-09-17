@@ -16,7 +16,7 @@ test('每日归档由FC定时器先于Actions压实成熟学习结果', () => {
   assert.match(schedule, /triggerName: learning-settlement-timer/)
   assert.match(
     schedule,
-    /cronExpression: "CRON_TZ=Asia\/Shanghai 0 20 17 \* \* 1-5"/,
+    /cronExpression: "CRON_TZ=Asia\/Shanghai 0 20,35 17 \* \* 1-5"/,
   )
   assert.doesNotMatch(workflow, /LEARNING_PIPELINE_URL|LEARNING_CRON_KEY/)
   assert.doesNotMatch(workflow, /TUSHARE_TOKEN|QUANT_KEY/)

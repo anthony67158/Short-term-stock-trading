@@ -57,6 +57,7 @@ export async function publishLearningTrainingView({
   const positionRows = []
   for (const outcome of outcomes) {
     if (outcome.payload?.outcomeType === 'STOCK_PICK_T5') {
+      if (outcome.payload?.feeAdjusted !== true) continue
       const prediction = predictionsById.get(
         String(outcome.lineage?.predictionEventId || ''),
       )
@@ -76,6 +77,12 @@ export async function publishLearningTrainingView({
         pFill: outcome.payload.pFill,
         pWinGivenFill: outcome.payload.pWinGivenFill,
         expectedNetR: outcome.payload.expectedNetR,
+        labelVersion: outcome.payload.labelVersion,
+        feeAdjusted: true,
+        feePolicyId: outcome.payload.feePolicyId,
+        assumedQuantity: outcome.payload.quantity,
+        totalFees: outcome.payload.totalFees,
+        grossReturnPctT5: outcome.payload.grossReturnPct,
         returnPctT5: outcome.payload.returnPct,
         mfePctT5: outcome.payload.mfePct,
         maePctT5: outcome.payload.maePct,
