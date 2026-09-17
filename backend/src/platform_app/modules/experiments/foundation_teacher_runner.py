@@ -84,6 +84,20 @@ MODEL_SPECS = {
     },
 }
 SCREENING_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
+STRONG_BASELINE_FAMILIES = (
+    "catboost-multiquantile-v1",
+    "xgboost-quantile-v1",
+    "lightgbm-quantile-v1",
+)
+SCREENING_SCORE_WEIGHTS = {
+    "wis": 0.30,
+    "brier": 0.25,
+    "rankIc": 0.20,
+    "netReturn": 0.25,
+}
+CATASTROPHIC_WIS_RELATIVE_LOSS = 0.10
+CATASTROPHIC_BRIER_RELATIVE_LOSS = 0.05
+CATASTROPHIC_TOP10_INCREMENT = -0.0005
 
 
 class FoundationTeacherError(ValueError):
@@ -767,6 +781,81 @@ def _teacher_ranking_metrics(
     }
 
 
+def _screening_metrics(
+    *,
+    dates: np.ndarray,
+    actual: np.ndarray,
+    sample_weight: np.ndarray,
+    p_win: np.ndarray,
+    quantiles: np.ndarray,
+) -> dict:
+    dates = np.asarray(dates)
+    actual = np.asarray(actual, dtype=np.float64)
+    weights = np.asarray(sample_weight, dtype=np.float64).copy()
+    probability = np.asarray(p_win, dtype=np.float64)
+    predicted = np.asarray(quantiles, dtype=np.float64)
+    if (
+        actual.ndim != 1
+        or len(actual) == 0
+        or len({len(dates), len(actual), len(weights), len(probability)}) != 1
+        or predicted.shape != (len(actual), len(SCREENING_QUANTILES))
+        or not np.all(np.isfinite(actual))
+        or not np.all(np.isfinite(weights))
+        or not np.all(np.isfinite(probability))
+        or not np.all(np.isfinite(predicted))
+        or np.any(weights <= 0)
+        or np.any(probability < 0)
+        or np.any(probability > 1)
+        or np.any(np.diff(predicted, axis=1) < 0)
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_SCREENING_INPUT_INVALID",
+        )
+    weights /= np.mean(weights)
+    probability = np.clip(probability, 1e-7, 1 - 1e-7)
+    direction = (actual > 0).astype(np.int8)
+    pinball = {
+        f"q{round(level * 100):02d}": float(
+            mean_pinball_loss(
+                actual,
+                predicted[:, index],
+                alpha=level,
+                sample_weight=weights,
+            )
+        )
+        for index, level in enumerate(SCREENING_QUANTILES)
+    }
+    wis = (
+        0.5 * np.abs(actual - predicted[:, 2])
+        + 0.1
+        * _interval_score(actual, predicted[:, 0], predicted[:, 4], 0.2)
+        + 0.25
+        * _interval_score(actual, predicted[:, 1], predicted[:, 3], 0.5)
+    ) / 2.5
+    covered80 = (actual >= predicted[:, 0]) & (actual <= predicted[:, 4])
+    return {
+        "samples": len(actual),
+        "dates": int(len(np.unique(dates))),
+        "brier": float(np.average((probability - direction) ** 2, weights=weights)),
+        "logLoss": float(
+            log_loss(
+                direction,
+                probability,
+                labels=[0, 1],
+                sample_weight=weights,
+            )
+        ),
+        "pinball": pinball,
+        "meanPinball": float(np.mean(tuple(pinball.values()))),
+        "weightedIntervalScore80": float(np.average(wis, weights=weights)),
+        "interval80Coverage": float(np.average(covered80, weights=weights)),
+        "interval80MeanWidth": float(
+            np.average(predicted[:, 4] - predicted[:, 0], weights=weights)
+        ),
+        "ranking": _teacher_ranking_metrics(dates, actual, predicted[:, 2]),
+    }
+
+
 def evaluate_teacher_test(
     dataset: TeacherDataset,
     raw: TeacherRawForecast,
@@ -824,62 +913,26 @@ def evaluate_teacher_test(
         residuals,
         dataset.sample_weight[calibration],
     )
-    actual = dataset.actual_return[test].astype(np.float64)
-    weights = dataset.sample_weight[test].astype(np.float64)
-    weights /= np.mean(weights)
-    predicted = quantiles[test].astype(np.float64)
-    p_win = np.clip(probability[test], 1e-7, 1 - 1e-7)
-    direction = (actual > 0).astype(np.int8)
-    pinball = {
-        f"q{round(level * 100):02d}": float(
-            mean_pinball_loss(
-                actual,
-                predicted[:, index],
-                alpha=level,
-                sample_weight=weights,
-            )
-        )
-        for index, level in enumerate(SCREENING_QUANTILES)
-    }
-    wis = (
-        0.5 * np.abs(actual - predicted[:, 2])
-        + 0.1
-        * _interval_score(actual, predicted[:, 0], predicted[:, 4], 0.2)
-        + 0.25
-        * _interval_score(actual, predicted[:, 1], predicted[:, 3], 0.5)
-    ) / 2.5
-    covered80 = (actual >= predicted[:, 0]) & (actual <= predicted[:, 4])
+    common_metrics = _screening_metrics(
+        dates=dataset.dates[test],
+        actual=dataset.actual_return[test],
+        sample_weight=dataset.sample_weight[test],
+        p_win=probability[test],
+        quantiles=quantiles[test],
+    )
     metrics = {
+        **common_metrics,
         "fold": fold,
         "model": model_name,
-        "samples": int(np.sum(test)),
-        "dates": int(len(np.unique(dataset.dates[test]))),
-        "brier": float(np.average((p_win - direction) ** 2, weights=weights)),
-        "logLoss": float(
-            log_loss(
-                direction,
-                p_win,
-                labels=[0, 1],
-                sample_weight=weights,
-            )
-        ),
-        "pinball": pinball,
-        "meanPinball": float(np.mean(tuple(pinball.values()))),
-        "weightedIntervalScore80": float(np.average(wis, weights=weights)),
-        "interval80Coverage": float(np.average(covered80, weights=weights)),
-        "interval80MeanWidth": float(
-            np.average(predicted[:, 4] - predicted[:, 0], weights=weights)
-        ),
-        "ranking": _teacher_ranking_metrics(
-            dataset.dates[test],
-            actual,
-            predicted[:, 2],
-        ),
         "probabilityCalibration": (
             "WEIGHTED_EMPIRICAL_POINT_RESIDUAL_CDF"
         ),
         "pointForecastProxy": (
             "FIFTH_ADJUSTED_CLOSE_OVER_DECISION_ADJUSTED_CLOSE_FEE_ADJUSTED"
+        ),
+        "targetAlignment": (
+            "PROBABILITY_CALIBRATION_RESIDUALS_MAP_CLOSE_TO_CLOSE_PROXY_TO_"
+            "NEXT_OPEN_TO_FIFTH_CLOSE_TARGET"
         ),
         "quantilePolicy": (
             "WEIGHTED_EMPIRICAL_POINT_RESIDUALS"
@@ -1059,6 +1112,36 @@ def _run_chronos(
     )
 
 
+def _seal_inference_failure(
+    root: Path,
+    *,
+    model_name: str,
+    dataset_sha256: str,
+    rows: int,
+    batch_size: int,
+    requested_device: str,
+    resolved_device: str,
+    stage: str,
+    error: Exception,
+) -> dict:
+    failure = {
+        "schemaVersion": "foundation-teacher-inference-failure.v1",
+        "model": model_name,
+        "modelSpec": MODEL_SPECS[model_name],
+        "datasetSha256": dataset_sha256,
+        "rows": rows,
+        "batchSize": batch_size,
+        "requestedDevice": requested_device,
+        "device": resolved_device,
+        "stage": stage,
+        "reason": type(error).__name__,
+        "paidCostCny": "0.00",
+        "releaseStatus": "UNAVAILABLE",
+    }
+    _write_json(root / "receipt.json", failure, immutable=True)
+    return failure
+
+
 def run_teacher_inference(
     *,
     dataset_root: Path,
@@ -1072,85 +1155,138 @@ def run_teacher_inference(
             "FOUNDATION_TEACHER_RUN_CONFIG_INVALID",
         )
     dataset, data_manifest = load_teacher_dataset(dataset_root)
-    resolved_device = _device(model_name, device)
     root = output_root / model_name
+    root.mkdir(parents=True, exist_ok=True)
+    existing = None
     if (root / "receipt.json").is_file():
-        _raw, existing = load_teacher_forecast(
+        try:
+            existing = json.loads((root / "receipt.json").read_text())
+        except (OSError, json.JSONDecodeError, TypeError) as exc:
+            raise FoundationTeacherError(
+                "FOUNDATION_TEACHER_FORECAST_NOT_SEALED",
+            ) from exc
+        if (
+            existing.get("schemaVersion")
+            == "foundation-teacher-inference-failure.v1"
+        ):
+            if (
+                existing.get("model") == model_name
+                and existing.get("datasetSha256") == data_manifest["dataSha256"]
+                and existing.get("batchSize") == batch_size
+                and existing.get(
+                    "requestedDevice",
+                    existing.get("device"),
+                )
+                == device
+            ):
+                return existing
+            raise FoundationTeacherError(
+                "FOUNDATION_TEACHER_RESUME_CONFIG_MISMATCH",
+            )
+    try:
+        resolved_device = _device(model_name, device)
+    except Exception as exc:
+        return _seal_inference_failure(
+            root,
+            model_name=model_name,
+            dataset_sha256=data_manifest["dataSha256"],
+            rows=len(dataset.contexts),
+            batch_size=batch_size,
+            requested_device=device,
+            resolved_device=device,
+            stage="DEVICE_RESOLUTION",
+            error=exc,
+        )
+    if existing is not None:
+        _raw, sealed = load_teacher_forecast(
             root,
             expected_dataset_sha256=data_manifest["dataSha256"],
         )
         if (
-            existing.get("model") == model_name
-            and existing.get("batchSize") == batch_size
-            and existing.get("device") == resolved_device
+            sealed.get("model") == model_name
+            and sealed.get("batchSize") == batch_size
+            and sealed.get("device") == resolved_device
         ):
-            return existing
+            return sealed
         raise FoundationTeacherError(
             "FOUNDATION_TEACHER_RESUME_CONFIG_MISMATCH",
         )
-    if model_name == "ttm-r2.1":
-        raw = _run_ttm(
-            dataset.contexts,
+    try:
+        if model_name == "ttm-r2.1":
+            raw = _run_ttm(
+                dataset.contexts,
+                batch_size=batch_size,
+                device=resolved_device,
+            )
+        elif model_name == "timesfm-2.5":
+            raw = _run_timesfm(
+                dataset.contexts,
+                batch_size=batch_size,
+            )
+        else:
+            raw = _run_chronos(
+                dataset.contexts,
+                batch_size=batch_size,
+                device=resolved_device,
+            )
+        raw_path = root / "raw-forecast.npz"
+        temporary = raw_path.with_suffix(".npz.tmp")
+        with temporary.open("wb") as stream:
+            np.savez_compressed(
+                stream,
+                point=raw.point,
+                quantiles=raw.quantiles,
+                quantileLevels=np.asarray(raw.quantile_levels),
+                inferenceSeconds=np.asarray(raw.inference_seconds),
+            )
+        os.replace(temporary, raw_path)
+        distributions = {}
+        for name in (
+            "torch",
+            "numpy",
+            "granite-tsfm",
+            "timesfm",
+            "chronos-forecasting",
+            "transformers",
+        ):
+            try:
+                distributions[name] = importlib.metadata.version(name)
+            except importlib.metadata.PackageNotFoundError:
+                continue
+        receipt = {
+            "schemaVersion": "foundation-teacher-inference-receipt.v1",
+            "model": model_name,
+            "modelSpec": MODEL_SPECS[model_name],
+            "datasetSha256": data_manifest["dataSha256"],
+            "forecastUnit": "ADJUSTED_PRICE",
+            "forecastTarget": data_manifest["forecastTarget"],
+            "rows": len(dataset.contexts),
+            "batchSize": batch_size,
+            "requestedDevice": device,
+            "device": resolved_device,
+            "inferenceSeconds": raw.inference_seconds,
+            "rawForecast": raw_path.name,
+            "rawForecastSha256": _file_sha256(raw_path),
+            "platform": platform.platform(),
+            "python": platform.python_version(),
+            "distributions": distributions,
+            "paidCostCny": "0.00",
+            "releaseStatus": "UNAVAILABLE",
+        }
+        _write_json(root / "receipt.json", receipt, immutable=True)
+        return receipt
+    except Exception as exc:
+        return _seal_inference_failure(
+            root,
+            model_name=model_name,
+            dataset_sha256=data_manifest["dataSha256"],
+            rows=len(dataset.contexts),
             batch_size=batch_size,
-            device=resolved_device,
+            requested_device=device,
+            resolved_device=resolved_device,
+            stage="INFERENCE_OR_PERSISTENCE",
+            error=exc,
         )
-    elif model_name == "timesfm-2.5":
-        raw = _run_timesfm(
-            dataset.contexts,
-            batch_size=batch_size,
-        )
-    else:
-        raw = _run_chronos(
-            dataset.contexts,
-            batch_size=batch_size,
-            device=resolved_device,
-        )
-    root.mkdir(parents=True, exist_ok=True)
-    raw_path = root / "raw-forecast.npz"
-    temporary = raw_path.with_suffix(".npz.tmp")
-    with temporary.open("wb") as stream:
-        np.savez_compressed(
-            stream,
-            point=raw.point,
-            quantiles=raw.quantiles,
-            quantileLevels=np.asarray(raw.quantile_levels),
-            inferenceSeconds=np.asarray(raw.inference_seconds),
-        )
-    os.replace(temporary, raw_path)
-    distributions = {}
-    for name in (
-        "torch",
-        "numpy",
-        "granite-tsfm",
-        "timesfm",
-        "chronos-forecasting",
-        "transformers",
-    ):
-        try:
-            distributions[name] = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            continue
-    receipt = {
-        "schemaVersion": "foundation-teacher-inference-receipt.v1",
-        "model": model_name,
-        "modelSpec": MODEL_SPECS[model_name],
-        "datasetSha256": data_manifest["dataSha256"],
-        "forecastUnit": "ADJUSTED_PRICE",
-        "forecastTarget": data_manifest["forecastTarget"],
-        "rows": len(dataset.contexts),
-        "batchSize": batch_size,
-        "device": resolved_device,
-        "inferenceSeconds": raw.inference_seconds,
-        "rawForecast": raw_path.name,
-        "rawForecastSha256": _file_sha256(raw_path),
-        "platform": platform.platform(),
-        "python": platform.python_version(),
-        "distributions": distributions,
-        "paidCostCny": "0.00",
-        "releaseStatus": "UNAVAILABLE",
-    }
-    _write_json(root / "receipt.json", receipt, immutable=True)
-    return receipt
 
 
 def load_teacher_forecast(
@@ -1247,6 +1383,622 @@ def evaluate_teacher_model(
     return result
 
 
+def _baseline_receipt(
+    baseline_root: Path,
+    *,
+    fold: int,
+    family: str,
+    expected_receipt_sha256: str,
+) -> tuple[dict, dict[str, Path]]:
+    root = baseline_root / f"fold-{fold}" / family
+    receipt_path = root / "receipt.json"
+    try:
+        receipt = json.loads(receipt_path.read_text())
+        files = receipt["files"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_BASELINE_NOT_SEALED",
+        ) from exc
+    prediction_paths = {
+        partition: root / f"{partition}.npz"
+        for partition in ("probabilityCalibration", "test")
+    }
+    if (
+        receipt.get("schemaVersion")
+        != "foundation-probabilistic-baseline-receipt.v1"
+        or _file_sha256(receipt_path) != expected_receipt_sha256
+        or receipt.get("fold") != fold
+        or receipt.get("family") != family
+        or any(
+            not path.is_file()
+            or _file_sha256(path) != files.get(path.name)
+            for path in prediction_paths.values()
+        )
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_BASELINE_INVALID",
+        )
+    return receipt, prediction_paths
+
+
+def _exact_baseline_indices(
+    prediction_path: Path,
+    *,
+    expected_dates: np.ndarray,
+    expected_instruments: np.ndarray,
+) -> np.ndarray:
+    with np.load(prediction_path, allow_pickle=False) as saved:
+        dates = saved["dates"]
+        instruments = saved["instruments"]
+    keys = np.rec.fromarrays([dates, instruments], names=("date", "instrument"))
+    expected_keys = np.rec.fromarrays(
+        [expected_dates, expected_instruments],
+        names=("date", "instrument"),
+    )
+    order = np.argsort(keys, kind="stable")
+    expected_order = np.argsort(expected_keys, kind="stable")
+    ordered_keys = keys[order]
+    ordered_expected = expected_keys[expected_order]
+    if (
+        len(expected_keys) == 0
+        or np.any(ordered_keys[1:] == ordered_keys[:-1])
+        or np.any(ordered_expected[1:] == ordered_expected[:-1])
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_BASELINE_KEY_DUPLICATE",
+        )
+    locations = np.searchsorted(ordered_keys, expected_keys)
+    if (
+        np.any(locations >= len(order))
+        or not np.array_equal(ordered_keys[locations], expected_keys)
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_BASELINE_KEY_MISMATCH",
+        )
+    return order[locations]
+
+
+def _sample_exact_baseline(
+    prediction_path: Path,
+    *,
+    expected_dates: np.ndarray,
+    expected_instruments: np.ndarray,
+    expected_actual: np.ndarray,
+    selected_indices: np.ndarray | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    selected = (
+        _exact_baseline_indices(
+            prediction_path,
+            expected_dates=expected_dates,
+            expected_instruments=expected_instruments,
+        )
+        if selected_indices is None
+        else np.asarray(selected_indices, dtype=np.int64)
+    )
+    with np.load(prediction_path, allow_pickle=False) as saved:
+        if (
+            selected.shape != expected_dates.shape
+            or np.any(selected < 0)
+            or np.any(selected >= len(saved["dates"]))
+            or not np.array_equal(saved["dates"][selected], expected_dates)
+            or not np.array_equal(
+                saved["instruments"][selected],
+                expected_instruments,
+            )
+        ):
+            raise FoundationTeacherError(
+                "FOUNDATION_TEACHER_BASELINE_KEY_MISMATCH",
+            )
+        actual = saved["actualReturn"][selected]
+        if not np.allclose(actual, expected_actual, atol=1e-7, rtol=0):
+            raise FoundationTeacherError(
+                "FOUNDATION_TEACHER_BASELINE_TARGET_MISMATCH",
+            )
+        probability = saved["pWin"][selected].copy()
+        quantiles = np.column_stack(
+            [
+                saved[name][selected]
+                for name in ("q10", "q25", "q50", "q75", "q90")
+            ]
+        )
+    return probability, quantiles
+
+
+def _aggregate_screening_folds(folds: list[dict]) -> dict:
+    if not folds:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_SCREENING_FOLDS_EMPTY",
+        )
+    return {
+        "weightedIntervalScore80": float(
+            np.mean([item["weightedIntervalScore80"] for item in folds])
+        ),
+        "brier": float(np.mean([item["brier"] for item in folds])),
+        "meanDailyRankIc": float(
+            np.mean([item["ranking"]["meanDailyRankIc"] for item in folds])
+        ),
+        "top10NetReturnIncrement": float(
+            np.mean(
+                [item["ranking"]["top10NetReturnIncrement"] for item in folds]
+            )
+        ),
+    }
+
+
+def _metric_skill(candidate: float, baseline: float, *, lower_is_better: bool) -> float:
+    denominator = max(abs(baseline), 1e-12)
+    return (
+        (baseline - candidate) / denominator
+        if lower_is_better
+        else (candidate - baseline) / denominator
+    )
+
+
+def score_teacher_candidate(
+    candidate_folds: list[dict],
+    baseline_folds: list[dict],
+) -> dict:
+    candidate = _aggregate_screening_folds(candidate_folds)
+    baseline = _aggregate_screening_folds(baseline_folds)
+    skills = {
+        "wis": _metric_skill(
+            candidate["weightedIntervalScore80"],
+            baseline["weightedIntervalScore80"],
+            lower_is_better=True,
+        ),
+        "brier": _metric_skill(
+            candidate["brier"],
+            baseline["brier"],
+            lower_is_better=True,
+        ),
+        "rankIc": _metric_skill(
+            candidate["meanDailyRankIc"],
+            baseline["meanDailyRankIc"],
+            lower_is_better=False,
+        ),
+        "netReturn": _metric_skill(
+            candidate["top10NetReturnIncrement"],
+            baseline["top10NetReturnIncrement"],
+            lower_is_better=False,
+        ),
+    }
+    fold_skills = [
+        {
+            "fold": candidate_fold.get("fold"),
+            "wis": _metric_skill(
+                candidate_fold["weightedIntervalScore80"],
+                baseline_fold["weightedIntervalScore80"],
+                lower_is_better=True,
+            ),
+            "brier": _metric_skill(
+                candidate_fold["brier"],
+                baseline_fold["brier"],
+                lower_is_better=True,
+            ),
+            "rankIc": _metric_skill(
+                candidate_fold["ranking"]["meanDailyRankIc"],
+                baseline_fold["ranking"]["meanDailyRankIc"],
+                lower_is_better=False,
+            ),
+            "netReturn": _metric_skill(
+                candidate_fold["ranking"]["top10NetReturnIncrement"],
+                baseline_fold["ranking"]["top10NetReturnIncrement"],
+                lower_is_better=False,
+            ),
+        }
+        for candidate_fold, baseline_fold in zip(
+            candidate_folds,
+            baseline_folds,
+            strict=True,
+        )
+    ]
+    disasters = []
+    if any(
+        item["wis"] <= -CATASTROPHIC_WIS_RELATIVE_LOSS
+        for item in fold_skills
+    ):
+        disasters.append("WIS_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD")
+    if any(
+        item["brier"] <= -CATASTROPHIC_BRIER_RELATIVE_LOSS
+        for item in fold_skills
+    ):
+        disasters.append("BRIER_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD")
+    if any(
+        item["ranking"]["meanDailyRankIc"] <= 0 for item in candidate_folds
+    ):
+        disasters.append("NON_POSITIVE_RANK_IC_IN_DEVELOPMENT_FOLD")
+    if any(
+        item["ranking"]["top10NetReturnIncrement"]
+        <= CATASTROPHIC_TOP10_INCREMENT
+        for item in candidate_folds
+    ):
+        disasters.append("TOP10_NET_RETURN_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD")
+    score = sum(
+        SCREENING_SCORE_WEIGHTS[name] * value
+        for name, value in skills.items()
+    )
+    return {
+        "candidate": candidate,
+        "baseline": baseline,
+        "skills": skills,
+        "foldSkills": fold_skills,
+        "score": float(score),
+        "catastrophicFailures": disasters,
+        "eligible": not disasters,
+    }
+
+
+def _sealed_inference_receipt(
+    inference_root: Path,
+    *,
+    model_name: str,
+    dataset_sha256: str,
+) -> tuple[dict, str]:
+    root = inference_root / model_name
+    receipt_path = root / "receipt.json"
+    try:
+        receipt = json.loads(receipt_path.read_text())
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_INFERENCE_NOT_SEALED",
+        ) from exc
+    schema = receipt.get("schemaVersion")
+    if (
+        receipt.get("model") != model_name
+        or receipt.get("datasetSha256") != dataset_sha256
+        or schema
+        not in {
+            "foundation-teacher-inference-receipt.v1",
+            "foundation-teacher-inference-failure.v1",
+        }
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_INFERENCE_INVALID",
+        )
+    if schema == "foundation-teacher-inference-receipt.v1":
+        raw_path = root / str(receipt.get("rawForecast"))
+        if (
+            not raw_path.is_file()
+            or _file_sha256(raw_path) != receipt.get("rawForecastSha256")
+        ):
+            raise FoundationTeacherError(
+                "FOUNDATION_TEACHER_INFERENCE_INVALID",
+            )
+    return receipt, _file_sha256(receipt_path)
+
+
+def _sealed_evaluation(
+    evaluation_root: Path,
+    *,
+    model_name: str,
+    dataset_sha256: str,
+    inference_receipt_sha256: str,
+) -> tuple[dict, str]:
+    root = evaluation_root / model_name
+    path = root / "evaluation.json"
+    receipt_path = root / "receipt.json"
+    try:
+        evaluation = json.loads(path.read_text())
+        receipt = json.loads(receipt_path.read_text())
+        files = receipt["files"]
+    except (
+        OSError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+    ) as exc:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_EVALUATION_NOT_SEALED",
+        ) from exc
+    if (
+        evaluation.get("schemaVersion")
+        != "foundation-teacher-evaluation.v1"
+        or receipt.get("schemaVersion")
+        != "foundation-teacher-evaluation-receipt.v1"
+        or receipt.get("model") != model_name
+        or evaluation.get("model") != model_name
+        or evaluation.get("datasetSha256") != dataset_sha256
+        or evaluation.get("inferenceReceiptSha256")
+        != inference_receipt_sha256
+        or [item.get("fold") for item in evaluation.get("folds", [])]
+        != list(SCREENING_FOLDS)
+        or set(files)
+        != {
+            "evaluation.json",
+            *(f"fold-{fold}-test.npz" for fold in SCREENING_FOLDS),
+        }
+        or any(
+            not (root / name).is_file()
+            or _file_sha256(root / name) != expected
+            for name, expected in files.items()
+        )
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_EVALUATION_INVALID",
+        )
+    return evaluation, _file_sha256(receipt_path)
+
+
+def finalize_teacher_screening(
+    *,
+    dataset_root: Path,
+    inference_root: Path,
+    evaluation_root: Path,
+    baseline_root: Path,
+    output_root: Path,
+) -> dict:
+    dataset, data_manifest = load_teacher_dataset(dataset_root)
+    try:
+        baseline_manifest = json.loads(
+            (baseline_root / "manifest.json").read_text()
+        )
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_BASELINE_NOT_SEALED",
+        ) from exc
+    if (
+        baseline_manifest.get("schemaVersion")
+        != "foundation-probabilistic-baseline-manifest.v1"
+        or not set(SCREENING_FOLDS).issubset(
+            baseline_manifest.get("completedFolds", [])
+        )
+        or not set(STRONG_BASELINE_FAMILIES).issubset(
+            baseline_manifest.get("families", [])
+        )
+        or not all(
+            f"{fold}:{family}" in baseline_manifest.get("receiptSha256", {})
+            for fold in SCREENING_FOLDS
+            for family in STRONG_BASELINE_FAMILIES
+        )
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_BASELINE_INVALID",
+        )
+
+    baseline_metrics = {family: [] for family in STRONG_BASELINE_FAMILIES}
+    baseline_receipts = {}
+    for fold in SCREENING_FOLDS:
+        masks = {
+            partition: (dataset.folds == fold)
+            & (dataset.partitions == partition.encode())
+            for partition in SCREENING_PARTITIONS
+        }
+        reference_family = STRONG_BASELINE_FAMILIES[0]
+        _receipt, reference_paths = _baseline_receipt(
+            baseline_root,
+            fold=fold,
+            family=reference_family,
+            expected_receipt_sha256=baseline_manifest["receiptSha256"][
+                f"{fold}:{reference_family}"
+            ],
+        )
+        selected_indices = {
+            partition: _exact_baseline_indices(
+                reference_paths[partition],
+                expected_dates=dataset.dates[masks[partition]],
+                expected_instruments=dataset.instruments[masks[partition]],
+            )
+            for partition in SCREENING_PARTITIONS
+        }
+        for family in STRONG_BASELINE_FAMILIES:
+            _receipt, prediction_paths = _baseline_receipt(
+                baseline_root,
+                fold=fold,
+                family=family,
+                expected_receipt_sha256=baseline_manifest["receiptSha256"][
+                    f"{fold}:{family}"
+                ],
+            )
+            calibration_mask = masks["probabilityCalibration"]
+            _calibration_probability, calibration_quantiles = (
+                _sample_exact_baseline(
+                    prediction_paths["probabilityCalibration"],
+                    expected_dates=dataset.dates[calibration_mask],
+                    expected_instruments=dataset.instruments[calibration_mask],
+                    expected_actual=dataset.actual_return[calibration_mask],
+                    selected_indices=selected_indices["probabilityCalibration"],
+                )
+            )
+            residuals = (
+                dataset.actual_return[calibration_mask]
+                - calibration_quantiles[:, 2]
+            )
+            residual_quantiles = _weighted_residual_quantiles(
+                residuals,
+                dataset.sample_weight[calibration_mask],
+            )
+            test_mask = masks["test"]
+            _raw_probability, quantiles = _sample_exact_baseline(
+                prediction_paths["test"],
+                expected_dates=dataset.dates[test_mask],
+                expected_instruments=dataset.instruments[test_mask],
+                expected_actual=dataset.actual_return[test_mask],
+                selected_indices=selected_indices["test"],
+            )
+            point = quantiles[:, 2].copy()
+            quantiles = np.sort(
+                quantiles + residual_quantiles[2],
+                axis=1,
+            )
+            probability = _empirical_win_probability(
+                point,
+                residuals,
+                dataset.sample_weight[calibration_mask],
+            )
+            metrics = _screening_metrics(
+                dates=dataset.dates[test_mask],
+                actual=dataset.actual_return[test_mask],
+                sample_weight=dataset.sample_weight[test_mask],
+                p_win=probability,
+                quantiles=quantiles,
+            )
+            metrics["fold"] = fold
+            metrics["family"] = family
+            baseline_metrics[family].append(metrics)
+            baseline_receipts[f"{fold}:{family}"] = _file_sha256(
+                baseline_root / f"fold-{fold}" / family / "receipt.json"
+            )
+
+    aggregate_baselines = {
+        family: _aggregate_screening_folds(folds)
+        for family, folds in baseline_metrics.items()
+    }
+    benchmark_family = {
+        "wis": min(
+            aggregate_baselines,
+            key=lambda name: aggregate_baselines[name][
+                "weightedIntervalScore80"
+            ],
+        ),
+        "brier": min(
+            aggregate_baselines,
+            key=lambda name: aggregate_baselines[name]["brier"],
+        ),
+        "rankIc": max(
+            aggregate_baselines,
+            key=lambda name: aggregate_baselines[name]["meanDailyRankIc"],
+        ),
+        "netReturn": max(
+            aggregate_baselines,
+            key=lambda name: aggregate_baselines[name][
+                "top10NetReturnIncrement"
+            ],
+        ),
+    }
+    benchmark_folds = []
+    for fold_index, fold in enumerate(SCREENING_FOLDS):
+        benchmark_folds.append(
+            {
+                "fold": fold,
+                "weightedIntervalScore80": baseline_metrics[
+                    benchmark_family["wis"]
+                ][fold_index]["weightedIntervalScore80"],
+                "brier": baseline_metrics[benchmark_family["brier"]][
+                    fold_index
+                ]["brier"],
+                "ranking": {
+                    "meanDailyRankIc": baseline_metrics[
+                        benchmark_family["rankIc"]
+                    ][fold_index]["ranking"]["meanDailyRankIc"],
+                    "top10NetReturnIncrement": baseline_metrics[
+                        benchmark_family["netReturn"]
+                    ][fold_index]["ranking"]["top10NetReturnIncrement"],
+                },
+            }
+        )
+
+    candidates = {}
+    inference_hashes = {}
+    evaluation_hashes = {}
+    for model_name in MODEL_SPECS:
+        inference_receipt, inference_hash = _sealed_inference_receipt(
+            inference_root,
+            model_name=model_name,
+            dataset_sha256=data_manifest["dataSha256"],
+        )
+        inference_hashes[model_name] = inference_hash
+        if (
+            inference_receipt["schemaVersion"]
+            == "foundation-teacher-inference-failure.v1"
+        ):
+            candidates[model_name] = {
+                "status": "FAILED",
+                "eligible": False,
+                "failure": {
+                    "stage": inference_receipt["stage"],
+                    "reason": inference_receipt["reason"],
+                },
+            }
+            continue
+        evaluation, evaluation_receipt_hash = _sealed_evaluation(
+            evaluation_root,
+            model_name=model_name,
+            dataset_sha256=data_manifest["dataSha256"],
+            inference_receipt_sha256=inference_hash,
+        )
+        score = score_teacher_candidate(
+            evaluation["folds"],
+            benchmark_folds,
+        )
+        score["status"] = "SUCCEEDED"
+        candidates[model_name] = score
+        evaluation_hashes[model_name] = {
+            "evaluationSha256": _file_sha256(
+                evaluation_root / model_name / "evaluation.json"
+            ),
+            "receiptSha256": evaluation_receipt_hash,
+        }
+
+    eligible = [
+        model_name
+        for model_name, result in candidates.items()
+        if result["eligible"]
+    ]
+    selected = (
+        max(eligible, key=lambda name: candidates[name]["score"])
+        if eligible
+        else None
+    )
+    result = {
+        "schemaVersion": "foundation-teacher-screening-final.v2",
+        "datasetSha256": data_manifest["dataSha256"],
+        "baselineManifestSha256": _file_sha256(
+            baseline_root / "manifest.json"
+        ),
+        "baselineReceiptSha256": baseline_receipts,
+        "inferenceReceiptSha256": inference_hashes,
+        "evaluationSha256": evaluation_hashes,
+        "folds": list(SCREENING_FOLDS),
+        "samplesPerFold": int(
+            np.sum(
+                (dataset.folds == SCREENING_FOLDS[0])
+                & (dataset.partitions == b"test")
+            )
+        ),
+        "scoreWeights": SCREENING_SCORE_WEIGHTS,
+        "skillBaselinePolicy": "BEST_STRONG_GBDT_PER_METRIC_ON_EXACT_KEYS",
+        "baselineCalibrationPolicy": (
+            "SAME_WEIGHTED_EMPIRICAL_POINT_RESIDUAL_POLICY_AS_NATIVE_TEACHERS"
+        ),
+        "benchmarkFamily": benchmark_family,
+        "baselines": {
+            family: {
+                "aggregate": aggregate_baselines[family],
+                "folds": baseline_metrics[family],
+            }
+            for family in STRONG_BASELINE_FAMILIES
+        },
+        "catastrophicThresholds": {
+            "wisRelativeLoss": CATASTROPHIC_WIS_RELATIVE_LOSS,
+            "brierRelativeLoss": CATASTROPHIC_BRIER_RELATIVE_LOSS,
+            "rankIcPerFold": 0.0,
+            "top10NetReturnIncrement": CATASTROPHIC_TOP10_INCREMENT,
+        },
+        "candidates": candidates,
+        "selectedModel": selected,
+        "selectionStatus": (
+            "SELECTED" if selected is not None else "STOPPED_ALL_CANDIDATES_FAILED"
+        ),
+        "paidCostCny": "0.00",
+        "releaseStatus": "UNAVAILABLE",
+        "confirmationFoldUsed": False,
+    }
+    output_root.mkdir(parents=True, exist_ok=True)
+    path = output_root / "screening-result.json"
+    _write_json(path, result, immutable=True)
+    receipt = {
+        "schemaVersion": "foundation-teacher-screening-receipt.v2",
+        "screeningResult": path.name,
+        "screeningResultSha256": _file_sha256(path),
+        "selectedModel": selected,
+        "selectionStatus": result["selectionStatus"],
+        "paidCostCny": "0.00",
+        "releaseStatus": "UNAVAILABLE",
+    }
+    _write_json(output_root / "receipt.json", receipt, immutable=True)
+    return receipt
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -1278,6 +2030,12 @@ def main() -> None:
     evaluate.add_argument("--inference-root", type=Path, required=True)
     evaluate.add_argument("--output", type=Path, required=True)
     evaluate.add_argument("--model", choices=tuple(MODEL_SPECS), required=True)
+    finalize = commands.add_parser("finalize")
+    finalize.add_argument("--dataset-root", type=Path, required=True)
+    finalize.add_argument("--inference-root", type=Path, required=True)
+    finalize.add_argument("--evaluation-root", type=Path, required=True)
+    finalize.add_argument("--baseline-root", type=Path, required=True)
+    finalize.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     if args.command == "export":
         result = export_teacher_dataset(
@@ -1298,12 +2056,20 @@ def main() -> None:
             batch_size=args.batch_size,
             device=args.device,
         )
-    else:
+    elif args.command == "evaluate":
         result = evaluate_teacher_model(
             dataset_root=args.dataset_root,
             inference_root=args.inference_root,
             output_root=args.output,
             model_name=args.model,
+        )
+    else:
+        result = finalize_teacher_screening(
+            dataset_root=args.dataset_root,
+            inference_root=args.inference_root,
+            evaluation_root=args.evaluation_root,
+            baseline_root=args.baseline_root,
+            output_root=args.output,
         )
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 

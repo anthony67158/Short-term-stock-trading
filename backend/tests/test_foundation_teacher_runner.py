@@ -5,6 +5,7 @@ from decimal import Decimal
 import numpy as np
 import pytest
 
+import platform_app.modules.experiments.foundation_teacher_runner as teacher_runner
 from platform_app.modules.experiments.foundation_return_dataset import (
     FoundationReturnDatasetError,
     reference_full_fill_net_return,
@@ -17,12 +18,16 @@ from platform_app.modules.experiments.foundation_teacher_runner import (
     common_quantile_predictions,
     _adjusted_close_context,
     _daily_quotas,
+    _exact_baseline_indices,
     _partition_samples,
+    _sample_exact_baseline,
     _score,
     evaluate_teacher_test,
     fee_adjusted_returns,
     load_teacher_forecast,
     price_forecasts_to_fee_adjusted_returns,
+    run_teacher_inference,
+    score_teacher_candidate,
     select_forecast_steps,
 )
 
@@ -393,6 +398,286 @@ def test_load_teacher_forecast_rejects_hash_drift(tmp_path):
             tmp_path,
             expected_dataset_sha256="a" * 64,
         )
+
+
+def test_exact_baseline_sampling_preserves_requested_key_order(tmp_path):
+    path = tmp_path / "test.npz"
+    np.savez_compressed(
+        path,
+        dates=np.array([20200101, 20200101, 20200102]),
+        instruments=np.array([b"000001.SZ", b"000002.SZ", b"000001.SZ"]),
+        actualReturn=np.array([0.01, 0.02, 0.03], dtype=np.float32),
+        pWin=np.array([0.4, 0.5, 0.6], dtype=np.float32),
+        q10=np.array([-0.02, -0.01, 0.0]),
+        q25=np.array([-0.01, 0.0, 0.01]),
+        q50=np.array([0.0, 0.01, 0.02]),
+        q75=np.array([0.01, 0.02, 0.03]),
+        q90=np.array([0.02, 0.03, 0.04]),
+    )
+
+    probability, quantiles = _sample_exact_baseline(
+        path,
+        expected_dates=np.array([20200102, 20200101]),
+        expected_instruments=np.array([b"000001.SZ", b"000002.SZ"]),
+        expected_actual=np.array([0.03, 0.02]),
+    )
+
+    np.testing.assert_allclose(probability, np.array([0.6, 0.5]))
+    np.testing.assert_allclose(quantiles[:, 2], np.array([0.02, 0.01]))
+
+
+def test_exact_baseline_indices_reject_duplicate_keys(tmp_path):
+    path = tmp_path / "test.npz"
+    np.savez_compressed(
+        path,
+        dates=np.array([20200101, 20200101]),
+        instruments=np.array([b"000001.SZ", b"000001.SZ"]),
+    )
+
+    with pytest.raises(
+        FoundationTeacherError,
+        match="FOUNDATION_TEACHER_BASELINE_KEY_DUPLICATE",
+    ):
+        _exact_baseline_indices(
+            path,
+            expected_dates=np.array([20200101]),
+            expected_instruments=np.array([b"000001.SZ"]),
+        )
+
+
+def screening_fold(
+    *,
+    wis: float,
+    brier: float,
+    rank_ic: float,
+    net_return: float,
+) -> dict:
+    return {
+        "weightedIntervalScore80": wis,
+        "brier": brier,
+        "ranking": {
+            "meanDailyRankIc": rank_ic,
+            "top10NetReturnIncrement": net_return,
+        },
+    }
+
+
+def test_teacher_score_rejects_catastrophic_candidate():
+    baseline = [
+        screening_fold(
+            wis=0.03,
+            brier=0.24,
+            rank_ic=0.08,
+            net_return=0.001,
+        ),
+        screening_fold(
+            wis=0.025,
+            brier=0.23,
+            rank_ic=0.07,
+            net_return=0.001,
+        ),
+    ]
+    candidate = [
+        screening_fold(
+            wis=0.04,
+            brier=0.27,
+            rank_ic=0.02,
+            net_return=-0.001,
+        ),
+        screening_fold(
+            wis=0.035,
+            brier=0.26,
+            rank_ic=0.03,
+            net_return=-0.0008,
+        ),
+    ]
+
+    result = score_teacher_candidate(candidate, baseline)
+
+    assert result["eligible"] is False
+    assert "WIS_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD" in result[
+        "catastrophicFailures"
+    ]
+    assert "BRIER_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD" in result[
+        "catastrophicFailures"
+    ]
+    assert "TOP10_NET_RETURN_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD" in result[
+        "catastrophicFailures"
+    ]
+
+
+def test_teacher_score_accepts_consistent_improvement():
+    baseline = [
+        screening_fold(
+            wis=0.03,
+            brier=0.25,
+            rank_ic=0.05,
+            net_return=0.001,
+        )
+    ] * 2
+    candidate = [
+        screening_fold(
+            wis=0.025,
+            brier=0.23,
+            rank_ic=0.07,
+            net_return=0.002,
+        )
+    ] * 2
+
+    result = score_teacher_candidate(candidate, baseline)
+
+    assert result["eligible"] is True
+    assert result["catastrophicFailures"] == []
+    assert result["score"] > 0
+
+
+def test_teacher_score_rejects_single_catastrophic_fold():
+    baseline = [
+        screening_fold(
+            wis=0.03,
+            brier=0.25,
+            rank_ic=0.05,
+            net_return=0.001,
+        )
+    ] * 2
+    candidate = [
+        screening_fold(
+            wis=0.04,
+            brier=0.25,
+            rank_ic=0.01,
+            net_return=0.001,
+        ),
+        screening_fold(
+            wis=0.02,
+            brier=0.20,
+            rank_ic=0.08,
+            net_return=0.001,
+        ),
+    ]
+
+    result = score_teacher_candidate(candidate, baseline)
+
+    assert result["eligible"] is False
+    assert "WIS_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD" in result[
+        "catastrophicFailures"
+    ]
+
+
+def test_teacher_score_rejects_single_catastrophic_net_return_fold():
+    baseline = [
+        screening_fold(
+            wis=0.03,
+            brier=0.25,
+            rank_ic=0.05,
+            net_return=0.001,
+        )
+    ] * 2
+    candidate = [
+        screening_fold(
+            wis=0.03,
+            brier=0.25,
+            rank_ic=0.05,
+            net_return=-0.001,
+        ),
+        screening_fold(
+            wis=0.03,
+            brier=0.25,
+            rank_ic=0.05,
+            net_return=0.003,
+        ),
+    ]
+
+    result = score_teacher_candidate(candidate, baseline)
+
+    assert result["eligible"] is False
+    assert (
+        "TOP10_NET_RETURN_CATASTROPHIC_LOSS_IN_DEVELOPMENT_FOLD"
+        in result["catastrophicFailures"]
+    )
+
+
+def test_inference_failure_is_sealed_and_resumable(tmp_path, monkeypatch):
+    dataset = TeacherDataset(
+        contexts=np.ones((1, DEFAULT_CONTEXT_LENGTH), dtype=np.float32),
+        reference_close=np.ones(1, dtype=np.float32),
+        actual_return=np.zeros(1, dtype=np.float32),
+        dates=np.array([20200101]),
+        execution_dates=np.array([20200102]),
+        terminal_dates=np.array([20200108]),
+        instruments=np.array([b"000001.SZ"]),
+        boards=np.zeros(1, dtype=np.int8),
+        sample_weight=np.ones(1),
+        forecast_steps=np.full(1, 5),
+        folds=np.ones(1, dtype=np.int8),
+        partitions=np.array([b"test"], dtype="S24"),
+    )
+    monkeypatch.setattr(
+        teacher_runner,
+        "load_teacher_dataset",
+        lambda _root: (dataset, {"dataSha256": "a" * 64}),
+    )
+    monkeypatch.setattr(
+        teacher_runner,
+        "_device",
+        lambda _model, _device: "cpu",
+    )
+    monkeypatch.setattr(
+        teacher_runner,
+        "_run_ttm",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError()),
+    )
+
+    first = run_teacher_inference(
+        dataset_root=tmp_path / "dataset",
+        output_root=tmp_path / "inference",
+        model_name="ttm-r2.1",
+    )
+    second = run_teacher_inference(
+        dataset_root=tmp_path / "dataset",
+        output_root=tmp_path / "inference",
+        model_name="ttm-r2.1",
+    )
+
+    assert first == second
+    assert first["schemaVersion"] == "foundation-teacher-inference-failure.v1"
+    assert first["reason"] == "RuntimeError"
+
+
+def test_device_resolution_failure_is_sealed(tmp_path, monkeypatch):
+    dataset = TeacherDataset(
+        contexts=np.ones((1, DEFAULT_CONTEXT_LENGTH), dtype=np.float32),
+        reference_close=np.ones(1, dtype=np.float32),
+        actual_return=np.zeros(1, dtype=np.float32),
+        dates=np.array([20200101]),
+        execution_dates=np.array([20200102]),
+        terminal_dates=np.array([20200108]),
+        instruments=np.array([b"000001.SZ"]),
+        boards=np.zeros(1, dtype=np.int8),
+        sample_weight=np.ones(1),
+        forecast_steps=np.full(1, 5),
+        folds=np.ones(1, dtype=np.int8),
+        partitions=np.array([b"test"], dtype="S24"),
+    )
+    monkeypatch.setattr(
+        teacher_runner,
+        "load_teacher_dataset",
+        lambda _root: (dataset, {"dataSha256": "a" * 64}),
+    )
+    monkeypatch.setattr(
+        teacher_runner,
+        "_device",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError()),
+    )
+
+    receipt = run_teacher_inference(
+        dataset_root=tmp_path / "dataset",
+        output_root=tmp_path / "inference",
+        model_name="ttm-r2.1",
+    )
+
+    assert receipt["schemaVersion"] == "foundation-teacher-inference-failure.v1"
+    assert receipt["stage"] == "DEVICE_RESOLUTION"
+    assert receipt["reason"] == "RuntimeError"
 
 
 def test_daily_quota_requires_one_sample_per_date():
