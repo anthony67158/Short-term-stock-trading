@@ -42,6 +42,7 @@ POLICY = {
     "withinStratumSelection": "LOWEST_SHA256_SCORE",
     "probability": "SELECTED_IN_STRATUM_DIVIDED_BY_POPULATION_IN_STRATUM",
     "weight": "INVERSE_SELECTION_PROBABILITY",
+    "marketCapUsage": "TRAINING_SAMPLING_ONLY_NOT_MODEL_FEATURE",
     "testPolicy": "FULL_UNIVERSE_NOT_SAMPLED",
     "calibrationPolicy": "FULL_UNIVERSE_NOT_SAMPLED",
 }
