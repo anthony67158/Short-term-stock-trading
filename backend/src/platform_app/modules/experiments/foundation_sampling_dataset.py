@@ -867,6 +867,7 @@ def main() -> None:
         type=int,
         default=DEFAULT_SAMPLING_SEED,
     )
+    parser.add_argument("--progress-every", type=int, default=100)
     args = parser.parse_args()
     with FoundationSamplingDataset(
         args.root,
@@ -877,8 +878,12 @@ def main() -> None:
         maximum_windows_per_fold=args.maximum_windows_per_fold,
         sampling_seed=args.sampling_seed,
     ) as dataset:
-        for result in dataset.build():
-            print(json.dumps(result, ensure_ascii=False, sort_keys=True), flush=True)
+        for index, result in enumerate(dataset.build(), 1):
+            if args.progress_every <= 0 or index % args.progress_every == 0:
+                print(
+                    json.dumps(result, ensure_ascii=False, sort_keys=True),
+                    flush=True,
+                )
         print(
             json.dumps(dataset.seal(), ensure_ascii=False, sort_keys=True),
             flush=True,
