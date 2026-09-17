@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+from scipy.stats import rankdata
+from sklearn.metrics import log_loss, mean_pinball_loss
 
 from platform_app.modules.experiments.foundation_return_contract import (
     DEFAULT_QUANTILES,
@@ -79,6 +81,7 @@ MODEL_SPECS = {
         "officialSource": "https://huggingface.co/amazon/chronos-2",
     },
 }
+SCREENING_QUANTILES = (0.10, 0.25, 0.50, 0.75, 0.90)
 
 
 class FoundationTeacherError(ValueError):
@@ -123,6 +126,34 @@ class TeacherDataset:
         ):
             raise FoundationTeacherError(
                 "FOUNDATION_TEACHER_DATASET_INVALID",
+            )
+
+
+@dataclass(frozen=True)
+class TeacherRawForecast:
+    point: np.ndarray
+    quantiles: np.ndarray
+    quantile_levels: tuple[float, ...]
+    inference_seconds: float
+
+    def __post_init__(self) -> None:
+        if (
+            self.point.ndim != 2
+            or self.point.shape[1] != DEFAULT_FORECAST_HORIZON
+            or self.quantiles.shape
+            != (
+                len(self.point),
+                DEFAULT_FORECAST_HORIZON,
+                len(self.quantile_levels),
+            )
+            or not np.all(np.isfinite(self.point))
+            or not np.all(np.isfinite(self.quantiles))
+            or tuple(sorted(set(self.quantile_levels)))
+            != self.quantile_levels
+            or self.inference_seconds < 0
+        ):
+            raise FoundationTeacherError(
+                "FOUNDATION_TEACHER_RAW_FORECAST_INVALID",
             )
 
 
@@ -416,6 +447,264 @@ def load_teacher_dataset(root: Path) -> tuple[TeacherDataset, dict]:
             "FOUNDATION_TEACHER_DATASET_COUNT_MISMATCH",
         )
     return dataset, manifest
+
+
+def select_forecast_steps(
+    values: np.ndarray,
+    forecast_steps: np.ndarray,
+) -> np.ndarray:
+    array = np.asarray(values)
+    steps = np.asarray(forecast_steps, dtype=np.int64)
+    if (
+        array.ndim not in (2, 3)
+        or len(array) != len(steps)
+        or array.shape[1] != DEFAULT_FORECAST_HORIZON
+        or np.any(steps < 1)
+        or np.any(steps > DEFAULT_FORECAST_HORIZON)
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_FORECAST_STEP_INVALID",
+        )
+    return array[np.arange(len(array)), steps - 1]
+
+
+def _weighted_residual_quantiles(
+    residuals: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    values = np.asarray(residuals, dtype=np.float64)
+    sample_weight = np.asarray(weights, dtype=np.float64)
+    if (
+        values.ndim != 1
+        or len(values) != len(sample_weight)
+        or len(values) == 0
+        or np.any(sample_weight <= 0)
+        or not np.all(np.isfinite(values))
+        or not np.all(np.isfinite(sample_weight))
+    ):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_RESIDUALS_INVALID",
+        )
+    order = np.argsort(values, kind="stable")
+    cumulative = np.cumsum(sample_weight[order])
+    indices = np.searchsorted(
+        cumulative,
+        np.asarray(SCREENING_QUANTILES) * cumulative[-1],
+        side="left",
+    )
+    return values[order][np.minimum(indices, len(values) - 1)]
+
+
+def _empirical_win_probability(
+    point: np.ndarray,
+    calibration_residuals: np.ndarray,
+    calibration_weights: np.ndarray,
+) -> np.ndarray:
+    residuals = np.asarray(calibration_residuals, dtype=np.float64)
+    weights = np.asarray(calibration_weights, dtype=np.float64)
+    order = np.argsort(residuals, kind="stable")
+    ordered = residuals[order]
+    cumulative = np.cumsum(weights[order])
+    thresholds = -np.asarray(point, dtype=np.float64)
+    left = np.searchsorted(ordered, thresholds, side="right")
+    below = np.where(left == 0, 0.0, cumulative[left - 1])
+    return np.clip(1.0 - below / cumulative[-1], 0.0, 1.0)
+
+
+def common_quantile_predictions(
+    *,
+    model_name: str,
+    selected_point: np.ndarray,
+    selected_native_quantiles: np.ndarray,
+    native_levels: tuple[float, ...],
+    calibration_residual_quantiles: np.ndarray,
+) -> np.ndarray:
+    point = np.asarray(selected_point, dtype=np.float64)
+    if model_name == "ttm-r2.1":
+        result = point[:, None] + calibration_residual_quantiles[None, :]
+    else:
+        native = np.asarray(selected_native_quantiles, dtype=np.float64)
+        if (
+            native.shape != (len(point), len(native_levels))
+            or len(native_levels) == 0
+        ):
+            raise FoundationTeacherError(
+                "FOUNDATION_TEACHER_NATIVE_QUANTILES_INVALID",
+            )
+        result = np.column_stack(
+            [
+                np.asarray(
+                    [
+                        np.interp(level, native_levels, row)
+                        for row in native
+                    ]
+                )
+                for level in SCREENING_QUANTILES
+            ]
+        )
+    return np.sort(result, axis=1).astype(np.float32)
+
+
+def _interval_score(
+    actual: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    alpha: float,
+) -> np.ndarray:
+    return (
+        upper
+        - lower
+        + (2.0 / alpha) * np.maximum(lower - actual, 0.0)
+        + (2.0 / alpha) * np.maximum(actual - upper, 0.0)
+    )
+
+
+def _teacher_ranking_metrics(
+    dates: np.ndarray,
+    actual: np.ndarray,
+    scores: np.ndarray,
+) -> dict:
+    rank_ic = []
+    top10 = []
+    market = []
+    for date in np.unique(dates):
+        mask = dates == date
+        date_actual = actual[mask]
+        date_scores = scores[mask]
+        if len(date_actual) < 2 or np.ptp(date_scores) == 0:
+            rank_ic.append(0.0)
+        else:
+            rank_ic.append(
+                float(
+                    np.corrcoef(
+                        rankdata(date_scores, method="average"),
+                        rankdata(date_actual, method="average"),
+                    )[0, 1]
+                )
+            )
+        selected = np.argsort(date_scores)[-min(10, len(date_scores)) :]
+        top10.append(float(np.mean(date_actual[selected])))
+        market.append(float(np.mean(date_actual)))
+    return {
+        "meanDailyRankIc": float(np.mean(rank_ic)),
+        "top10MeanNetReturn": float(np.mean(top10)),
+        "marketMeanNetReturn": float(np.mean(market)),
+        "top10NetReturnIncrement": float(np.mean(top10) - np.mean(market)),
+    }
+
+
+def evaluate_teacher_test(
+    dataset: TeacherDataset,
+    raw: TeacherRawForecast,
+    *,
+    model_name: str,
+    fold: int,
+) -> tuple[dict, dict[str, np.ndarray]]:
+    calibration = (dataset.folds == fold) & (
+        dataset.partitions == b"probabilityCalibration"
+    )
+    test = (dataset.folds == fold) & (dataset.partitions == b"test")
+    if not np.any(calibration) or not np.any(test):
+        raise FoundationTeacherError(
+            "FOUNDATION_TEACHER_EVALUATION_PARTITION_MISSING",
+        )
+    selected_point = select_forecast_steps(raw.point, dataset.forecast_steps)
+    if raw.quantiles.shape[2]:
+        selected_native = select_forecast_steps(
+            raw.quantiles,
+            dataset.forecast_steps,
+        )
+    else:
+        selected_native = np.empty((len(dataset.contexts), 0))
+    residuals = dataset.actual_return[calibration] - selected_point[calibration]
+    residual_quantiles = _weighted_residual_quantiles(
+        residuals,
+        dataset.sample_weight[calibration],
+    )
+    quantiles = common_quantile_predictions(
+        model_name=model_name,
+        selected_point=selected_point,
+        selected_native_quantiles=selected_native,
+        native_levels=raw.quantile_levels,
+        calibration_residual_quantiles=residual_quantiles,
+    )
+    probability = _empirical_win_probability(
+        selected_point,
+        residuals,
+        dataset.sample_weight[calibration],
+    )
+    actual = dataset.actual_return[test].astype(np.float64)
+    weights = dataset.sample_weight[test].astype(np.float64)
+    weights /= np.mean(weights)
+    predicted = quantiles[test].astype(np.float64)
+    p_win = np.clip(probability[test], 1e-7, 1 - 1e-7)
+    direction = (actual > 0).astype(np.int8)
+    pinball = {
+        f"q{round(level * 100):02d}": float(
+            mean_pinball_loss(
+                actual,
+                predicted[:, index],
+                alpha=level,
+                sample_weight=weights,
+            )
+        )
+        for index, level in enumerate(SCREENING_QUANTILES)
+    }
+    wis = (
+        0.5 * np.abs(actual - predicted[:, 2])
+        + 0.1
+        * _interval_score(actual, predicted[:, 0], predicted[:, 4], 0.2)
+        + 0.25
+        * _interval_score(actual, predicted[:, 1], predicted[:, 3], 0.5)
+    ) / 2.5
+    covered80 = (actual >= predicted[:, 0]) & (actual <= predicted[:, 4])
+    metrics = {
+        "fold": fold,
+        "model": model_name,
+        "samples": int(np.sum(test)),
+        "dates": int(len(np.unique(dataset.dates[test]))),
+        "brier": float(np.average((p_win - direction) ** 2, weights=weights)),
+        "logLoss": float(
+            log_loss(
+                direction,
+                p_win,
+                labels=[0, 1],
+                sample_weight=weights,
+            )
+        ),
+        "pinball": pinball,
+        "meanPinball": float(np.mean(tuple(pinball.values()))),
+        "weightedIntervalScore80": float(np.average(wis, weights=weights)),
+        "interval80Coverage": float(np.average(covered80, weights=weights)),
+        "interval80MeanWidth": float(
+            np.average(predicted[:, 4] - predicted[:, 0], weights=weights)
+        ),
+        "ranking": _teacher_ranking_metrics(
+            dataset.dates[test],
+            actual,
+            predicted[:, 2],
+        ),
+        "probabilityCalibration": (
+            "WEIGHTED_EMPIRICAL_POINT_RESIDUAL_CDF"
+        ),
+        "quantilePolicy": (
+            "WEIGHTED_EMPIRICAL_POINT_RESIDUALS"
+            if model_name == "ttm-r2.1"
+            else "NATIVE_WITHIN_RANGE_LINEAR_INTERPOLATION"
+        ),
+    }
+    predictions = {
+        "dates": dataset.dates[test],
+        "instruments": dataset.instruments[test],
+        "actualReturn": dataset.actual_return[test],
+        "sampleWeight": dataset.sample_weight[test],
+        "pWin": probability[test].astype(np.float32),
+        **{
+            f"q{round(level * 100):02d}": quantiles[test, index]
+            for index, level in enumerate(SCREENING_QUANTILES)
+        },
+    }
+    return metrics, predictions
 
 
 def main() -> None:

@@ -6,11 +6,15 @@ import pytest
 from platform_app.modules.experiments.foundation_teacher_runner import (
     DEFAULT_CONTEXT_LENGTH,
     FoundationTeacherError,
+    TeacherRawForecast,
     TeacherDataset,
+    common_quantile_predictions,
     _daily_quotas,
     _mature_return_context,
     _partition_samples,
     _score,
+    evaluate_teacher_test,
+    select_forecast_steps,
 )
 
 
@@ -113,6 +117,97 @@ def test_teacher_dataset_rejects_wrong_context_shape():
             folds=np.ones(2),
             partitions=np.array([b"test", b"test"]),
         )
+
+
+def test_forecast_steps_select_each_samples_target_horizon():
+    values = np.arange(15).reshape(3, 5)
+
+    selected = select_forecast_steps(values, np.array([1, 3, 5]))
+
+    np.testing.assert_array_equal(selected, np.array([0, 7, 14]))
+
+
+def test_ttm_quantiles_use_calibration_residuals_only():
+    predicted = common_quantile_predictions(
+        model_name="ttm-r2.1",
+        selected_point=np.array([0.1, 0.2]),
+        selected_native_quantiles=np.empty((2, 0)),
+        native_levels=(),
+        calibration_residual_quantiles=np.array(
+            [-0.05, -0.02, 0.0, 0.03, 0.08]
+        ),
+    )
+
+    np.testing.assert_allclose(
+        predicted[0],
+        np.array([0.05, 0.08, 0.1, 0.13, 0.18]),
+    )
+
+
+def test_teacher_evaluation_uses_calibration_and_test_partitions():
+    contexts = np.zeros((8, DEFAULT_CONTEXT_LENGTH), dtype=np.float32)
+    dataset = TeacherDataset(
+        contexts=contexts,
+        actual_return=np.array(
+            [-0.02, 0.01, 0.03, 0.04, -0.01, 0.02, 0.05, 0.08],
+            dtype=np.float32,
+        ),
+        dates=np.array(
+            [
+                20200101,
+                20200101,
+                20200102,
+                20200102,
+                20200201,
+                20200201,
+                20200202,
+                20200202,
+            ]
+        ),
+        instruments=np.asarray(
+            [f"{index:06d}.SZ".encode() for index in range(8)],
+            dtype="S9",
+        ),
+        boards=np.zeros(8, dtype=np.int8),
+        sample_weight=np.ones(8),
+        forecast_steps=np.array([1, 2, 3, 5, 1, 2, 3, 5]),
+        folds=np.ones(8, dtype=np.int8),
+        partitions=np.array(
+            [b"probabilityCalibration"] * 4 + [b"test"] * 4,
+            dtype="S24",
+        ),
+    )
+    point = np.tile(np.arange(5, dtype=np.float32) / 100, (8, 1))
+    raw = TeacherRawForecast(
+        point=point,
+        quantiles=np.empty((8, 5, 0), dtype=np.float32),
+        quantile_levels=(),
+        inference_seconds=1.0,
+    )
+
+    metrics, predictions = evaluate_teacher_test(
+        dataset,
+        raw,
+        model_name="ttm-r2.1",
+        fold=1,
+    )
+
+    assert metrics["samples"] == 4
+    assert metrics["dates"] == 2
+    assert 0 <= metrics["interval80Coverage"] <= 1
+    assert predictions["pWin"].shape == (4,)
+    assert list(predictions) == [
+        "dates",
+        "instruments",
+        "actualReturn",
+        "sampleWeight",
+        "pWin",
+        "q10",
+        "q25",
+        "q50",
+        "q75",
+        "q90",
+    ]
 
 
 def test_daily_quota_requires_one_sample_per_date():
