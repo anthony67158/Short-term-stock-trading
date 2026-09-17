@@ -1383,7 +1383,7 @@ Agent 采用一个选股 runtime 与一个独立端点的三种严格模式；�
   `OSS_ACCESS_KEY_SECRET`，不再依赖新增 secrets；训练下载器将读取路径硬限制为
   `learning/v1/manifests/` 与 `learning/v1/views/`，上传路径硬限制为
   `learning/v1/training-runs/`。后续仍建议将现有 OSS 凭据轮换为等价前缀最小权限
-  RAM 身份。工作流尚未进入默认分支，因此自动运行尚未发生。
+  RAM 身份。工作流已进入默认分支并完成真实自动运行验证。
 
 恢复与首轮生产验收（2026-09-17 21:46）：
 - 确认此前没有训练进程卡死；新 `daily-learning-challengers` 工作流仅存在于本地
@@ -1397,5 +1397,23 @@ Agent 采用一个选股 runtime 与一个独立端点的三种严格模式；�
   `NO_CHALLENGER_PROMOTION`，两路均为
   `SKIPPED_INSUFFICIENT_MATURED_DATA`，`productionPointerChanged=false`。
 - 当前不是故障状态，而是正常采样等待状态：选股门槛为 60 条/12 个交易日，持仓
-  门槛为 30 条/10 个交易日。GitHub 自动训练仍需将工作流发布到默认分支并配置
-  最小权限 secrets；在此之前 FC 会继续每日结算并积累脱敏样本。
+  门槛为 30 条/10 个交易日。FC 会继续每日结算并积累脱敏样本。
+
+GitHub Actions 自动运行验收（2026-09-17 22:21）：
+- PR #1 将完整学习闭环以 squash commit `934082e` 合并到 `main`；PR #2 将仅限
+  学习流水线文件的 `push` 验证入口以 commit `b1e8805` 合并到 `main`。既有北京
+  时间 01:15 的定时触发保持不变。
+- `daily-learning-challengers` run
+  [#35232945353](https://github.com/anthony67158/Short-term-stock-trading/actions/runs/35232945353)
+  成功，`train` job `105241486528` 用时 46 秒。不可变合同测试、Python 门禁测试、
+  最新脱敏视图下载、challenger 训练、不可变运行上传和诊断产物上传全部成功。
+- 本次读取 manifest
+  `learning/v1/manifests/2026-09-17/54afefa1c6b0307f95a8802b5a0fee7cc85bfc7eb87cb27d75f1ca6b67b302b5.json`；
+  manifest、view 路径与规范化内容哈希一致。训练视图为选股 0 行、持仓 0 行，未将
+  缺少 `decisionId` 预测关联的历史真实结果强行配对。
+- 运行报告上传至
+  `learning/v1/training-runs/2026-09-17/b50569a0ff072031bd3e/report.json`：
+  总状态 `NO_CHALLENGER_PROMOTION`，两路均为
+  `SKIPPED_INSUFFICIENT_MATURED_DATA`，`productionPointerChanged=false`。
+  线上 `stockpick/ranking-score-snapshot.json` 的最后修改时间早于本次运行，
+  确认 Actions 未切换生产模型。
