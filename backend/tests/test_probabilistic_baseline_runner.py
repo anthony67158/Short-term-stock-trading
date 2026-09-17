@@ -311,3 +311,17 @@ def test_baseline_primitives_reject_invalid_inputs():
             np.array(["20200101"]),
             np.array(["20200102"]),
         )
+    ranking, sampling = baseline_databases()
+    with pytest.raises(
+        ProbabilisticBaselineError,
+        match="PROBABILISTIC_BASELINE_MAXIMUM_DATES_INVALID",
+    ):
+        _load_partition_from_connections(
+            ranking,
+            sampling,
+            fold_contract={"fold": 1},
+            partition="train",
+            maximum_dates=0,
+        )
+    ranking.close()
+    sampling.close()

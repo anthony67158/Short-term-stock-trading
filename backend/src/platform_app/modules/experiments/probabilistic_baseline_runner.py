@@ -339,7 +339,12 @@ def _load_partition_from_connections(
     *,
     fold_contract: dict,
     partition: str,
+    maximum_dates: int | None = None,
 ) -> BaselinePartition:
+    if maximum_dates is not None and maximum_dates <= 0:
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_MAXIMUM_DATES_INVALID",
+        )
     fold = int(fold_contract["fold"])
     start, end, expected_rows = _fold_partition_range(fold_contract, partition)
     decision_dates = [
@@ -354,6 +359,8 @@ def _load_partition_from_connections(
         raise ProbabilisticBaselineError(
             "PROBABILISTIC_BASELINE_PARTITION_EMPTY",
         )
+    if maximum_dates is not None:
+        decision_dates = decision_dates[:maximum_dates]
 
     feature_blocks = []
     date_blocks = []
@@ -436,7 +443,7 @@ def _load_partition_from_connections(
         direction=np.concatenate(direction_blocks),
         sample_weight=np.concatenate(weight_blocks),
     )
-    if len(result.x) != expected_rows:
+    if maximum_dates is None and len(result.x) != expected_rows:
         raise ProbabilisticBaselineError(
             "PROBABILISTIC_BASELINE_PARTITION_COUNT_MISMATCH",
         )
@@ -487,7 +494,13 @@ class FoundationBaselineDataLoader:
         self.sampling.close()
         self.ranking.close()
 
-    def load_partition(self, fold: int, partition: str) -> BaselinePartition:
+    def load_partition(
+        self,
+        fold: int,
+        partition: str,
+        *,
+        maximum_dates: int | None = None,
+    ) -> BaselinePartition:
         try:
             contract = self.folds[fold]
         except KeyError as exc:
@@ -499,6 +512,7 @@ class FoundationBaselineDataLoader:
             self.sampling,
             fold_contract=contract,
             partition=partition,
+            maximum_dates=maximum_dates,
         )
 
 
