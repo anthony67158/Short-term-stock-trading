@@ -70,12 +70,6 @@ const StockPickTab = lazyWithReload(
   () => import('./components/StockPickTab'),
   'stock-pick',
 )
-const AdaptiveWorkbenchPreview = import.meta.env.DEV
-  ? lazyWithReload(
-      () => import('./components/AdaptiveWorkbenchPreview'),
-      'adaptive-preview',
-    )
-  : null
 const PlanTab = lazyWithReload(() => import('./components/PlanTab'), 'plan')
 const ResearchTab = lazyWithReload(() => import('./components/ResearchTab'), 'research')
 const AccountHub = lazyWithReload(() => import('./components/AccountHub'), 'account-hub')
@@ -181,16 +175,6 @@ function WorkspaceNavigation({
 }
 
 export default function App() {
-  const preview = import.meta.env.DEV
-    && new URLSearchParams(window.location.search)
-      .get('preview') === 'adaptive'
-  if (preview && AdaptiveWorkbenchPreview) {
-    return (
-      <Suspense fallback={<TabSkeleton />}>
-        <AdaptiveWorkbenchPreview />
-      </Suspense>
-    )
-  }
   return <AuthenticatedApp />
 }
 
