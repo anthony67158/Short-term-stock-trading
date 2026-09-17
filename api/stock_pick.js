@@ -11,11 +11,19 @@ import {
   buildStockPickRecall,
 } from './_stock_pick_recall.js'
 import {
+  generateStockPickAgentSelection,
+} from './_stock_pick_agent.js'
+import {
   stockPickStore,
 } from './_stock_pick_store.js'
 import {
   unavailableStockPickSnapshot,
 } from '../shared/stockPick.js'
+import {
+  topStockPickReferences,
+  unavailableStockPickAgentSelection,
+} from '../shared/stockPickAgent.js'
+import { randomUUID } from 'node:crypto'
 
 const runFlights = new Map()
 
@@ -97,6 +105,34 @@ export async function handleStockPickRun({
   return promise
 }
 
+export async function handleStockPickAgent({
+  store = stockPickStore,
+  generate = generateStockPickAgentSelection,
+  now = Date.now,
+} = {}) {
+  const snapshot = await store.readLatest()
+  if (!snapshot || snapshot.availability !== 'READY' || !snapshot.candidates?.length) {
+    const selection = unavailableStockPickAgentSelection({
+      reasonCode: 'NO_RECALL_SNAPSHOT',
+      reason: '请先运行全市场召回',
+      now: Number(now()) || Date.now(),
+    })
+    await store.saveAgent(selection)
+    return { ok: true, selection, references: [] }
+  }
+  const selection = await generate({
+    snapshot,
+    agentRunId: randomUUID(),
+    now: Number(now()) || Date.now(),
+  })
+  await store.saveAgent(selection)
+  // Agent 未选/不可用时，附 Top 候选供人工参考（明确标注未经 Agent 精选）。
+  const references = selection.conclusion === 'SELECT' && selection.selections.length
+    ? []
+    : topStockPickReferences(snapshot)
+  return { ok: true, selection, references }
+}
+
 export default async function handler(req, res) {
   if (preflight(req, res)) return
   applyCors(res)
@@ -104,14 +140,22 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store')
 
   if (req.method === 'GET') {
-    const [snapshot, progress] = await Promise.all([
+    const [snapshot, progress, agent] = await Promise.all([
       stockPickStore.readLatest(),
       stockPickStore.readProgress(),
+      stockPickStore.readAgent(),
     ])
+    const references = agent
+      && !(agent.conclusion === 'SELECT' && agent.selections?.length)
+      && snapshot?.availability === 'READY'
+      ? topStockPickReferences(snapshot)
+      : []
     return reply(res, 200, {
       ok: true,
       snapshot: snapshot || null,
       progress: progress || null,
+      agent: agent || null,
+      references,
     })
   }
 
@@ -147,7 +191,7 @@ export default async function handler(req, res) {
     })
   }
 
-  if (body.action !== 'run') {
+  if (!['run', 'agent'].includes(body.action)) {
     return reply(res, 422, {
       ok: false,
       error: '选股操作无效',
@@ -156,16 +200,19 @@ export default async function handler(req, res) {
   }
 
   try {
-    const result = await handleStockPickRun()
+    const result = body.action === 'agent'
+      ? await handleStockPickAgent()
+      : await handleStockPickRun()
     return reply(res, 200, result)
   } catch (error) {
     console.error(
-      '[stock_pick] run failed',
+      '[stock_pick] action failed',
+      body.action,
       error?.code || error?.name || error?.message,
     )
     return reply(res, 500, {
       ok: false,
-      error: '选股召回失败',
+      error: '选股服务失败',
       errorCode: 'STOCK_PICK_FAILED',
     })
   }

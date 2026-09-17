@@ -10,6 +10,7 @@ const PREFIX = 'stockpick/'
 const PATHS = Object.freeze({
   latest: `${PREFIX}latest.json`,
   progress: `${PREFIX}progress.json`,
+  agent: `${PREFIX}agent.json`,
   lock: `${PREFIX}active.json`,
 })
 const CLAIM_TTL_MS = 3 * 60 * 1000
@@ -25,6 +26,7 @@ function jsonOptions() {
 
 let memoryLatest = null
 let memoryProgress = null
+let memoryAgent = null
 let memoryClaim = null
 
 export function createStockPickStore(storage = {
@@ -61,6 +63,17 @@ export function createStockPickStore(storage = {
         return progress
       }
       return writeJson(PATHS.progress, progress)
+    },
+    async readAgent() {
+      if (!storage.hasStorage()) return memoryAgent
+      return storage.readJson(PATHS.agent).catch(() => null)
+    },
+    async saveAgent(selection) {
+      if (!storage.hasStorage()) {
+        memoryAgent = selection
+        return selection
+      }
+      return writeJson(PATHS.agent, selection)
     },
     // 单飞锁：避免同一账户并发全市场扫描重复计费。
     async claimRun(now = Date.now()) {
