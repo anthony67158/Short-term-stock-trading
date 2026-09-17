@@ -1,13 +1,18 @@
 """Reproducible probabilistic tree baselines on frozen foundation folds."""
 
+import hashlib
+import json
+import os
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import catboost
+import joblib
 import lightgbm
 import numpy as np
+import sklearn
 import xgboost
 from catboost import CatBoostClassifier, CatBoostRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
@@ -17,6 +22,9 @@ from xgboost import XGBClassifier, XGBRegressor
 
 from platform_app.modules.experiments.foundation_return_contract import (
     DEFAULT_QUANTILES,
+    experiment_config_sha256,
+    experiment_id,
+    load_frozen_experiment,
 )
 from platform_app.modules.experiments.foundation_return_dataset import (
     verify_foundation_return_dataset,
@@ -27,6 +35,7 @@ from platform_app.modules.experiments.foundation_sampling_dataset import (
 from platform_app.modules.experiments.ranking_model_trainer import (
     BOARD_CODES,
     GLOBAL_PERCENTILE_TARGET,
+    MODEL_FEATURE_NAMES,
     RAW_COLUMNS,
     _date_features,
     _verified_ranking_database,
@@ -41,6 +50,13 @@ DEFAULT_ITERATIONS = 120
 CATBOOST_FAMILY = "catboost-multiquantile-v1"
 XGBOOST_FAMILY = "xgboost-quantile-v1"
 LIGHTGBM_FAMILY = "lightgbm-quantile-v1"
+HISTORICAL_FAMILY = "historical-distribution-v1"
+MODEL_FAMILIES = (
+    HISTORICAL_FAMILY,
+    CATBOOST_FAMILY,
+    XGBOOST_FAMILY,
+    LIGHTGBM_FAMILY,
+)
 PARTITION_RANGES = {
     "train": ("trainStart", "trainEnd", "trainSelected"),
     "probabilityCalibration": (
@@ -288,6 +304,8 @@ def baseline_library_versions() -> dict[str, str]:
         "catboost": catboost.__version__,
         "lightgbm": lightgbm.__version__,
         "numpy": np.__version__,
+        "scikitLearn": sklearn.__version__,
+        "joblib": joblib.__version__,
         "xgboost": xgboost.__version__,
     }
 
@@ -516,6 +534,113 @@ class FoundationBaselineDataLoader:
             partition=partition,
             maximum_dates=maximum_dates,
         )
+
+
+def _file_sha256(path: Path) -> str:
+    with path.open("rb") as stream:
+        return hashlib.file_digest(stream, "sha256").hexdigest()
+
+
+def _write_json(path: Path, payload: dict, *, immutable: bool = False) -> None:
+    rendered = json.dumps(
+        payload,
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+        allow_nan=False,
+    ) + "\n"
+    if immutable and path.exists():
+        if path.read_text() != rendered:
+            raise ProbabilisticBaselineError(
+                f"PROBABILISTIC_BASELINE_ARTIFACT_MISMATCH:{path.name}",
+            )
+        return
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(rendered)
+    os.replace(temporary, path)
+
+
+def _write_joblib(path: Path, payload: Any) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    joblib.dump(payload, temporary, compress=3)
+    os.replace(temporary, path)
+
+
+def _write_predictions(
+    path: Path,
+    partition: BaselinePartition,
+    predictions: dict[str, np.ndarray],
+) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with temporary.open("wb") as stream:
+        np.savez_compressed(
+            stream,
+            dates=partition.dates,
+            boards=partition.boards,
+            instruments=partition.instruments,
+            actualReturn=partition.target_return,
+            actualDirection=partition.direction,
+            sampleWeight=partition.sample_weight,
+            **predictions,
+        )
+    os.replace(temporary, path)
+
+
+def build_baseline_protocol(
+    experiment_root: Path,
+    loader: FoundationBaselineDataLoader,
+    *,
+    iterations: int = DEFAULT_ITERATIONS,
+    smoke_dates: int | None = None,
+) -> dict:
+    experiment = load_frozen_experiment(experiment_root)
+    if (
+        experiment.dataset.database_sha256
+        != loader.foundation_manifest["databaseSha256"]
+        or experiment.dataset.sampling_database_sha256
+        != loader.sampling_manifest["databaseSha256"]
+        or experiment.dataset.sampling_policy_sha256
+        != loader.sampling_manifest["policySha256"]
+        or experiment.dataset.feature_schema_sha256
+        != loader.foundation_manifest["featureSchemaSha256"]
+        or experiment.dataset.label_policy_sha256
+        != loader.foundation_manifest["labelPolicySha256"]
+    ):
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_EXPERIMENT_LINEAGE_MISMATCH",
+        )
+    if iterations <= 0 or (smoke_dates is not None and smoke_dates <= 0):
+        raise ProbabilisticBaselineError(
+            "PROBABILISTIC_BASELINE_TRAINING_CONFIG_INVALID",
+        )
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "experimentId": experiment_id(experiment),
+        "experimentConfigSha256": experiment_config_sha256(experiment),
+        "datasetId": loader.foundation_manifest["datasetId"],
+        "foundationDatabaseSha256": loader.foundation_manifest["databaseSha256"],
+        "rankingDatabaseSha256": loader.ranking_manifest["databaseSha256"],
+        "samplingDatabaseSha256": loader.sampling_manifest["databaseSha256"],
+        "samplingPolicySha256": loader.sampling_manifest["policySha256"],
+        "featureSchemaSha256": loader.foundation_manifest["featureSchemaSha256"],
+        "labelPolicySha256": loader.foundation_manifest["labelPolicySha256"],
+        "featureNames": list(MODEL_FEATURE_NAMES),
+        "quantiles": list(DEFAULT_QUANTILES),
+        "families": list(MODEL_FAMILIES),
+        "iterations": iterations,
+        "seed": BASELINE_SEED,
+        "trainingSelection": "DETERMINISTIC_STRATIFIED_SAMPLE",
+        "calibrationSelection": "FULL_UNIVERSE",
+        "testSelection": "FULL_UNIVERSE",
+        "feeTarget": "REFERENCE_FULL_FILL_FEE_ADJUSTED_5D",
+        "fullUniverseEvaluation": smoke_dates is None,
+        "smokeDatesPerPartition": smoke_dates,
+        "confirmationFold": 5,
+        "confirmationGate": "DEVELOPMENT_CONFIGURATION_FREEZE_REQUIRED",
+        "libraryVersions": baseline_library_versions(),
+        "sourceSha256": _file_sha256(Path(__file__)),
+        "releaseStatus": "UNAVAILABLE",
+    }
 
 
 def _round_cny(values: np.ndarray) -> np.ndarray:

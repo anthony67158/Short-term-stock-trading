@@ -1,3 +1,4 @@
+import json
 from decimal import Decimal
 import sqlite3
 
@@ -14,6 +15,8 @@ from platform_app.modules.experiments.probabilistic_baseline_runner import (
     BaselinePartition,
     ProbabilisticBaselineError,
     _load_partition_from_connections,
+    _write_json,
+    _write_predictions,
     baseline_library_versions,
     evaluate_predictions,
     fee_adjusted_returns,
@@ -306,6 +309,27 @@ def test_evaluate_predictions_uses_fee_adjusted_distribution_and_daily_ranks():
     assert metrics["interval80Coverage"] == 1.0
     assert metrics["interval80MeanWidth"] == pytest.approx(0.04)
     assert metrics["ranking"]["meanDailyRankIc"] == pytest.approx(1.0)
+
+
+def test_artifact_writes_are_atomic_and_immutable(tmp_path):
+    metadata = tmp_path / "protocol.json"
+    _write_json(metadata, {"version": 1}, immutable=True)
+    _write_json(metadata, {"version": 1}, immutable=True)
+    assert json.loads(metadata.read_text()) == {"version": 1}
+    with pytest.raises(
+        ProbabilisticBaselineError,
+        match="PROBABILISTIC_BASELINE_ARTIFACT_MISMATCH",
+    ):
+        _write_json(metadata, {"version": 2}, immutable=True)
+
+    data = partition()
+    predictions = historical_baseline_predictions(data, len(data.x))
+    output = tmp_path / "predictions.npz"
+    _write_predictions(output, data, predictions)
+    with np.load(output, allow_pickle=False) as saved:
+        np.testing.assert_array_equal(saved["dates"], data.dates)
+        np.testing.assert_array_equal(saved["actualReturn"], data.target_return)
+        np.testing.assert_array_equal(saved["pWin"], predictions["pWin"])
 
 
 def test_baseline_primitives_reject_invalid_inputs():
