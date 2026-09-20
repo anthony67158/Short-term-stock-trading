@@ -627,13 +627,16 @@ def audit_multifactor_source_archive(
         blockers.append("SOURCE_PARTITION_COVERAGE_MISMATCH")
     if (
         expected_decision_dates is not None
-        and declared_dates != sorted({_date(value) for value in expected_decision_dates})
+        and not set(_date(value) for value in expected_decision_dates).issubset(
+            declared_dates
+        )
     ):
         blockers.append("SOURCE_DECISION_DATE_COVERAGE_MISMATCH")
     if (
         expected_financial_periods is not None
-        and declared_periods
-        != sorted({_date(value) for value in expected_financial_periods})
+        and not set(_date(value) for value in expected_financial_periods).issubset(
+            declared_periods
+        )
     ):
         blockers.append("SOURCE_FINANCIAL_PERIOD_COVERAGE_MISMATCH")
 

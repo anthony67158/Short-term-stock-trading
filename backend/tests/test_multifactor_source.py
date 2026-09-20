@@ -134,6 +134,12 @@ def test_source_archive_is_resumable_sealed_and_fully_audited(tmp_path):
     assert audit["state"] == "READY"
     assert audit["partitionHashesValid"] is True
     assert audit["sources"]["daily_basic"]["partitions"] == 2
+    subset_audit = audit_multifactor_source_archive(
+        tmp_path,
+        expected_decision_dates=["20250102"],
+        expected_financial_periods=["20241231"],
+    )
+    assert subset_audit["state"] == "READY"
 
     with pytest.raises(ValueError, match="ALREADY_SEALED"):
         build_multifactor_source_archive(
