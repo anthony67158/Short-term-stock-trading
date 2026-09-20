@@ -17,6 +17,7 @@ from platform_app.modules.experiments.episode_dataset import canonical_sha256
 from platform_app.modules.experiments.multifactor_features import (
     FACTOR_FAMILIES,
     FEATURE_SCHEMA_VERSION,
+    METRIC_NAMES,
     build_multifactor_metrics,
     score_multifactor_cross_section,
 )
@@ -32,10 +33,12 @@ from platform_app.modules.experiments.multifactor_source import (
 )
 
 
-SCHEMA_VERSION = "action-value-factor-dataset.v1"
+SCHEMA_VERSION = "action-value-factor-dataset.v2"
 FEATURE_NAMES = tuple(
     [f"factorScore_{family}" for family in FACTOR_FAMILIES]
+    + [f"metricScore_{metric}" for metric in METRIC_NAMES]
     + [f"factorMissing_{family}" for family in FACTOR_FAMILIES]
+    + [f"metricMissing_{metric}" for metric in METRIC_NAMES]
 )
 POLICY = {
     "policyVersion": "action-value-six-factor.v1",
@@ -101,6 +104,7 @@ CREATE TABLE IF NOT EXISTS factor_rows (
     momentum_score REAL,
     dividend_score REAL,
     low_volatility_score REAL,
+    metric_scores_json TEXT NOT NULL,
     missing_families_json TEXT NOT NULL,
     report_period TEXT,
     report_available_at TEXT,
@@ -330,17 +334,42 @@ def load_factor_vectors(
         for row in connection.execute(
             "SELECT episode_id,"
             + ",".join(SCORE_COLUMNS)
+            + ",metric_scores_json"
             + " FROM factor_rows ORDER BY decision_date,episode_id"
         ):
+            try:
+                metric_scores = json.loads(row["metric_scores_json"])
+            except (TypeError, ValueError) as exc:
+                raise ActionValueFactorDatasetError(
+                    "ACTION_VALUE_FACTOR_METRIC_SCORES_INVALID"
+                ) from exc
+            if set(metric_scores) != set(METRIC_NAMES):
+                raise ActionValueFactorDatasetError(
+                    "ACTION_VALUE_FACTOR_METRIC_SCORES_INVALID"
+                )
             scores = [
                 float(row[column]) if row[column] is not None else 0.5
                 for column in SCORE_COLUMNS
             ]
-            missing = [
+            metric_values = [
+                (
+                    float(metric_scores[name])
+                    if metric_scores[name] is not None
+                    else 0.5
+                )
+                for name in METRIC_NAMES
+            ]
+            factor_missing = [
                 1.0 if row[column] is None else 0.0
                 for column in SCORE_COLUMNS
             ]
-            result[row["episode_id"]] = tuple((*scores, *missing))
+            metric_missing = [
+                1.0 if metric_scores[name] is None else 0.0
+                for name in METRIC_NAMES
+            ]
+            result[row["episode_id"]] = tuple(
+                (*scores, *metric_values, *factor_missing, *metric_missing)
+            )
     finally:
         connection.close()
     if len(result) != manifest["rows"]:
@@ -652,6 +681,7 @@ class ActionValueFactorDataset:
                 "instrumentId": row["code"],
                 "state": row["state"],
                 "scores": row["factorScores"],
+                "metricScores": row["metricScores"],
                 "missingFamilies": row["missingFamilies"],
                 "reportPeriod": row.get("reportPeriod"),
                 "reportAvailableAt": report_available,
@@ -662,6 +692,7 @@ class ActionValueFactorDataset:
                 "sourceRowSha256": canonical_sha256({
                     "dailyBasic": daily_hashes[row["code"]],
                     "factorScores": row["factorScores"],
+                    "metricScores": row["metricScores"],
                     "reportPeriod": row.get("reportPeriod"),
                     "reportAvailableAt": report_available,
                 }),
@@ -690,7 +721,7 @@ class ActionValueFactorDataset:
             )
             self.db.executemany(
                 "INSERT INTO factor_rows VALUES "
-                f"({','.join('?' for _ in range(15))})",
+                f"({','.join('?' for _ in range(16))})",
                 [
                     (
                         row["decisionDate"],
@@ -698,6 +729,11 @@ class ActionValueFactorDataset:
                         row["instrumentId"],
                         row["state"],
                         *(row["scores"][family] for family in FACTOR_FAMILIES),
+                        json.dumps(
+                            row["metricScores"],
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
                         json.dumps(
                             row["missingFamilies"],
                             sort_keys=True,

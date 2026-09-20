@@ -26,7 +26,9 @@ jobs:
       RANKING_ID: action-value-ranking-20240102-20260918-v1
       EPISODE_ID: action-value-episodes-20240401-20260911-v1
       LABEL_ID: action-value-labels-20240401-20260911-v1
-      FACTOR_ID: action-value-factors-20240401-20260911-v1
+      FACTOR_ID: action-value-factors-20240401-20260911-v2
+      FACTOR_SOURCE_RELEASE: action-value-factor-source-transfer-20260920
+      FACTOR_SOURCE_ASSET: action-value-factor-source-v2.tar.gz.enc
     steps:
       - uses: actions/checkout@v6
 
@@ -122,7 +124,8 @@ jobs:
               raise SystemExit("LABEL_BOARD_COVERAGE_INCOMPLETE")
           PY
 
-      - name: Restore sealed factor dataset
+      - name: Restore sealed factor dataset when present
+        id: restore-factor
         working-directory: backend
         run: |
           uv run --group ops python -m \
@@ -133,8 +136,67 @@ jobs:
             --dataset-id "$FACTOR_ID" \
             --output "$RUNNER_TEMP/factor-restore.json"
           status="$(jq -r .status "$RUNNER_TEMP/factor-restore.json")"
-          test "$status" = "RESTORED"
-          test -f "$DATA_ROOT/factor/manifest.json"
+          if [ "$status" = "RESTORED" ]; then
+            echo "restored=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "restored=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Restore encrypted point-in-time factor sources
+        if: steps.restore-factor.outputs.restored != 'true'
+        working-directory: backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FACTOR_SOURCE_KEY: ${{ secrets.ACTION_VALUE_FACTOR_SOURCE_KEY }}
+        run: |
+          test -n "$FACTOR_SOURCE_KEY"
+          gh release download "$FACTOR_SOURCE_RELEASE" \
+            --pattern "$FACTOR_SOURCE_ASSET" \
+            --dir "$RUNNER_TEMP/factor-source-transfer"
+          printf '%s' "$FACTOR_SOURCE_KEY" | openssl enc \
+            -d -aes-256-cbc -pbkdf2 \
+            -in "$RUNNER_TEMP/factor-source-transfer/$FACTOR_SOURCE_ASSET" \
+            -out "$RUNNER_TEMP/factor-source.tar.gz" \
+            -pass stdin
+          mkdir -p "$DATA_ROOT/factor-source"
+          tar -xzf "$RUNNER_TEMP/factor-source.tar.gz" \
+            -C "$DATA_ROOT/factor-source"
+          uv run python - <<'PY'
+          from pathlib import Path
+          import os
+
+          from platform_app.modules.experiments.multifactor_source import (
+              audit_multifactor_source_archive,
+          )
+
+          report = audit_multifactor_source_archive(
+              Path(os.environ["DATA_ROOT"]) / "factor-source"
+          )
+          if report["state"] != "READY":
+              raise SystemExit("ACTION_VALUE_FACTOR_SOURCE_NOT_READY")
+          PY
+
+      - name: Build and checkpoint sealed factor dataset
+        if: steps.restore-factor.outputs.restored != 'true'
+        working-directory: backend
+        run: |
+          uv run python -m \
+            platform_app.modules.experiments.action_value_factor_dataset \
+            build-dataset \
+            --root "$DATA_ROOT/factor" \
+            --dataset-id "$FACTOR_ID" \
+            --source-root "$DATA_ROOT/factor-source" \
+            --episode-root "$DATA_ROOT/episode" \
+            --label-root "$DATA_ROOT/label" \
+            --ranking-root "$DATA_ROOT/ranking" \
+            --market-root "$DATA_ROOT/market"
+          uv run --group ops python -m \
+            platform_app.modules.experiments.retraining_dataset_store checkpoint \
+            --root "$DATA_ROOT/factor" \
+            --scope full \
+            --kind factor \
+            --dataset-id "$FACTOR_ID" \
+            --output "$RUNNER_TEMP/factor-checkpoint.json"
 
       - name: Audit sealed factor dataset
         working-directory: backend
@@ -159,7 +221,7 @@ jobs:
             --label-root "$DATA_ROOT/label" \
             --ranking-root "$DATA_ROOT/ranking" \
             --factor-root "$DATA_ROOT/factor" \
-            --feature-set fusion_history \
+            --feature-set fusion \
             --output "$DATA_ROOT/experiment" \
             --max-iterations 200
 
@@ -238,6 +300,7 @@ jobs:
             ${{ runner.temp }}/label-restore.json
             ${{ runner.temp }}/label-final.json
             ${{ runner.temp }}/factor-restore.json
+            ${{ runner.temp }}/factor-checkpoint.json
             ${{ runner.temp }}/factor-final.json
             ${{ runner.temp }}/factor-manifest.json
             ${{ runner.temp }}/experiment-receipt.json
