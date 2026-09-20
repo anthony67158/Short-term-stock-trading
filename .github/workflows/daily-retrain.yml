@@ -1,63 +1,52 @@
-name: action-value-market-full
+name: action-value-derived-data
 
 on:
   workflow_dispatch: {}
 
 concurrency:
-  group: action-value-market-full
+  group: action-value-derived-data
   cancel-in-progress: false
 
 permissions:
   contents: read
 
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PIP_DEFAULT_TIMEOUT: "90"
+  OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+  OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+  OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+  OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+  DATA_ROOT: /mnt/action-value-data
+  MARKET_ID: action-value-market-20240102-20260918-v1
+  RANKING_ID: action-value-ranking-20240102-20260918-v1
+  EPISODE_ID: action-value-episodes-20240401-20260911-v1
+  START_DATE: "20240401"
+  END_DATE: "20260911"
+  MINUTE_START_DATE: "20240402"
+  MINUTE_END_DATE: "20260918"
+
 jobs:
-  market-full:
+  ranking-full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
-    env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_DEFAULT_TIMEOUT: "90"
-      PLATFORM_MARKET_DATA_ENABLED: "true"
-      PLATFORM_MARKET_DATA_BASE_URL: https://ts.gyzcloud.top/api
-      PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.TUSHARE_TOKEN }}
-      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
-      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-      DATA_ROOT: /mnt/action-value-data
-      DATASET_ID: action-value-market-20240102-20260918-v1
-      START_DATE: "20240102"
-      END_DATE: "20260918"
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v6
 
-      - name: Use Python 3.12
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
 
-      - name: Install locked backend and operations dependencies
+      - name: Install locked dependencies
         working-directory: backend
         run: uv sync --frozen --group ops --dev
 
-      - name: Verify market transport and checkpoint contracts
-        working-directory: backend
-        run: |
-          uv run --group ops pytest \
-            tests/test_market_tushare.py \
-            tests/test_retraining_dataset_store.py \
-            -q
-          uv run --group ops ruff check \
-            src/platform_app/adapters/market_tushare.py \
-            src/platform_app/modules/experiments/retraining_dataset_store.py
-
-      - name: Restore latest immutable full checkpoint
+      - name: Restore sealed market and ranking checkpoint
         working-directory: backend
         run: |
           sudo mkdir -p "$DATA_ROOT"
@@ -67,130 +56,399 @@ jobs:
             --root "$DATA_ROOT/market" \
             --scope full \
             --kind market \
-            --dataset-id "$DATASET_ID" \
-            --output "$RUNNER_TEMP/restore-report.json"
+            --dataset-id "$MARKET_ID"
+          test -f "$DATA_ROOT/market/manifest.json"
+          uv run --group ops python -m \
+            platform_app.modules.experiments.retraining_dataset_store restore \
+            --root "$DATA_ROOT/ranking" \
+            --scope full \
+            --kind ranking \
+            --dataset-id "$RANKING_ID" \
+            --output "$RUNNER_TEMP/ranking-restore.json"
 
-      - name: Build and seal full market dataset
+      - name: Build and seal ranking dataset
         working-directory: backend
         run: |
           set -Eeuo pipefail
           checkpoint() {
             uv run --group ops python -m \
               platform_app.modules.experiments.retraining_dataset_store checkpoint \
-              --root "$DATA_ROOT/market" \
+              --root "$DATA_ROOT/ranking" \
               --scope full \
-              --kind market \
-              --dataset-id "$DATASET_ID" \
-              --output "$RUNNER_TEMP/checkpoint-report.json"
+              --kind ranking \
+              --dataset-id "$RANKING_ID" \
+              --output "$RUNNER_TEMP/ranking-checkpoint.json"
           }
           checkpoint_on_exit() {
             status=$?
-            if [ -f "$DATA_ROOT/market/market.sqlite3" ]; then
+            if [ -f "$DATA_ROOT/ranking/ranking.sqlite3" ]; then
               checkpoint || true
             fi
             exit "$status"
           }
           trap checkpoint_on_exit EXIT
 
-          if [ -f "$DATA_ROOT/market/manifest.json" ]; then
-            checkpoint
-            trap - EXIT
-            exit 0
-          fi
+          if [ ! -f "$DATA_ROOT/ranking/manifest.json" ]; then
+            while true; do
+              remaining="$(DATA_ROOT="$DATA_ROOT" uv run python - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
 
-          uv run platform-cli build-market-dataset \
-            --dataset-root "$DATA_ROOT/market" \
-            --dataset-id "$DATASET_ID" \
-            --stage reference \
-            --start-date "$START_DATE" \
-            --end-date "$END_DATE"
-          checkpoint
-
-          uv run platform-cli build-market-dataset \
-            --dataset-root "$DATA_ROOT/market" \
-            --dataset-id "$DATASET_ID" \
-            --stage names \
-            --start-date "$START_DATE" \
-            --end-date "$END_DATE"
-          checkpoint
-
-          while read -r quarter_start quarter_end; do
-            uv run platform-cli build-market-dataset \
+          market = sqlite3.connect(
+              Path(os.environ["DATA_ROOT"], "market", "market.sqlite3")
+          )
+          ranking_path = Path(os.environ["DATA_ROOT"], "ranking", "ranking.sqlite3")
+          completed = 0
+          if ranking_path.exists():
+              ranking = sqlite3.connect(ranking_path)
+              try:
+                  completed = ranking.execute(
+                      "SELECT COUNT(*) FROM ranking_instrument_progress"
+                  ).fetchone()[0]
+              finally:
+                  ranking.close()
+          expected = market.execute("SELECT COUNT(*) FROM instruments").fetchone()[0]
+          market.close()
+          print(expected - completed)
+          PY
+          )"
+              if [ "$remaining" -eq 0 ]; then
+                break
+              fi
+              uv run platform-cli build-ranking-dataset \
+                --dataset-root "$DATA_ROOT/market" \
+                --ranking-root "$DATA_ROOT/ranking" \
+                --ranking-dataset-id "$RANKING_ID" \
+                --start-date "20240102" \
+                --end-date "20260918" \
+                --stage ranking-samples \
+                --max-windows 500
+              checkpoint
+            done
+            uv run platform-cli build-ranking-dataset \
               --dataset-root "$DATA_ROOT/market" \
-              --dataset-id "$DATASET_ID" \
-              --stage daily \
-              --start-date "$quarter_start" \
-              --end-date "$quarter_end"
-            checkpoint
-          done <<'QUARTERS'
-          20240102 20240331
-          20240401 20240630
-          20240701 20240930
-          20241001 20241231
-          20250101 20250331
-          20250401 20250630
-          20250701 20250930
-          20251001 20251231
-          20260101 20260331
-          20260401 20260630
-          20260701 20260918
-          QUARTERS
-
-          uv run platform-cli build-market-dataset \
-            --dataset-root "$DATA_ROOT/market" \
-            --dataset-id "$DATASET_ID" \
-            --stage block-trades \
-            --start-date "$START_DATE" \
-            --end-date "$END_DATE"
-          checkpoint
-
-          uv run platform-cli build-market-dataset \
-            --dataset-root "$DATA_ROOT/market" \
-            --dataset-id "$DATASET_ID" \
-            --stage seal
+              --ranking-root "$DATA_ROOT/ranking" \
+              --ranking-dataset-id "$RANKING_ID" \
+              --start-date "20240102" \
+              --end-date "20260918" \
+              --stage seal
+          fi
           checkpoint
           trap - EXIT
 
-      - name: Audit sealed full market dataset
+      - name: Audit ranking dataset
         working-directory: backend
         run: |
-          uv run platform-cli audit-market-dataset \
-            --dataset-root "$DATA_ROOT/market" \
-            --output "$RUNNER_TEMP/market-audit.json"
           uv run --group ops python -m \
             platform_app.modules.experiments.retraining_dataset_store audit \
-            --root "$DATA_ROOT/market" \
+            --root "$DATA_ROOT/ranking" \
             --scope full \
-            --kind market \
-            --dataset-id "$DATASET_ID" \
-            --output "$RUNNER_TEMP/final-report.json"
-          python - <<'PY'
+            --kind ranking \
+            --dataset-id "$RANKING_ID" \
+            --output "$RUNNER_TEMP/ranking-final.json"
+          DATA_ROOT="$DATA_ROOT" uv run python - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          report = json.loads(
-              (Path(os.environ["RUNNER_TEMP"]) / "market-audit.json").read_text()
+          manifest = json.loads(
+              Path(os.environ["DATA_ROOT"], "ranking", "manifest.json").read_text()
           )
-          if not report["passed"]:
-              raise SystemExit("MARKET_AUDIT_FAILED")
-          if report["range"]["openDates"] < 600:
-              raise SystemExit("MARKET_OPEN_DATE_COVERAGE_INSUFFICIENT")
-          if report["totals"]["dailyBars"] < 3_000_000:
-              raise SystemExit("MARKET_DAILY_BAR_COVERAGE_INSUFFICIENT")
-          if set(report["boards"]) != {"MAIN", "CHINEXT", "STAR", "BEIJING"}:
-              raise SystemExit("MARKET_BOARD_COVERAGE_INCOMPLETE")
+          if manifest["instruments"] < 5_000:
+              raise SystemExit("RANKING_INSTRUMENT_COVERAGE_INSUFFICIENT")
+          if manifest["samples"] < 2_500_000:
+              raise SystemExit("RANKING_SAMPLE_COVERAGE_INSUFFICIENT")
+          if set(manifest["samplesByBoard"]) != {
+              "MAIN", "CHINEXT", "STAR", "BEIJING"
+          }:
+              raise SystemExit("RANKING_BOARD_COVERAGE_INCOMPLETE")
           PY
 
-      - name: Upload full market diagnostics
+      - name: Upload ranking diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: action-value-market-full-${{ github.run_id }}
+          name: action-value-ranking-full-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/restore-report.json
-            ${{ runner.temp }}/checkpoint-report.json
-            ${{ runner.temp }}/market-audit.json
-            ${{ runner.temp }}/final-report.json
+            ${{ runner.temp }}/ranking-restore.json
+            ${{ runner.temp }}/ranking-checkpoint.json
+            ${{ runner.temp }}/ranking-final.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  episode-full:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env:
+      PLATFORM_MARKET_DATA_ENABLED: "true"
+      PLATFORM_MARKET_DATA_BASE_URL: https://ts.gyzcloud.top/api
+      PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.TUSHARE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install locked dependencies
+        working-directory: backend
+        run: uv sync --frozen --group ops --dev
+
+      - name: Verify episode and minute evidence contracts
+        working-directory: backend
+        run: |
+          uv run --group ops pytest \
+            tests/test_episode_dataset.py \
+            tests/test_minute_requirement_builder.py \
+            tests/test_minute_alias_retry.py \
+            -q
+
+      - name: Restore sealed market and episode checkpoint
+        working-directory: backend
+        run: |
+          sudo mkdir -p "$DATA_ROOT"
+          sudo chown "$USER:$USER" "$DATA_ROOT"
+          uv run --group ops python -m \
+            platform_app.modules.experiments.retraining_dataset_store restore \
+            --root "$DATA_ROOT/market" \
+            --scope full \
+            --kind market \
+            --dataset-id "$MARKET_ID"
+          test -f "$DATA_ROOT/market/manifest.json"
+          uv run --group ops python -m \
+            platform_app.modules.experiments.retraining_dataset_store restore \
+            --root "$DATA_ROOT/episode" \
+            --scope full \
+            --kind episode \
+            --dataset-id "$EPISODE_ID" \
+            --output "$RUNNER_TEMP/episode-restore.json"
+
+      - name: Build, fetch and seal episode dataset
+        working-directory: backend
+        run: |
+          set -Eeuo pipefail
+          checkpoint() {
+            uv run --group ops python -m \
+              platform_app.modules.experiments.retraining_dataset_store checkpoint \
+              --root "$DATA_ROOT/episode" \
+              --scope full \
+              --kind episode \
+              --dataset-id "$EPISODE_ID" \
+              --output "$RUNNER_TEMP/episode-checkpoint.json"
+          }
+          checkpoint_on_exit() {
+            status=$?
+            if [ -f "$DATA_ROOT/episode/episodes.sqlite3" ]; then
+              checkpoint || true
+            fi
+            exit "$status"
+          }
+          missing_source() {
+            source_kind="$1"
+            DATA_ROOT="$DATA_ROOT" SOURCE_KIND="$source_kind" uv run python - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          database = Path(os.environ["DATA_ROOT"], "episode", "episodes.sqlite3")
+          connection = sqlite3.connect(database)
+          count = connection.execute(
+              "SELECT COUNT(*) FROM minute_requirements r "
+              "LEFT JOIN minute_requirement_resolutions x "
+              "ON x.instrument_id = r.instrument_id AND x.trade_date = r.trade_date "
+              "WHERE r.status = 'PENDING' AND x.instrument_id IS NULL "
+              "AND NOT EXISTS (SELECT 1 FROM minute_ingestion_attempts a "
+              "WHERE a.instrument_id = r.instrument_id "
+              "AND a.trade_date = r.trade_date AND a.source_kind = ?)",
+              (os.environ["SOURCE_KIND"],),
+          ).fetchone()[0]
+          connection.close()
+          print(count)
+          PY
+          }
+          trap checkpoint_on_exit EXIT
+
+          if [ ! -f "$DATA_ROOT/episode/manifest.json" ]; then
+            uv run platform-cli build-episode-dataset \
+              --dataset-root "$DATA_ROOT/market" \
+              --episode-root "$DATA_ROOT/episode" \
+              --episode-dataset-id "$EPISODE_ID" \
+              --stage candidates \
+              --start-date "$START_DATE" \
+              --end-date "$END_DATE"
+            checkpoint
+
+            uv run platform-cli build-episode-dataset \
+              --dataset-root "$DATA_ROOT/market" \
+              --episode-root "$DATA_ROOT/episode" \
+              --episode-dataset-id "$EPISODE_ID" \
+              --stage minute-requirements \
+              --start-date "$START_DATE" \
+              --end-date "$END_DATE"
+            checkpoint
+
+            primary="TUSHARE_API_STK_MINS_V1:GYZ_PRIMARY"
+            if [ "$(missing_source "$primary")" -gt 0 ]; then
+              uv run platform-cli build-episode-dataset \
+                --dataset-root "$DATA_ROOT/market" \
+                --episode-root "$DATA_ROOT/episode" \
+                --episode-dataset-id "$EPISODE_ID" \
+                --stage fetch-minutes \
+                --start-date "$MINUTE_START_DATE" \
+                --end-date "$MINUTE_END_DATE"
+              checkpoint
+            fi
+            test "$(missing_source "$primary")" -eq 0
+
+            secondary="TUSHARE_API_STK_MINS_V1:GYZ_SECONDARY"
+            if [ "$(missing_source "$secondary")" -gt 0 ]; then
+              PLATFORM_MARKET_DATA_BASE_URL=https://ts2.gyzcloud.top/api \
+                uv run platform-cli build-episode-dataset \
+                  --dataset-root "$DATA_ROOT/market" \
+                  --episode-root "$DATA_ROOT/episode" \
+                  --episode-dataset-id "$EPISODE_ID" \
+                  --stage fetch-minutes \
+                  --start-date "$MINUTE_START_DATE" \
+                  --end-date "$MINUTE_END_DATE"
+              checkpoint
+            fi
+            test "$(missing_source "$secondary")" -eq 0
+
+            mapfile -t reasons < <(
+              DATA_ROOT="$DATA_ROOT" uv run python - <<'PY'
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          allowed = {
+              "INVALID_MARKET_NUMBER",
+              "INVALID_MINUTE_TIME",
+              "INVALID_OHLC",
+              "MINUTE_DAILY_AMOUNT_MISMATCH",
+              "MINUTE_DAILY_OPEN_CLOSE_MISMATCH",
+              "MINUTE_DAILY_VOLUME_MISMATCH",
+              "MINUTE_INSTRUMENT_MISMATCH",
+              "MINUTE_OUTSIDE_DAILY_RANGE",
+              "MINUTE_SESSION_INCOMPLETE",
+              "MINUTE_VOLUME_NOT_INTEGER_SHARES",
+          }
+          connection = sqlite3.connect(
+              Path(os.environ["DATA_ROOT"], "episode", "episodes.sqlite3")
+          )
+          reasons = {
+              row[0]
+              for row in connection.execute(
+                  "SELECT DISTINCT reason FROM minute_requirements "
+                  "WHERE status = 'PENDING'"
+              )
+              if row[0]
+          }
+          connection.close()
+          unexpected = reasons - allowed
+          if unexpected:
+              raise SystemExit(
+                  "NON_EXHAUSTIBLE_MINUTE_FAILURE:" + ",".join(sorted(unexpected))
+              )
+          if reasons:
+              print("\n".join(sorted(reasons)))
+          PY
+            )
+            if [ "${#reasons[@]}" -gt 0 ] && [ -n "${reasons[0]}" ]; then
+              reason_args=()
+              for reason in "${reasons[@]}"; do
+                reason_args+=(--reason "$reason")
+              done
+              uv run platform-cli build-episode-dataset \
+                --dataset-root "$DATA_ROOT/market" \
+                --episode-root "$DATA_ROOT/episode" \
+                --episode-dataset-id "$EPISODE_ID" \
+                --stage exhaust-minutes \
+                --start-date "$MINUTE_START_DATE" \
+                --end-date "$MINUTE_END_DATE" \
+                --resolution-note \
+                "Two allowlisted compatible endpoints independently rejected the session." \
+                "${reason_args[@]}"
+            fi
+
+            uv run platform-cli build-episode-dataset \
+              --dataset-root "$DATA_ROOT/market" \
+              --episode-root "$DATA_ROOT/episode" \
+              --episode-dataset-id "$EPISODE_ID" \
+              --stage seal
+          fi
+          checkpoint
+          trap - EXIT
+
+      - name: Audit episode dataset
+        working-directory: backend
+        run: |
+          uv run --group ops python -m \
+            platform_app.modules.experiments.retraining_dataset_store audit \
+            --root "$DATA_ROOT/episode" \
+            --scope full \
+            --kind episode \
+            --dataset-id "$EPISODE_ID" \
+            --output "$RUNNER_TEMP/episode-final.json"
+          DATA_ROOT="$DATA_ROOT" uv run python - <<'PY'
+          import json
+          import os
+          import sqlite3
+          from pathlib import Path
+
+          root = Path(os.environ["DATA_ROOT"], "episode")
+          manifest = json.loads((root / "manifest.json").read_text())
+          connection = sqlite3.connect(root / "episodes.sqlite3")
+          checks = {
+              "partitions": connection.execute(
+                  "SELECT COUNT(*) FROM candidate_partitions"
+              ).fetchone()[0],
+              "deferred": connection.execute(
+                  "SELECT COALESCE(SUM(deferred_episode_count), 0) "
+                  "FROM minute_requirement_partitions"
+              ).fetchone()[0],
+              "badCompletedBars": connection.execute(
+                  "SELECT COUNT(*) FROM ("
+                  "SELECT r.instrument_id, r.trade_date "
+                  "FROM minute_requirements r LEFT JOIN episode_minute_bars b "
+                  "ON b.instrument_id=r.instrument_id AND b.trade_date=r.trade_date "
+                  "WHERE r.status='COMPLETED' "
+                  "GROUP BY r.instrument_id, r.trade_date HAVING COUNT(b.bar_end_shanghai) != 48"
+                  ")"
+              ).fetchone()[0],
+              "weakExhaustion": connection.execute(
+                  "SELECT COUNT(*) FROM minute_requirement_resolutions x "
+                  "WHERE (SELECT COUNT(DISTINCT a.source_kind) "
+                  "FROM minute_ingestion_attempts a "
+                  "WHERE a.instrument_id=x.instrument_id AND a.trade_date=x.trade_date) < 2"
+              ).fetchone()[0],
+          }
+          connection.close()
+          episodes = manifest["coverage"]["episodes"]
+          coverage = episodes["eligible"] / max(episodes["total"], 1)
+          if checks["partitions"] < 580:
+              raise SystemExit("EPISODE_PARTITION_COVERAGE_INSUFFICIENT")
+          if checks["deferred"] or checks["badCompletedBars"] or checks["weakExhaustion"]:
+              raise SystemExit("EPISODE_INTEGRITY_FAILED")
+          if episodes["total"] < 50_000 or coverage < 0.85:
+              raise SystemExit("EPISODE_PATH_COVERAGE_INSUFFICIENT")
+          if manifest["coverage"]["requirements"]["unresolved"] != 0:
+              raise SystemExit("EPISODE_REQUIREMENTS_UNRESOLVED")
+          PY
+
+      - name: Upload episode diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: action-value-episode-full-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/episode-restore.json
+            ${{ runner.temp }}/episode-checkpoint.json
+            ${{ runner.temp }}/episode-final.json
           if-no-files-found: warn
           retention-days: 30
