@@ -114,7 +114,7 @@ def _predict_candidate(bundle, candidate: dict, scenario: dict) -> dict:
                 "family": "out-of-domain",
             }
         result["utilityAt10BpsStress"] = (
-            result["expectedNetReturnOnRequestedNotional"]
+            result["hurdleExpectedNetReturnOnRequestedNotional"]
             - float(STRESS_COST) * result["expectedFillFraction"]
         )
         result["modelActionable"] = (
@@ -833,7 +833,7 @@ def write_action_value_account_backtest(
             "sameInstrumentOverlap": "SKIP",
             "sameDayCashReuse": "BUYS_BEFORE_EXITS",
             "modelGate": (
-                "expectedNetReturnOnRequestedNotional"
+                "hurdleExpectedNetReturnOnRequestedNotional"
                 "-0.001*expectedFillFraction>0; then calibrated daily Top-K"
             ),
             "candidatePriority": "PREDICTED_UTILITY_DESCENDING_STABLE",

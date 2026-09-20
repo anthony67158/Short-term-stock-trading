@@ -47,6 +47,7 @@ class _PositiveActionValuePredictor:
             "pAnyFill": 0.8,
             "expectedFillFraction": 0.7,
             "expectedNetReturnOnRequestedNotional": 0.02,
+            "hurdleExpectedNetReturnOnRequestedNotional": 0.02,
             "selectionThreshold": 0.005,
             "dailySelectionLimit": 1,
             "family": "hgb",
@@ -69,7 +70,8 @@ class _UtilityOrderedPredictor:
         return {
             "pAnyFill": 0.8,
             "expectedFillFraction": 0.7,
-            "expectedNetReturnOnRequestedNotional": scenario_values[0],
+            "expectedNetReturnOnRequestedNotional": 0.1 - scenario_values[0],
+            "hurdleExpectedNetReturnOnRequestedNotional": scenario_values[0],
             "selectionThreshold": 0.0,
             "dailySelectionLimit": 1,
             "family": "hgb",

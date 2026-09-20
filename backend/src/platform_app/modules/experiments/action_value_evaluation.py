@@ -159,14 +159,18 @@ def fit_action_value_calibration(
 
     conditional_weights = weights[conditional]
     conditional_actual = data.conditional_return[calibration][conditional]
-    conditional_offset = _weighted_median(
-        conditional_actual - raw["expectedNetReturnGivenFill"][conditional],
-        conditional_weights,
+    conditional_offset = float(
+        np.average(
+            conditional_actual - raw["expectedNetReturnGivenFill"][conditional],
+            weights=conditional_weights,
+        )
     )
     requested_actual = data.net_return_on_requested_notional[calibration]
-    requested_offset = _weighted_median(
-        requested_actual - raw["expectedNetReturnOnRequestedNotional"],
-        weights,
+    requested_offset = float(
+        np.average(
+            requested_actual - raw["expectedNetReturnOnRequestedNotional"],
+            weights=weights,
+        )
     )
     quantile_location_offset = _weighted_median(
         conditional_actual - raw["q50GivenFill"][conditional],
@@ -194,7 +198,7 @@ def fit_action_value_calibration(
     )
     calibrated = fitted.predict(data.features[calibration])
     predicted_utility = (
-        calibrated["expectedNetReturnOnRequestedNotional"]
+        calibrated["hurdleExpectedNetReturnOnRequestedNotional"]
         - stress_cost * calibrated["expectedFillFraction"]
     )
     actual_utility = requested_actual - stress_cost * data.fill_fraction[calibration]
@@ -342,7 +346,7 @@ def evaluate_action_value_predictions(
     )
 
     predicted_utility = (
-        requested_predicted
+        predictions["hurdleExpectedNetReturnOnRequestedNotional"]
         - calibration.stress_cost * predictions["expectedFillFraction"]
     )
     actual_utility = (
@@ -409,6 +413,7 @@ def evaluate_action_value_predictions(
         "selection": {
             "threshold": calibration.selection_threshold,
             "dailyLimit": calibration.daily_selection_limit,
+            "utilitySource": "hurdleExpectedNetReturnOnRequestedNotional",
             "maximumSelectedPerSession": max(selected_per_session, default=0),
             "samples": int(selected.sum()),
             "sessions": int(len(np.unique(test_dates[selected]))),

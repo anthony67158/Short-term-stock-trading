@@ -124,7 +124,7 @@ def _candidate_selection_loss(data, mask, predictions):
             )
         )
     actual = data.net_return_on_requested_notional[mask]
-    predicted = predictions["expectedNetReturnOnRequestedNotional"]
+    predicted = predictions["hurdleExpectedNetReturnOnRequestedNotional"]
     mae = float(mean_absolute_error(actual, predicted, sample_weight=weights))
     baseline = weighted_quantile(actual, weights, 0.5)
     scale = float(
