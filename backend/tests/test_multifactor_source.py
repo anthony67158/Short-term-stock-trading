@@ -167,6 +167,30 @@ def test_large_source_partition_is_fetched_with_offsets(tmp_path):
     assert client.offsets == [0, PAGE_SIZE]
 
 
+def test_unbounded_compatible_response_is_not_requested_twice(tmp_path):
+    class UnboundedClient:
+        def __init__(self):
+            self.calls = 0
+
+        def rows(self, api_name, params, fields):
+            self.calls += 1
+            return [{"row": index} for index in range(PAGE_SIZE + 1)]
+
+    client = UnboundedClient()
+    result = _fetch_partition(
+        client=client,
+        root=tmp_path,
+        source="income_vip",
+        key="20241231",
+        params={"period": "20241231"},
+        fields="row",
+        maximum_attempts=1,
+    )
+
+    assert result["rows"] == PAGE_SIZE + 1
+    assert client.calls == 1
+
+
 def test_source_fetch_failure_identifies_partition_without_credentials(tmp_path):
     class FailedClient:
         def rows(self, api_name, params, fields):

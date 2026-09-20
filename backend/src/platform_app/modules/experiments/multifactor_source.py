@@ -440,7 +440,7 @@ def _fetch_partition(
                 f"MULTIFACTOR_SOURCE_PAGINATION_STALLED:{source}:{key}"
             )
         rows.extend(page_rows)
-        if source == "daily_basic" or len(page_rows) < PAGE_SIZE:
+        if source == "daily_basic" or len(page_rows) != PAGE_SIZE:
             break
         previous_page_hash = page_hash
     else:
