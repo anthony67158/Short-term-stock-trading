@@ -14,7 +14,7 @@ from platform_app.modules.experiments.action_value_training import (
 def _training_data():
     rng = np.random.default_rng(97240)
     sample_count = 240
-    features = rng.normal(size=(sample_count, 5)).astype(np.float32)
+    features = rng.normal(size=(sample_count, 8)).astype(np.float32)
     dates = np.repeat(np.arange(20260101, 20260161), 4)
     boards = np.tile(np.arange(4), sample_count // 4)
     rows = []
@@ -49,7 +49,16 @@ def _training_data():
         )
     return build_action_value_training_data(
         features=features,
-        feature_names=("f0", "f1", "f2", "f3", "f4"),
+        feature_names=(
+            "f0",
+            "f1",
+            "f2",
+            "f3",
+            "f4",
+            "logTargetNotionalCny",
+            "logTargetShares",
+            "logTargetToMedianAmount",
+        ),
         dates=dates,
         boards=boards,
         rows=rows,
@@ -73,6 +82,9 @@ def test_all_tree_families_fit_the_same_hurdle_contract(family):
 
     assert candidate.family == family
     assert candidate.feature_names == data.feature_names
+    assert candidate.base_feature_count == 5
+    assert candidate.models["pAnyFill"].n_features_in_ == 5
+    assert candidate.models["stopHazardGivenFill"].n_features_in_ == 5
     assert set(candidate.models) == {
         "pAnyFill",
         "fillFractionGivenFill",

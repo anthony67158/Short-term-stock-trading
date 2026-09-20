@@ -9,10 +9,17 @@ from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostin
 
 from platform_app.modules.experiments.action_value_training import (
     ActionValueTrainingData,
+    scenario_weights,
 )
 from platform_app.modules.experiments.quant_model_trainer import RANDOM_STATE
 
 ACTION_VALUE_FAMILIES = ("hgb", "lightgbm", "catboost")
+SCENARIO_FEATURE_SUFFIX = (
+    "logTargetNotionalCny",
+    "logTargetShares",
+    "logTargetToMedianAmount",
+)
+BASE_FEATURE_TARGETS = {"pAnyFill", "stopHazardGivenFill"}
 
 
 class ActionValueModelError(ValueError):
@@ -23,6 +30,7 @@ class ActionValueModelError(ValueError):
 class ActionValueCandidate:
     family: str
     feature_names: tuple[str, ...]
+    base_feature_count: int
     models: dict[str, Any]
 
     def predict(self, features) -> dict[str, np.ndarray]:
@@ -34,9 +42,15 @@ class ActionValueCandidate:
         ):
             raise ActionValueModelError("ACTION_VALUE_FEATURE_CONTRACT_MISMATCH")
 
+        def model_features(name):
+            return x[:, : self.base_feature_count] if name in BASE_FEATURE_TARGETS else x
+
         def probability(name):
             return np.clip(
-                np.asarray(self.models[name].predict_proba(x)[:, 1], dtype=np.float64),
+                np.asarray(
+                    self.models[name].predict_proba(model_features(name))[:, 1],
+                    dtype=np.float64,
+                ),
                 0,
                 1,
             )
@@ -69,19 +83,19 @@ class ActionValueCandidate:
                 p_any * fill_given * expected_given_fill
             ),
         }
-        median = np.asarray(self.models["q50"].predict(x), dtype=np.float64)
-        lower_distance = np.maximum(
-            np.asarray(self.models["q10"].predict(x), dtype=np.float64),
-            0,
-        )
-        upper_distance = np.maximum(
-            np.asarray(self.models["q90"].predict(x), dtype=np.float64),
-            0,
+        quantiles = np.sort(
+            np.column_stack(
+                [
+                    np.asarray(self.models[name].predict(x), dtype=np.float64)
+                    for name in ("q10", "q50", "q90")
+                ]
+            ),
+            axis=1,
         )
         result.update({
-            "q10GivenFill": median - lower_distance,
-            "q50GivenFill": median,
-            "q90GivenFill": median + upper_distance,
+            "q10GivenFill": quantiles[:, 0],
+            "q50GivenFill": quantiles[:, 1],
+            "q90GivenFill": quantiles[:, 2],
         })
         if any(values.shape != (len(x),) for values in result.values()):
             raise ActionValueModelError("ACTION_VALUE_PREDICTION_SHAPE_INVALID")
@@ -230,9 +244,12 @@ def fit_action_value_candidate(
     conditional = train & data.conditional_available
     if not np.any(conditional):
         raise ActionValueModelError("ACTION_VALUE_CONDITIONAL_SUPPORT_INSUFFICIENT")
+    base_feature_count = len(data.feature_names)
+    if data.feature_names[-len(SCENARIO_FEATURE_SUFFIX) :] == SCENARIO_FEATURE_SUFFIX:
+        base_feature_count -= len(SCENARIO_FEATURE_SUFFIX)
 
     def weights(mask):
-        selected = data.weights[mask]
+        selected = scenario_weights(data.dates[mask], data.episodes[mask])
         return selected / selected.mean()
 
     classifier_targets = {
@@ -244,7 +261,11 @@ def fit_action_value_candidate(
     models = {
         name: _fit_classifier(
             family,
-            data.features[mask],
+            (
+                data.features[mask, :base_feature_count]
+                if name in BASE_FEATURE_TARGETS
+                else data.features[mask]
+            ),
             target[mask],
             weights(mask),
             iterations=iterations,
@@ -255,11 +276,11 @@ def fit_action_value_candidate(
     }
     regression_targets = {
         "fillFractionGivenFill": (data.fill_fraction, conditional, False),
-        "expectedNetReturnGivenFill": (data.conditional_return, conditional, True),
+        "expectedNetReturnGivenFill": (data.conditional_return, conditional, False),
         "expectedNetReturnOnRequestedNotional": (
             data.net_return_on_requested_notional,
             train,
-            True,
+            False,
         ),
     }
     for name, (target, mask, robust) in regression_targets.items():
@@ -275,33 +296,20 @@ def fit_action_value_candidate(
         )
     conditional_x = data.features[conditional]
     conditional_y = data.conditional_return[conditional]
-    models["q50"] = _fit_regressor(
-        family,
-        conditional_x,
-        conditional_y,
-        weights(conditional),
-        iterations=iterations,
-        min_samples_leaf=min_samples_leaf,
-        threads=threads,
-        quantile=0.5,
-    )
-    fitted_median = np.asarray(models["q50"].predict(conditional_x))
-    for name, target in (
-        ("q10", np.maximum(fitted_median - conditional_y, 0)),
-        ("q90", np.maximum(conditional_y - fitted_median, 0)),
-    ):
+    for name, quantile in (("q10", 0.1), ("q50", 0.5), ("q90", 0.9)):
         models[name] = _fit_regressor(
             family,
             conditional_x,
-            target,
+            conditional_y,
             weights(conditional),
             iterations=iterations,
             min_samples_leaf=min_samples_leaf,
             threads=threads,
-            quantile=0.9,
+            quantile=quantile,
         )
     return ActionValueCandidate(
         family=family,
         feature_names=data.feature_names,
+        base_feature_count=base_feature_count,
         models=models,
     )
