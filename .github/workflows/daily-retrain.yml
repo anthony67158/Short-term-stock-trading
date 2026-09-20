@@ -224,6 +224,8 @@ jobs:
             --episode-root "$DATA_ROOT/episode" \
             --label-root "$DATA_ROOT/label" \
             --ranking-root "$DATA_ROOT/ranking" \
+            --factor-root "$DATA_ROOT/factor" \
+            --feature-set factor \
             --output "$DATA_ROOT/experiment" \
             --max-iterations 200
 
