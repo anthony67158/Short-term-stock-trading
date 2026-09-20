@@ -21,16 +21,14 @@ jobs:
       OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
-      PLATFORM_MARKET_DATA_ENABLED: "true"
-      PLATFORM_MARKET_DATA_BASE_URL: https://ts2.gyzcloud.top/api
-      PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.PLATFORM_MARKET_DATA_API_KEY }}
-      PLATFORM_MARKET_DATA_TIMEOUT_SECONDS: "60"
       DATA_ROOT: /mnt/action-value-data
       MARKET_ID: action-value-market-20240102-20260918-v1
       RANKING_ID: action-value-ranking-20240102-20260918-v1
       EPISODE_ID: action-value-episodes-20240401-20260911-v1
       LABEL_ID: action-value-labels-20240401-20260911-v1
       FACTOR_ID: action-value-factors-20240401-20260911-v1
+      FACTOR_SOURCE_RELEASE: action-value-factor-source-transfer-20260920
+      FACTOR_SOURCE_ASSET: action-value-factor-source-v2.tar.gz.enc
     steps:
       - uses: actions/checkout@v6
 
@@ -144,16 +142,25 @@ jobs:
             echo "restored=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build immutable point-in-time factor sources
+      - name: Restore encrypted point-in-time factor sources
         if: steps.restore-factor.outputs.restored != 'true'
         working-directory: backend
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FACTOR_SOURCE_KEY: ${{ secrets.ACTION_VALUE_FACTOR_SOURCE_KEY }}
         run: |
-          uv run python -m \
-            platform_app.modules.experiments.action_value_factor_dataset \
-            build-source \
-            --root "$DATA_ROOT/factor-source" \
-            --episode-root "$DATA_ROOT/episode" \
-            --workers 1
+          test -n "$FACTOR_SOURCE_KEY"
+          gh release download "$FACTOR_SOURCE_RELEASE" \
+            --pattern "$FACTOR_SOURCE_ASSET" \
+            --dir "$RUNNER_TEMP/factor-source-transfer"
+          printf '%s' "$FACTOR_SOURCE_KEY" | openssl enc \
+            -d -aes-256-cbc -pbkdf2 \
+            -in "$RUNNER_TEMP/factor-source-transfer/$FACTOR_SOURCE_ASSET" \
+            -out "$RUNNER_TEMP/factor-source.tar.gz" \
+            -pass stdin
+          mkdir -p "$DATA_ROOT/factor-source"
+          tar -xzf "$RUNNER_TEMP/factor-source.tar.gz" \
+            -C "$DATA_ROOT/factor-source"
           uv run python - <<'PY'
           import json
           import os
