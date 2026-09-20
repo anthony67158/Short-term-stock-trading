@@ -49,6 +49,8 @@ jobs:
           endpoints = (
               "https://api.tushare.pro",
               "https://ts.gyzcloud.top/api",
+              "https://ts2.gyzcloud.top/api",
+              "https://tx.xiaodefa.top/",
           )
           report = {"schemaVersion": "market-data-capability-probe.v1", "endpoints": []}
           for endpoint in endpoints:
@@ -69,7 +71,7 @@ jobs:
                               "Content-Type": "application/json",
                               **(
                                   {"X-API-Key": token}
-                                  if "gyzcloud.top" in endpoint
+                                  if "tushare.pro" not in endpoint
                                   else {}
                               ),
                           },
