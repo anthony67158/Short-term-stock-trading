@@ -117,6 +117,8 @@ def source_rows(root: Path, source: str) -> list[dict]:
     for path in sorted(
         (root.expanduser().resolve() / "raw" / source).glob("*.json.gz")
     ):
+        if path.name.startswith("._"):
+            continue
         rows.extend(read_source_partition(root, source, path.name[:-8]))
     return rows
 

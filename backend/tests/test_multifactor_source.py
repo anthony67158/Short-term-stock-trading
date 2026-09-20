@@ -11,6 +11,7 @@ from platform_app.modules.experiments.multifactor_source import (
     financial_metric_snapshots_for_dates,
     financial_periods_for_dates,
     industry_members_as_of,
+    source_rows,
 )
 
 
@@ -145,6 +146,23 @@ def test_source_archive_is_resumable_sealed_and_fully_audited(tmp_path):
         build_multifactor_source_archive(
             **{**options, "decision_dates": ["20250102"]}
         )
+
+
+def test_source_rows_ignore_macos_appledouble_files(tmp_path):
+    build_multifactor_source_archive(
+        client=FakeClient(),
+        output_root=tmp_path,
+        decision_dates=["20250102"],
+        financial_periods=["20241231"],
+    )
+    (tmp_path / "raw" / "income_vip" / "._20241231.json.gz").write_bytes(
+        b"\x00\x05metadata"
+    )
+
+    rows = source_rows(tmp_path, "income_vip")
+
+    assert len(rows) == 1
+    assert rows[0]["ts_code"] == "600001.SH"
 
 
 def test_large_source_partition_is_fetched_with_offsets(tmp_path):
