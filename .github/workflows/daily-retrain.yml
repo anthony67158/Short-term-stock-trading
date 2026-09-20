@@ -13,6 +13,7 @@ jobs:
     env:
       PLATFORM_MARKET_DATA_ENABLED: "true"
       PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.TUSHARE_TOKEN }}
+      QUANT_KEY: ${{ secrets.QUANT_KEY }}
     steps:
       - uses: actions/checkout@v6
 
@@ -65,7 +66,14 @@ jobs:
                       request = urllib.request.Request(
                           endpoint,
                           data=body,
-                          headers={"Content-Type": "application/json"},
+                          headers={
+                              "Content-Type": "application/json",
+                              **(
+                                  {"X-API-Key": os.environ["QUANT_KEY"]}
+                                  if "gyzcloud.top" in endpoint
+                                  else {}
+                              ),
+                          },
                           method="POST",
                       )
                       with urllib.request.urlopen(request, timeout=40) as response:
