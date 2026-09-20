@@ -366,6 +366,11 @@ class TushareClient:
         self.timeout = config.market_data_timeout_seconds
         self.transport = transport
 
+    def _headers(self, endpoint: str) -> dict[str, str]:
+        if urlsplit(endpoint).hostname == "api.tushare.pro":
+            return {}
+        return {"X-API-Key": self.api_key}
+
     def rows(self, api_name: str, params: dict, fields: str) -> list[dict]:
         endpoint = self.endpoint
         body = {
@@ -380,7 +385,11 @@ class TushareClient:
             transport=self.transport,
         ) as client:
             for _ in range(3):
-                response = client.post(endpoint, json=body)
+                response = client.post(
+                    endpoint,
+                    json=body,
+                    headers=self._headers(endpoint),
+                )
                 if response.status_code in (301, 302, 307, 308):
                     location = response.headers.get("location")
                     if not location:

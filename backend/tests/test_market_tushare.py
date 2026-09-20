@@ -283,6 +283,7 @@ def test_endpoint_allowlist_and_protocol_response(monkeypatch):
     def handle(request):
         body = json.loads(request.content)
         assert body["token"] == "synthetic"
+        assert request.headers["X-API-Key"] == "synthetic"
         calls.append(str(request.url))
         if request.url.host == "ts.gyzcloud.top":
             return httpx.Response(307, headers={"location": "https://ts2.gyzcloud.top/api"})
@@ -297,6 +298,30 @@ def test_endpoint_allowlist_and_protocol_response(monkeypatch):
     client = TushareClient(transport=httpx.MockTransport(handle))
     assert client.rows("daily", {"trade_date": "20260915"}, "ts_code") == [{"ts_code": "000001.SZ"}]
     assert calls == ["https://ts.gyzcloud.top/api", "https://ts2.gyzcloud.top/api"]
+
+
+def test_official_endpoint_does_not_receive_compatibility_header(monkeypatch):
+    config = settings().model_copy(
+        update={
+            "market_data_enabled": True,
+            "market_data_api_key": SecretStr("synthetic"),
+            "market_data_base_url": "https://api.tushare.pro",
+        }
+    )
+    monkeypatch.setattr(market_tushare, "settings", lambda: config)
+
+    def handle(request):
+        assert request.headers.get("X-API-Key") is None
+        return httpx.Response(
+            200,
+            json={
+                "code": 0,
+                "data": {"fields": ["ts_code"], "items": [["000001.SZ"]]},
+            },
+        )
+
+    client = TushareClient(transport=httpx.MockTransport(handle))
+    assert client.rows("daily", {}, "ts_code") == [{"ts_code": "000001.SZ"}]
 
 
 def test_redirect_cannot_send_market_credential_to_untrusted_host(monkeypatch):
