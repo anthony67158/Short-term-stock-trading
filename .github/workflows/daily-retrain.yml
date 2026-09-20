@@ -159,7 +159,7 @@ jobs:
             --label-root "$DATA_ROOT/label" \
             --ranking-root "$DATA_ROOT/ranking" \
             --factor-root "$DATA_ROOT/factor" \
-            --feature-set fusion \
+            --feature-set fusion_history \
             --output "$DATA_ROOT/experiment" \
             --max-iterations 200
 
