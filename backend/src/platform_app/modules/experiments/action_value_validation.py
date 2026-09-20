@@ -1,5 +1,6 @@
 """Leakage-resistant validation and calibration primitives for action value."""
 
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -226,14 +227,29 @@ def conformal_interval_correction(
     weights,
     *,
     coverage: float = 0.8,
+    calibration_units: int | None = None,
 ) -> float:
     q10 = np.asarray(q10, dtype=np.float64)
     q90 = np.asarray(q90, dtype=np.float64)
     actual = np.asarray(actual, dtype=np.float64)
-    if q10.shape != q90.shape or q10.shape != actual.shape or np.any(q10 > q90):
+    if (
+        q10.shape != q90.shape
+        or q10.shape != actual.shape
+        or np.any(q10 > q90)
+        or calibration_units is not None
+        and calibration_units <= 0
+    ):
         raise ActionValueValidationError("ACTION_VALUE_CONFORMAL_INPUT_INVALID")
     score = np.maximum(q10 - actual, actual - q90)
-    return max(0.0, weighted_quantile(score, weights, coverage))
+    corrected_coverage = (
+        min(
+            math.ceil((calibration_units + 1) * coverage) / calibration_units,
+            1.0,
+        )
+        if calibration_units is not None
+        else coverage
+    )
+    return max(0.0, weighted_quantile(score, weights, corrected_coverage))
 
 
 def apply_conformal_interval(q10, q50, q90, correction):

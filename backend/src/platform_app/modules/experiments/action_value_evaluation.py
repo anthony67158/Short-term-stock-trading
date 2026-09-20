@@ -226,6 +226,7 @@ def fit_action_value_calibration(
         conditional_actual,
         conditional_weights,
         coverage=interval_coverage,
+        calibration_units=len(np.unique(data.dates[calibration][conditional])),
     )
     fitted = ActionValueCalibration(
         candidate=candidate,

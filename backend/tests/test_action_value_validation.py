@@ -94,6 +94,31 @@ def test_conformal_interval_is_non_crossing_and_uses_weighted_residuals():
     assert np.all(median <= upper)
 
 
+def test_conformal_interval_uses_finite_calibration_unit_correction():
+    values = np.zeros(4)
+    actual = np.asarray([0.0, 0.01, 0.02, 0.03])
+    weights = np.ones(4)
+
+    uncorrected = conformal_interval_correction(
+        values,
+        values,
+        actual,
+        weights,
+        coverage=0.5,
+    )
+    corrected = conformal_interval_correction(
+        values,
+        values,
+        actual,
+        weights,
+        coverage=0.5,
+        calibration_units=4,
+    )
+
+    assert uncorrected == pytest.approx(0.01)
+    assert corrected == pytest.approx(0.02)
+
+
 def test_validation_rejects_insufficient_date_support():
     with pytest.raises(
         ActionValueValidationError,
