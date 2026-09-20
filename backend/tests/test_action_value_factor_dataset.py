@@ -181,6 +181,7 @@ class FakeClient:
                 for code, pe, pb, ps, dividend, size in (
                     ("600001.SH", 8, 1, 2, 3, 80),
                     ("830001.BJ", 30, 4, 6, 0, 30),
+                    ("920001.BJ", 5, 0.5, 1, 8, 60),
                 )
             ]
         if api_name in {
@@ -274,10 +275,11 @@ def test_factor_dataset_seals_full_episode_coverage_and_aliases(tmp_path):
     assert verified == manifest
     with sqlite3.connect(database) as connection:
         aliased = connection.execute(
-            "SELECT instrument_id,state FROM factor_rows "
+            "SELECT instrument_id,state,value_score FROM factor_rows "
             "WHERE episode_id='episode-1'"
         ).fetchone()
-    assert aliased == ("BJ.920001", "READY")
+    assert aliased[:2] == ("BJ.920001", "READY")
+    assert aliased[2] < 0.5
 
     vectors, lineage = load_factor_vectors(root)
     assert lineage["databaseSha256"] == manifest["databaseSha256"]

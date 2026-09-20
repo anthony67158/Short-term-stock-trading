@@ -186,6 +186,36 @@ def _canonical_aliases(market: sqlite3.Connection) -> dict[str, str]:
     return aliases
 
 
+def _dated_aliases(
+    market: sqlite3.Connection,
+    decision_date: str,
+) -> dict[str, tuple[str, int]]:
+    aliases = {
+        row["source_code"]: (
+            _canonical_source_code(row["instrument_id"]),
+            1,
+        )
+        for row in market.execute(
+            "SELECT source_code,instrument_id FROM instruments"
+        )
+    }
+    for row in market.execute(
+        "SELECT source_code,instrument_id FROM instrument_aliases "
+        "WHERE effective_from<=? "
+        "AND (effective_to IS NULL OR effective_to>?)",
+        (decision_date, decision_date),
+    ):
+        source_code = row["source_code"]
+        value = (_canonical_source_code(row["instrument_id"]), 0)
+        existing = aliases.get(source_code)
+        if existing is not None and existing[0] != value[0]:
+            raise ActionValueFactorDatasetError(
+                "ACTION_VALUE_FACTOR_ALIAS_CONFLICT"
+            )
+        aliases[source_code] = value
+    return aliases
+
+
 def _canonicalize_rows(rows: list[dict], aliases: dict[str, str]) -> list[dict]:
     result = []
     for row in rows:
@@ -486,20 +516,26 @@ class ActionValueFactorDataset:
 
     def _daily_basics(self, decision_date: str) -> dict[str, dict]:
         basics = {}
+        priorities = {}
+        aliases = _dated_aliases(self.market, decision_date)
         for row in read_source_partition(
             self.source_root,
             "daily_basic",
             decision_date,
         ):
             source_code = str(row.get("ts_code") or "").upper()
-            canonical = self.aliases.get(source_code)
-            if canonical is None:
+            resolved = aliases.get(source_code)
+            if resolved is None:
                 continue
-            if canonical in basics:
+            canonical, priority = resolved
+            if canonical in basics and priority >= priorities[canonical]:
+                if priority > priorities[canonical]:
+                    continue
                 raise ActionValueFactorDatasetError(
                     "ACTION_VALUE_FACTOR_DAILY_BASIC_DUPLICATE"
                 )
             basics[canonical] = row
+            priorities[canonical] = priority
         return basics
 
     def build_partition(self, decision_date: str) -> dict:
