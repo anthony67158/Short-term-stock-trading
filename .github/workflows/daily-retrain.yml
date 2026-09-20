@@ -65,7 +65,14 @@ jobs:
                       request = urllib.request.Request(
                           endpoint,
                           data=body,
-                          headers={"Content-Type": "application/json"},
+                          headers={
+                              "Content-Type": "application/json",
+                              **(
+                                  {"X-API-Key": token}
+                                  if "gyzcloud.top" in endpoint
+                                  else {}
+                              ),
+                          },
                           method="POST",
                       )
                       with urllib.request.urlopen(request, timeout=40) as response:
