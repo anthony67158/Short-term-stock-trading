@@ -49,6 +49,7 @@ def main():
             "build-label-dataset",
             "build-ranking-dataset",
             "train-quant-model",
+            "evaluate-action-value-walk-forward",
             "train-ranking-model",
             "audit-execution-coverage",
             "build-selected-backtest-dataset",
@@ -756,6 +757,46 @@ def main():
             else:
                 for result in dataset.build(max_instruments=args.max_windows):
                     print(json.dumps(result, ensure_ascii=False), flush=True)
+    elif args.command == "evaluate-action-value-walk-forward":
+        from platform_app.modules.experiments.action_value_experiment import (
+            write_action_value_experiment,
+        )
+        from platform_app.modules.experiments.action_value_walk_forward import (
+            ActionValueWalkForwardConfig,
+        )
+
+        if not all(
+            (
+                args.episode_root,
+                args.label_root,
+                args.ranking_root,
+                args.output,
+            )
+        ):
+            parser.error(
+                "episode-root, label-root, ranking-root and output are required"
+            )
+        try:
+            episode_root = external_dataset_root(args.episode_root)
+            label_root = external_dataset_root(args.label_root)
+            ranking_root = external_dataset_root(args.ranking_root)
+            output_root = external_dataset_root(args.output)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(
+            json.dumps(
+                write_action_value_experiment(
+                    episode_dataset_root=episode_root,
+                    label_dataset_root=label_root,
+                    ranking_dataset_root=ranking_root,
+                    output_root=output_root,
+                    config=ActionValueWalkForwardConfig(
+                        iterations=args.max_iterations,
+                    ),
+                ),
+                ensure_ascii=False,
+            )
+        )
     elif args.command == "build-position-action-dataset":
         from platform_app.modules.experiments.position_action_dataset import (
             PositionActionDataset,

@@ -28,6 +28,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+action-value = [
+    { name = "catboost" },
+]
 dev = [
     { name = "hypothesis" },
     { name = "pytest" },
@@ -61,6 +64,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+action-value = [{ name = "catboost", specifier = ">=1.2,<2" }]
 dev = [
     { name = "hypothesis", specifier = ">=6.130" },
     { name = "pytest", specifier = ">=8.3,<10" },
