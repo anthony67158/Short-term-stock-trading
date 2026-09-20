@@ -78,7 +78,14 @@ class ActionValueWalkForwardResult:
 class WalkForwardActionValuePredictor:
     artifacts: tuple[ActionValueFoldArtifact, ...]
 
-    def predict_action_value(self, *, decision_date, scenario_values) -> dict:
+    def predict_action_value(
+        self,
+        *,
+        decision_date,
+        scenario_values,
+        board=None,
+    ) -> dict:
+        del board
         date = int(decision_date)
         matches = [
             artifact

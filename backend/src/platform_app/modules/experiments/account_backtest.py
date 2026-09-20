@@ -10,8 +10,17 @@ from datetime import UTC, datetime
 from decimal import Decimal, ROUND_FLOOR
 from pathlib import Path
 
+import joblib
+
 from platform_app.modules.experiments.cash_equity_fees import (
     calculate_cash_equity_fees,
+)
+from platform_app.modules.experiments.action_value_experiment import (
+    SCHEMA_VERSION as ACTION_VALUE_EXPERIMENT_SCHEMA_VERSION,
+)
+from platform_app.modules.experiments.action_value_walk_forward import (
+    ActionValueFoldArtifact,
+    WalkForwardActionValuePredictor,
 )
 from platform_app.modules.experiments.execution_backtest import _verified_dataset
 from platform_app.modules.experiments.quant_execution_backtest import (
@@ -88,6 +97,31 @@ def _predict_candidate(bundle, candidate: dict, scenario: dict) -> dict:
         math.log1p(scenario["targetShares"]),
         math.log(max(float(scenario["targetToMedianAmount"]), 1e-12)),
     ]
+    if hasattr(bundle, "predict_action_value"):
+        result = dict(
+            bundle.predict_action_value(
+                decision_date=candidate["path"]["decisionDate"],
+                scenario_values=scenario_values,
+                board=candidate["board"],
+            )
+        )
+        if result.get("status") == "OOD":
+            return {
+                **result,
+                "utilityAt10BpsStress": 0.0,
+                "selectionThreshold": 0.0,
+                "modelActionable": False,
+                "family": "out-of-domain",
+            }
+        result["utilityAt10BpsStress"] = (
+            result["expectedNetReturnOnRequestedNotional"]
+            - float(STRESS_COST) * result["expectedFillFraction"]
+        )
+        result["modelActionable"] = (
+            result["utilityAt10BpsStress"]
+            > float(result["selectionThreshold"])
+        )
+        return result
     predictions = bundle.predict_matrix(
         base_values=[candidate["baseFeatures"]],
         scenario_values=[scenario_values],
@@ -96,6 +130,9 @@ def _predict_candidate(bundle, candidate: dict, scenario: dict) -> dict:
     result["utilityAt10BpsStress"] = result["pFill"] * (
         result["expectedNetReturnGivenFill"] - float(STRESS_COST)
     )
+    result["selectionThreshold"] = 0.0
+    result["modelActionable"] = result["utilityAt10BpsStress"] > 0
+    result["family"] = "legacy-quant-bundle"
     return result
 
 
@@ -193,6 +230,7 @@ def replay_account(
                     "predictedUtilityAt10BpsStress": position["prediction"][
                         "utilityAt10BpsStress"
                     ],
+                    "predictionFamily": position["prediction"]["family"],
                 }
             )
 
@@ -234,8 +272,13 @@ def replay_account(
                 continue
             scenario, reservation = target
             prediction = _predict_candidate(bundle, candidate, scenario)
-            if prediction["utilityAt10BpsStress"] <= 0:
-                counters["modelGateRejected"] += 1
+            if not prediction["modelActionable"]:
+                counter = (
+                    "modelOutOfDomain"
+                    if prediction.get("status") == "OOD"
+                    else "modelGateRejected"
+                )
+                counters[counter] += 1
                 continue
             pending.append(
                 {
@@ -290,6 +333,41 @@ def _trade_breakdown(trades: list[dict], field: str) -> dict:
     return result
 
 
+def account_capacity_gate(scenarios: list[dict]) -> dict:
+    by_cash = {
+        Decimal(scenario["initialCashCny"]): scenario
+        for scenario in scenarios
+    }
+    required = ACCOUNT_SIZES[:3]
+    failed_required = [
+        cash
+        for cash in required
+        if cash not in by_cash or by_cash[cash]["stressNetReturn"] <= 0
+    ]
+    maximum_supported = None
+    for cash in ACCOUNT_SIZES:
+        scenario = by_cash.get(cash)
+        if scenario is None or scenario["stressNetReturn"] <= 0:
+            break
+        maximum_supported = cash
+    failed_capacity = [
+        cash
+        for cash in ACCOUNT_SIZES
+        if cash not in by_cash or by_cash[cash]["stressNetReturn"] <= 0
+    ]
+    return {
+        "passed": not failed_required,
+        "maximumSupportedCashCny": (
+            _text(maximum_supported) if maximum_supported is not None else None
+        ),
+        "capacityRestricted": (
+            not failed_required and maximum_supported != ACCOUNT_SIZES[-1]
+        ),
+        "failedRequiredAccountsCny": [_text(value) for value in failed_required],
+        "failedCapacityAccountsCny": [_text(value) for value in failed_capacity],
+    }
+
+
 def _file_sha256(path: Path) -> str:
     with path.open("rb") as stream:
         return hashlib.file_digest(stream, "sha256").hexdigest()
@@ -313,53 +391,15 @@ def _preferred_paths(database: sqlite3.Connection) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def write_account_backtest(
+def _load_replay_inputs(
     *,
-    quant_backtest_path: Path,
-    market_dataset_root: Path,
-    ranking_dataset_root: Path,
-    quant_model_root: Path,
-    episode_dataset_root: Path,
-    label_dataset_root: Path,
-    output_path: Path,
-) -> dict:
-    quant_backtest_path = quant_backtest_path.resolve()
-    quant_report = json.loads(quant_backtest_path.read_text())
-    if quant_report.get("schemaVersion") != BACKTEST_SCHEMA_VERSION:
-        raise QuantModelError("ACCOUNT_BACKTEST_INPUT_INVALID")
-    market_manifest, market_path = _verified_dataset(
-        market_dataset_root,
-        "market-dataset.v4",
-    )
-    ranking_manifest, ranking_path = _verified_dataset(
-        ranking_dataset_root,
-        "ranking-dataset.v1",
-    )
-    episode_manifest, episode_path = _verified_dataset(
-        episode_dataset_root,
-        "episode-dataset.v4",
-    )
-    label_manifest, label_path = _verified_dataset(
-        label_dataset_root,
-        "label-dataset.v2",
-    )
-    bundle = QuantModelBundle(quant_model_root, require_ready=False)
-    if (
-        ranking_manifest["marketDatabaseSha256"]
-        != market_manifest["databaseSha256"]
-        or episode_manifest["marketDatabaseSha256"]
-        != market_manifest["databaseSha256"]
-        or label_manifest["episodeDatabaseSha256"]
-        != episode_manifest["databaseSha256"]
-        or bundle.manifest.get("rankingDatabaseSha256")
-        != ranking_manifest["databaseSha256"]
-        or quant_report["lineage"]["quantModelArtifactSha256"]
-        != bundle.manifest["artifactSha256"]
-        or quant_report["lineage"]["labelDatabaseSha256"]
-        != label_manifest["databaseSha256"]
-    ):
-        raise QuantModelError("ACCOUNT_BACKTEST_LINEAGE_MISMATCH")
-
+    market_path: Path,
+    ranking_path: Path,
+    episode_path: Path,
+    label_path: Path,
+    episode_manifest: dict,
+    label_manifest: dict,
+) -> tuple[dict[str, list[dict]], dict[tuple[str, str], Decimal]]:
     database = sqlite3.connect(
         f"{label_path.resolve().as_uri()}?mode=ro&immutable=1",
         uri=True,
@@ -386,9 +426,7 @@ def write_account_backtest(
         path = None
         base_features = None
         if row["median_amount20_cny"] is not None:
-            base_features = ranking_features[
-                (decision_date, row["instrument_id"])
-            ]
+            base_features = ranking_features[(decision_date, row["instrument_id"])]
             path = {
                 "instrumentId": row["instrument_id"],
                 "board": row["board"],
@@ -445,13 +483,21 @@ def write_account_backtest(
         )
     }
     market.close()
+    return candidates_by_date, close_prices
 
+
+def _run_account_scenarios(
+    *,
+    candidates_by_date: dict[str, list[dict]],
+    close_prices: dict[tuple[str, str], Decimal],
+    predictor,
+) -> list[dict]:
     scenarios = []
     for initial_cash in ACCOUNT_SIZES:
         result = replay_account(
             candidates_by_date=candidates_by_date,
             close_prices=close_prices,
-            bundle=bundle,
+            bundle=predictor,
             initial_cash=initial_cash,
         )
         result["tradesByBoard"] = _trade_breakdown(result["trades"], "board")
@@ -462,13 +508,77 @@ def write_account_backtest(
             "exitYear",
         )
         scenarios.append(result)
+    return scenarios
 
+
+def write_account_backtest(
+    *,
+    quant_backtest_path: Path,
+    market_dataset_root: Path,
+    ranking_dataset_root: Path,
+    quant_model_root: Path,
+    episode_dataset_root: Path,
+    label_dataset_root: Path,
+    output_path: Path,
+) -> dict:
+    quant_backtest_path = quant_backtest_path.resolve()
+    quant_report = json.loads(quant_backtest_path.read_text())
+    if quant_report.get("schemaVersion") != BACKTEST_SCHEMA_VERSION:
+        raise QuantModelError("ACCOUNT_BACKTEST_INPUT_INVALID")
+    market_manifest, market_path = _verified_dataset(
+        market_dataset_root,
+        "market-dataset.v4",
+    )
+    ranking_manifest, ranking_path = _verified_dataset(
+        ranking_dataset_root,
+        "ranking-dataset.v1",
+    )
+    episode_manifest, episode_path = _verified_dataset(
+        episode_dataset_root,
+        "episode-dataset.v4",
+    )
+    label_manifest, label_path = _verified_dataset(
+        label_dataset_root,
+        "label-dataset.v2",
+    )
+    bundle = QuantModelBundle(quant_model_root, require_ready=False)
+    if (
+        ranking_manifest["marketDatabaseSha256"]
+        != market_manifest["databaseSha256"]
+        or episode_manifest["marketDatabaseSha256"]
+        != market_manifest["databaseSha256"]
+        or label_manifest["episodeDatabaseSha256"]
+        != episode_manifest["databaseSha256"]
+        or bundle.manifest.get("rankingDatabaseSha256")
+        != ranking_manifest["databaseSha256"]
+        or quant_report["lineage"]["quantModelArtifactSha256"]
+        != bundle.manifest["artifactSha256"]
+        or quant_report["lineage"]["labelDatabaseSha256"]
+        != label_manifest["databaseSha256"]
+    ):
+        raise QuantModelError("ACCOUNT_BACKTEST_LINEAGE_MISMATCH")
+
+    candidates_by_date, close_prices = _load_replay_inputs(
+        market_path=market_path,
+        ranking_path=ranking_path,
+        episode_path=episode_path,
+        label_path=label_path,
+        episode_manifest=episode_manifest,
+        label_manifest=label_manifest,
+    )
+    scenarios = _run_account_scenarios(
+        candidates_by_date=candidates_by_date,
+        close_prices=close_prices,
+        predictor=bundle,
+    )
+
+    capacity_gate = account_capacity_gate(scenarios)
     blockers = [
         value
         for value in quant_report["releaseBlockers"]
         if value != "ACCOUNT_CAPITAL_REPLAY_PENDING"
     ]
-    if any(result["stressNetReturn"] <= 0 for result in scenarios):
+    if not capacity_gate["passed"]:
         blockers.insert(0, "ACCOUNT_SCENARIO_STRESS_RETURN_NOT_POSITIVE")
     report = {
         "schemaVersion": ACCOUNT_BACKTEST_SCHEMA_VERSION,
@@ -486,6 +596,7 @@ def write_account_backtest(
             "modelGate": "pFill*(expectedNetReturnGivenFill-0.001)>0",
             "stressCostBps": 10,
         },
+        "capacityGate": capacity_gate,
         "lineage": {
             **quant_report["lineage"],
             "quantExecutionBacktestSha256": _file_sha256(quant_backtest_path),
@@ -497,6 +608,190 @@ def write_account_backtest(
             "labelDatabaseSha256": label_manifest["databaseSha256"],
         },
         "coverage": quant_report["coverage"],
+        "accountScenarios": scenarios,
+    }
+    output_path = output_path.resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    )
+    os.replace(temporary, output_path)
+    return report
+
+
+def _load_action_value_experiment(root: Path) -> tuple[dict, WalkForwardActionValuePredictor]:
+    root = root.resolve()
+    manifest_path = root / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text())
+        evaluation_path = root / manifest["evaluation"]
+        artifacts = manifest["foldArtifacts"]
+    except (OSError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        raise QuantModelError("ACTION_VALUE_ACCOUNT_EXPERIMENT_INVALID") from exc
+    if (
+        manifest.get("schemaVersion") != ACTION_VALUE_EXPERIMENT_SCHEMA_VERSION
+        or manifest.get("releaseStatus") != "UNAVAILABLE"
+        or manifest.get("productionEligible") is not False
+        or not manifest.get("gate", {}).get("passed")
+        or not evaluation_path.is_file()
+        or _file_sha256(evaluation_path) != manifest.get("evaluationSha256")
+        or not isinstance(artifacts, list)
+        or len(artifacts) != 5
+    ):
+        raise QuantModelError("ACTION_VALUE_ACCOUNT_EXPERIMENT_INVALID")
+    loaded = []
+    for item in artifacts:
+        path = root / item["path"]
+        if not path.is_file() or _file_sha256(path) != item.get("sha256"):
+            raise QuantModelError("ACTION_VALUE_ACCOUNT_EXPERIMENT_INVALID")
+        artifact = joblib.load(path)
+        if (
+            not isinstance(artifact, ActionValueFoldArtifact)
+            or artifact.fold.fold != item.get("fold")
+        ):
+            raise QuantModelError("ACTION_VALUE_ACCOUNT_EXPERIMENT_INVALID")
+        loaded.append(artifact)
+    loaded.sort(key=lambda value: value.fold.fold)
+    if [value.fold.fold for value in loaded] != [1, 2, 3, 4, 5]:
+        raise QuantModelError("ACTION_VALUE_ACCOUNT_EXPERIMENT_INVALID")
+    return manifest, WalkForwardActionValuePredictor(tuple(loaded))
+
+
+def _out_of_fold_candidates(
+    candidates_by_date: dict[str, list[dict]],
+    predictor: WalkForwardActionValuePredictor,
+    *,
+    minimum_dates: int = 315,
+) -> tuple[dict[str, list[dict]], int]:
+    selected = {
+        decision_date: candidates
+        for decision_date, candidates in candidates_by_date.items()
+        if any(
+            artifact.fold.test_start
+            <= int(decision_date)
+            <= artifact.fold.test_end
+            for artifact in predictor.artifacts
+        )
+    }
+    if len(selected) < minimum_dates:
+        raise QuantModelError("ACTION_VALUE_ACCOUNT_OOF_COVERAGE_INSUFFICIENT")
+    return selected, len(candidates_by_date) - len(selected)
+
+
+def write_action_value_account_backtest(
+    *,
+    action_value_experiment_root: Path,
+    market_dataset_root: Path,
+    ranking_dataset_root: Path,
+    episode_dataset_root: Path,
+    label_dataset_root: Path,
+    output_path: Path,
+) -> dict:
+    market_manifest, market_path = _verified_dataset(
+        market_dataset_root,
+        "market-dataset.v4",
+    )
+    ranking_manifest, ranking_path = _verified_dataset(
+        ranking_dataset_root,
+        "ranking-dataset.v1",
+    )
+    episode_manifest, episode_path = _verified_dataset(
+        episode_dataset_root,
+        "episode-dataset.v4",
+    )
+    label_manifest, label_path = _verified_dataset(
+        label_dataset_root,
+        "label-dataset.v2",
+    )
+    experiment, predictor = _load_action_value_experiment(
+        action_value_experiment_root
+    )
+    lineage = experiment.get("lineage", {})
+    if (
+        ranking_manifest["marketDatabaseSha256"]
+        != market_manifest["databaseSha256"]
+        or episode_manifest["marketDatabaseSha256"]
+        != market_manifest["databaseSha256"]
+        or label_manifest["episodeDatabaseSha256"]
+        != episode_manifest["databaseSha256"]
+        or lineage.get("episodeManifest", {}).get("databaseSha256")
+        != episode_manifest["databaseSha256"]
+        or lineage.get("labelManifest", {}).get("databaseSha256")
+        != label_manifest["databaseSha256"]
+        or lineage.get("rankingManifest", {}).get("databaseSha256")
+        != ranking_manifest["databaseSha256"]
+    ):
+        raise QuantModelError("ACTION_VALUE_ACCOUNT_LINEAGE_MISMATCH")
+
+    candidates_by_date, close_prices = _load_replay_inputs(
+        market_path=market_path,
+        ranking_path=ranking_path,
+        episode_path=episode_path,
+        label_path=label_path,
+        episode_manifest=episode_manifest,
+        label_manifest=label_manifest,
+    )
+    candidates_by_date, excluded_decision_dates = _out_of_fold_candidates(
+        candidates_by_date,
+        predictor,
+    )
+    scenarios = _run_account_scenarios(
+        candidates_by_date=candidates_by_date,
+        close_prices=close_prices,
+        predictor=predictor,
+    )
+    capacity_gate = account_capacity_gate(scenarios)
+    blockers = [
+        "PROSPECTIVE_FORWARD_GATE_PENDING",
+        "JOINT_AGENT_GATE_PENDING",
+        "MANUAL_APPROVAL_PENDING",
+    ]
+    if not capacity_gate["passed"]:
+        blockers.insert(0, "ACCOUNT_SCENARIO_STRESS_RETURN_NOT_POSITIVE")
+    report = {
+        "schemaVersion": "action-value-account-backtest.v1",
+        "createdAt": datetime.now(UTC).isoformat(),
+        "releaseStatus": "UNAVAILABLE",
+        "productionEligible": False,
+        "releaseBlockers": blockers,
+        "policy": {
+            "initialCashScenariosCny": [_text(value) for value in ACCOUNT_SIZES],
+            "requiredPositiveAccountsCny": [
+                _text(value) for value in ACCOUNT_SIZES[:3]
+            ],
+            "capacityOnlyAccountCny": _text(ACCOUNT_SIZES[-1]),
+            "maxConcurrentPositions": 10,
+            "targetNotional": "INITIAL_CASH_DIVIDED_BY_MAX_POSITIONS",
+            "sameInstrumentOverlap": "SKIP",
+            "sameDayCashReuse": "BUYS_BEFORE_EXITS",
+            "modelGate": (
+                "expectedNetReturnOnRequestedNotional"
+                "-0.001*expectedFillFraction>selectionThreshold"
+            ),
+            "stressCostBps": 10,
+            "predictionMode": "STRICT_OUT_OF_FOLD",
+        },
+        "capacityGate": capacity_gate,
+        "outOfFoldCoverage": {
+            "includedDecisionDates": len(candidates_by_date),
+            "excludedPreTestDecisionDates": excluded_decision_dates,
+            "outerFolds": len(predictor.artifacts),
+        },
+        "lineage": {
+            "actionValueExperimentManifestSha256": _file_sha256(
+                action_value_experiment_root.resolve() / "manifest.json"
+            ),
+            "marketDatasetId": market_manifest["datasetId"],
+            "marketDatabaseSha256": market_manifest["databaseSha256"],
+            "rankingDatasetId": ranking_manifest["datasetId"],
+            "rankingDatabaseSha256": ranking_manifest["databaseSha256"],
+            "episodeDatasetId": episode_manifest["datasetId"],
+            "episodeDatabaseSha256": episode_manifest["databaseSha256"],
+            "labelDatasetId": label_manifest["datasetId"],
+            "labelDatabaseSha256": label_manifest["databaseSha256"],
+        },
+        "coverage": episode_manifest["coverage"],
         "accountScenarios": scenarios,
     }
     output_path = output_path.resolve()
