@@ -1,0 +1,90 @@
+name: oss-dataset-inventory
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build redacted dataset inventory
+        run: |
+          mkdir -p audit-output
+          node <<'NODE'
+          const fs = require('node:fs')
+          const OSS = require('ali-oss')
+
+          const client = new OSS({
+            endpoint: process.env.OSS_ENDPOINT,
+            bucket: process.env.OSS_BUCKET,
+            accessKeyId: process.env.OSS_ACCESS_KEY_ID,
+            accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET,
+            secure: true,
+          })
+          const include = /(^|[/_.-])(dataset|market|minute|episode|label|ranking|quant|model|training|artifact)s?([/_.-]|$)/i
+          const exclude = /(^|[/_.-])(account|session|credential|message|chat|portfolio|holding)s?([/_.-]|$)/i
+          ;(async () => {
+            const matches = []
+            let marker
+            let scanned = 0
+            do {
+              const result = await client.list({
+                "max-keys": 1000,
+                ...(marker ? { marker } : {}),
+              })
+              for (const object of result.objects || []) {
+                scanned += 1
+                if (include.test(object.name) && !exclude.test(object.name)) {
+                  matches.push({
+                    name: object.name,
+                    size: Number(object.size),
+                    lastModified: object.lastModified,
+                    etag: object.etag,
+                  })
+                }
+              }
+              marker = result.isTruncated ? result.nextMarker : undefined
+              if (scanned > 100000) throw new Error('OSS_INVENTORY_OBJECT_LIMIT_EXCEEDED')
+            } while (marker)
+            matches.sort((left, right) => left.name.localeCompare(right.name))
+            fs.writeFileSync(
+              'audit-output/inventory.json',
+              JSON.stringify({
+                schemaVersion: 'oss-dataset-inventory.v1',
+                generatedAt: new Date().toISOString(),
+                scannedObjectCount: scanned,
+                matchingObjectCount: matches.length,
+                matchingBytes: matches.reduce((sum, item) => sum + item.size, 0),
+                objects: matches,
+              }, null, 2) + '\n',
+            )
+          })().catch((error) => {
+            console.error(error?.message || 'OSS_DATASET_INVENTORY_FAILED')
+            process.exitCode = 1
+          })
+          NODE
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: oss-dataset-inventory-${{ github.run_id }}
+          path: audit-output/inventory.json
+          if-no-files-found: error
+          retention-days: 1
