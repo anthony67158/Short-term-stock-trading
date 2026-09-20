@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 15
     env:
       PLATFORM_MARKET_DATA_ENABLED: "true"
-      PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.PLATFORM_MARKET_DATA_API_KEY }}
+      PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.TUSHARE_TOKEN }}
     steps:
       - uses: actions/checkout@v6
 
