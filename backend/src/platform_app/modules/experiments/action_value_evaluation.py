@@ -78,6 +78,10 @@ class ActionValueCalibration:
             * predictions["fillFractionGivenFill"]
             * predictions["expectedNetReturnGivenFill"]
         )
+        predictions.setdefault(
+            "selectionScore",
+            predictions["hurdleExpectedNetReturnOnRequestedNotional"].copy(),
+        )
         q10, q50, q90 = apply_conformal_interval(
             predictions["q10GivenFill"] + self.quantile_location_offset,
             predictions["q50GivenFill"] + self.quantile_location_offset,
@@ -98,21 +102,35 @@ def _weighted_median(values, weights):
     return weighted_quantile(values, weights, 0.5)
 
 
-def _daily_top_k_mask(dates, utility, *, limit: int, threshold: float) -> np.ndarray:
+def _daily_top_k_mask(
+    dates,
+    utility,
+    *,
+    ranking_score=None,
+    limit: int,
+    threshold: float,
+) -> np.ndarray:
     dates = np.asarray(dates)
     utility = np.asarray(utility, dtype=np.float64)
+    ranking_score = (
+        utility
+        if ranking_score is None
+        else np.asarray(ranking_score, dtype=np.float64)
+    )
     if (
         dates.shape != utility.shape
+        or ranking_score.shape != utility.shape
         or dates.ndim != 1
         or limit <= 0
         or not np.isfinite(threshold)
         or not np.all(np.isfinite(utility))
+        or not np.all(np.isfinite(ranking_score))
     ):
         raise ActionValueEvaluationError("ACTION_VALUE_SELECTION_POLICY_INVALID")
     selected = np.zeros(len(utility), dtype=bool)
     for date in np.unique(dates):
         eligible = np.flatnonzero((dates == date) & (utility > threshold))
-        order = np.argsort(-utility[eligible], kind="stable")[:limit]
+        order = np.argsort(-ranking_score[eligible], kind="stable")[:limit]
         selected[eligible[order]] = True
     return selected
 
@@ -236,6 +254,7 @@ def fit_action_value_calibration(
         selected = _daily_top_k_mask(
             calibration_dates,
             predicted_utility,
+            ranking_score=calibrated["selectionScore"],
             limit=limit,
             threshold=0.0,
         )
@@ -384,6 +403,7 @@ def evaluate_action_value_predictions(
     selected = _daily_top_k_mask(
         test_dates,
         predicted_utility,
+        ranking_score=predictions["selectionScore"],
         limit=calibration.daily_selection_limit,
         threshold=calibration.selection_threshold,
     )
@@ -441,6 +461,7 @@ def evaluate_action_value_predictions(
             "threshold": calibration.selection_threshold,
             "dailyLimit": calibration.daily_selection_limit,
             "utilitySource": "hurdleExpectedNetReturnOnRequestedNotional",
+            "rankingSource": "selectionScore",
             "maximumSelectedPerSession": max(selected_per_session, default=0),
             "samples": int(selected.sum()),
             "sessions": int(len(np.unique(test_dates[selected]))),

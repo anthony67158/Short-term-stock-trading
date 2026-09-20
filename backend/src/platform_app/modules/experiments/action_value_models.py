@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from lightgbm import LGBMClassifier, LGBMRegressor
+from lightgbm import LGBMClassifier, LGBMRanker, LGBMRegressor
+from scipy.stats import rankdata
 from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
 
 from platform_app.modules.experiments.action_value_training import (
@@ -96,6 +97,12 @@ class ActionValueCandidate:
                 p_any * fill_given * expected_given_fill
             ),
         }
+        selection_model = self.models.get("selectionScore")
+        result["selectionScore"] = (
+            np.asarray(selection_model.predict(x), dtype=np.float64)
+            if selection_model is not None
+            else result["hurdleExpectedNetReturnOnRequestedNotional"].copy()
+        )
         quantiles = np.sort(
             np.column_stack(
                 [
@@ -234,12 +241,59 @@ def _fit_regressor(
     return model.fit(x, y, sample_weight=weights)
 
 
+def _fit_selection_ranker(
+    x,
+    target,
+    dates,
+    weights,
+    *,
+    iterations,
+    min_samples_leaf,
+    threads,
+):
+    order = np.argsort(dates, kind="stable")
+    ordered_dates = dates[order]
+    ordered_target = target[order]
+    relevance = np.empty(len(order), dtype=np.int32)
+    for date in np.unique(ordered_dates):
+        local = ordered_dates == date
+        count = int(local.sum())
+        percentiles = (
+            (rankdata(ordered_target[local], method="average") - 1)
+            / max(count - 1, 1)
+        )
+        relevance[local] = np.minimum((percentiles * 5).astype(np.int32), 4)
+    _, groups = np.unique(ordered_dates, return_counts=True)
+    model = LGBMRanker(
+        objective="lambdarank",
+        n_estimators=iterations,
+        learning_rate=0.05,
+        num_leaves=31,
+        max_depth=6,
+        min_child_samples=min_samples_leaf,
+        reg_lambda=1.0,
+        label_gain=list(range(5)),
+        random_state=RANDOM_STATE,
+        n_jobs=threads,
+        verbosity=-1,
+        deterministic=True,
+        force_col_wise=True,
+    )
+    return model.fit(
+        x[order],
+        relevance,
+        group=groups,
+        sample_weight=weights[order],
+    )
+
+
 def fit_action_value_candidate(
     data: ActionValueTrainingData,
     train_mask,
     *,
     family: str,
     model_families: dict[str, str] | None = None,
+    fit_selection_ranker: bool = False,
     iterations: int = 120,
     min_samples_leaf: int = 100,
     threads: int = 2,
@@ -327,6 +381,16 @@ def fit_action_value_candidate(
             min_samples_leaf=min_samples_leaf,
             threads=threads,
             quantile=quantile,
+        )
+    if fit_selection_ranker:
+        models["selectionScore"] = _fit_selection_ranker(
+            data.features[train],
+            data.net_return_on_requested_notional[train],
+            data.dates[train],
+            weights(train),
+            iterations=iterations,
+            min_samples_leaf=min_samples_leaf,
+            threads=threads,
         )
     selected_families = set(families.values())
     return ActionValueCandidate(

@@ -171,6 +171,7 @@ def fit_action_value_shadow(
         train,
         family=selected_families["expectedNetReturnOnRequestedNotional"],
         model_families=selected_families,
+        fit_selection_ranker=True,
         iterations=int(config["iterations"]),
         min_samples_leaf=int(config["min_samples_leaf"]),
         threads=int(config["threads"]),

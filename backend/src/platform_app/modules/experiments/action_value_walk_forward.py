@@ -511,6 +511,7 @@ def run_action_value_walk_forward(
             outer_train,
             family=selected_families["expectedNetReturnOnRequestedNotional"],
             model_families=selected_families,
+            fit_selection_ranker=True,
             iterations=config.iterations,
             min_samples_leaf=config.min_samples_leaf,
             threads=config.threads,

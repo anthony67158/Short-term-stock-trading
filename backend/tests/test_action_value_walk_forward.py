@@ -119,14 +119,17 @@ def test_nested_walk_forward_selects_family_without_reading_outer_test_targets(
     assert result.report["gate"]["passed"] is True
     for fold, artifact in zip(result.report["foldReports"], result.artifacts, strict=True):
         assert fold["selectedFamily"] in (*config.candidate_families, "mixed")
-        assert set(fold["selectedFamilies"]) == set(artifact.candidate.models)
+        assert set(fold["selectedFamilies"]) == set(
+            artifact.candidate.model_families
+        )
         assert set(fold["selectedFamilies"].values()) <= set(
             config.candidate_families
         )
         assert artifact.candidate.model_families == fold["selectedFamilies"]
         assert len(fold["innerTrials"]) == len(config.candidate_families)
         assert all(
-            set(trial["targetSelectionLosses"]) == set(artifact.candidate.models)
+            set(trial["targetSelectionLosses"])
+            == set(artifact.candidate.model_families)
             for trial in fold["innerTrials"]
         )
         assert artifact.fold.test_start == int(fold["split"]["testStart"])

@@ -129,6 +129,12 @@ def _predict_candidate(bundle, candidate: dict, scenario: dict) -> dict:
             ) from exc
         if result["dailySelectionLimit"] <= 0:
             raise QuantModelError("ACTION_VALUE_DAILY_SELECTION_LIMIT_INVALID")
+        try:
+            result["selectionScore"] = float(result["selectionScore"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise QuantModelError("ACTION_VALUE_SELECTION_SCORE_INVALID") from exc
+        if not math.isfinite(result["selectionScore"]):
+            raise QuantModelError("ACTION_VALUE_SELECTION_SCORE_INVALID")
         return result
     predictions = bundle.predict_matrix(
         base_values=[candidate["baseFeatures"]],
@@ -141,6 +147,7 @@ def _predict_candidate(bundle, candidate: dict, scenario: dict) -> dict:
     result["selectionThreshold"] = 0.0
     result["dailySelectionLimit"] = None
     result["modelActionable"] = result["utilityAt10BpsStress"] > 0
+    result["selectionScore"] = result["utilityAt10BpsStress"]
     result["family"] = "legacy-quant-bundle"
     return result
 
@@ -309,7 +316,7 @@ def replay_account(
         daily_limit = next(iter(limits), max_positions)
         opportunities.sort(
             key=lambda row: (
-                -row["prediction"]["utilityAt10BpsStress"],
+                -row["prediction"]["selectionScore"],
                 row["candidate"]["rankPosition"],
                 row["candidate"]["instrumentId"],
             )
@@ -836,7 +843,7 @@ def write_action_value_account_backtest(
                 "hurdleExpectedNetReturnOnRequestedNotional"
                 "-0.001*expectedFillFraction>0; then calibrated daily Top-K"
             ),
-            "candidatePriority": "PREDICTED_UTILITY_DESCENDING_STABLE",
+            "candidatePriority": "TRAIN_FOLD_LAMBDARANK_SCORE_DESCENDING_STABLE",
             "stressCostBps": 10,
             "predictionMode": "STRICT_OUT_OF_FOLD",
         },

@@ -112,6 +112,7 @@ def test_all_tree_families_fit_the_same_hurdle_contract(family):
         "expectedNetReturnGivenFill",
         "expectedNetReturnOnRequestedNotional",
         "hurdleExpectedNetReturnOnRequestedNotional",
+        "selectionScore",
         "q10GivenFill",
         "q50GivenFill",
         "q90GivenFill",
@@ -143,6 +144,7 @@ def test_candidate_supports_target_specific_families():
         data.dates <= 20260145,
         family="hgb",
         model_families=model_families,
+        fit_selection_ranker=True,
         iterations=2,
         min_samples_leaf=4,
         threads=1,
@@ -154,6 +156,7 @@ def test_candidate_supports_target_specific_families():
     assert candidate.models["pWinGivenFill"].__class__.__name__ == (
         "HistGradientBoostingClassifier"
     )
+    assert candidate.models["selectionScore"].__class__.__name__ == "LGBMRanker"
 
 
 def test_candidate_rejects_feature_contract_mismatch():

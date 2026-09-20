@@ -155,6 +155,7 @@ def test_evaluation_applies_frozen_daily_selection_limit():
     assert report["selection"]["utilitySource"] == (
         "hurdleExpectedNetReturnOnRequestedNotional"
     )
+    assert report["selection"]["rankingSource"] == "selectionScore"
 
 
 def test_release_gate_never_marks_a_development_candidate_ready():
