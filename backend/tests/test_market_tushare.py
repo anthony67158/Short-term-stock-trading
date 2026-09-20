@@ -341,7 +341,7 @@ def test_api_failure_reports_endpoint_reason_without_secret(monkeypatch):
                     "code": -2001,
                     "msg": (
                         "permission denied for "
-                        "abcdefghijklmnopqrstuvwxyz123456"
+                        "\u662fabcdefghijklmnopqrstuvwxyz123456\u8bf7"
                     ),
                 },
             )
@@ -352,7 +352,7 @@ def test_api_failure_reports_endpoint_reason_without_secret(monkeypatch):
         HistoricalMarketError,
         match=(
             r"MARKET_DATA_API_FAILED:daily_basic:-2001:"
-            r"permission denied for \[REDACTED\]"
+            r"permission denied for \u662f\[REDACTED\]\u8bf7"
         ),
     ):
         client.rows("daily_basic", {}, "ts_code")

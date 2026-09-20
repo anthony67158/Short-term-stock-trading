@@ -23,7 +23,9 @@ BLOCK_TRADE_FIELDS = "ts_code,trade_date,price,vol,amount,buyer,seller"
 STOCK_BASIC_FIELDS = "ts_code,symbol,name,market,exchange,list_status,list_date,delist_date"
 BSE_MAPPING_FIELDS = "name,o_code,n_code,list_date"
 TS_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$")
-SECRET_LIKE_TEXT = re.compile(r"\b[A-Za-z0-9_-]{24,}\b")
+SECRET_LIKE_TEXT = re.compile(
+    r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{24,}(?![A-Za-z0-9_-])"
+)
 BSE_CODE_CHANGE_DATE = "20251009"
 BSE_OPEN_DATE = "20211115"
 

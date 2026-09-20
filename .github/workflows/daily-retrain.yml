@@ -22,7 +22,7 @@ jobs:
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
       PLATFORM_MARKET_DATA_ENABLED: "true"
-      PLATFORM_MARKET_DATA_BASE_URL: https://ts.gyzcloud.top/api
+      PLATFORM_MARKET_DATA_BASE_URL: https://ts2.gyzcloud.top/api
       PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.PLATFORM_MARKET_DATA_API_KEY }}
       PLATFORM_MARKET_DATA_TIMEOUT_SECONDS: "60"
       DATA_ROOT: /mnt/action-value-data
