@@ -427,9 +427,12 @@ def _fetch_partition(
             try:
                 page_rows = client.rows(source, request_params, fields)
                 break
-            except Exception:
+            except Exception as exc:
                 if attempt == maximum_attempts:
-                    raise
+                    raise ValueError(
+                        "MULTIFACTOR_SOURCE_FETCH_FAILED:"
+                        f"{source}:{key}:{exc}"
+                    ) from exc
                 time.sleep(min(30, 2 ** (attempt - 1)))
         page_hash = hashlib.sha256(_canonical_bytes(page_rows)).hexdigest()
         if page and page_hash == previous_page_hash:

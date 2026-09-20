@@ -324,6 +324,40 @@ def test_official_endpoint_does_not_receive_compatibility_header(monkeypatch):
     assert client.rows("daily", {}, "ts_code") == [{"ts_code": "000001.SZ"}]
 
 
+def test_api_failure_reports_endpoint_reason_without_secret(monkeypatch):
+    config = settings().model_copy(
+        update={
+            "market_data_enabled": True,
+            "market_data_api_key": SecretStr("synthetic"),
+            "market_data_base_url": "https://api.tushare.pro",
+        }
+    )
+    monkeypatch.setattr(market_tushare, "settings", lambda: config)
+    client = TushareClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "code": -2001,
+                    "msg": (
+                        "permission denied for "
+                        "abcdefghijklmnopqrstuvwxyz123456"
+                    ),
+                },
+            )
+        )
+    )
+
+    with pytest.raises(
+        HistoricalMarketError,
+        match=(
+            r"MARKET_DATA_API_FAILED:daily_basic:-2001:"
+            r"permission denied for \[REDACTED\]"
+        ),
+    ):
+        client.rows("daily_basic", {}, "ts_code")
+
+
 def test_redirect_cannot_send_market_credential_to_untrusted_host(monkeypatch):
     config = settings().model_copy(
         update={

@@ -23,12 +23,22 @@ BLOCK_TRADE_FIELDS = "ts_code,trade_date,price,vol,amount,buyer,seller"
 STOCK_BASIC_FIELDS = "ts_code,symbol,name,market,exchange,list_status,list_date,delist_date"
 BSE_MAPPING_FIELDS = "name,o_code,n_code,list_date"
 TS_CODE = re.compile(r"^(\d{6})\.(SH|SZ|BJ)$")
+SECRET_LIKE_TEXT = re.compile(r"\b[A-Za-z0-9_-]{24,}\b")
 BSE_CODE_CHANGE_DATE = "20251009"
 BSE_OPEN_DATE = "20211115"
 
 
 class HistoricalMarketError(ValueError):
     pass
+
+
+def _api_error(api_name: str, payload: dict) -> str:
+    code = str(payload.get("code", "UNKNOWN"))[:32]
+    message = SECRET_LIKE_TEXT.sub(
+        "[REDACTED]",
+        str(payload.get("msg") or "NO_MESSAGE")[:240],
+    )
+    return f"MARKET_DATA_API_FAILED:{api_name}:{code}:{message}"
 
 
 def validate_endpoint(value: str) -> str:
@@ -408,7 +418,7 @@ class TushareClient:
                 if not isinstance(payload, dict):
                     raise HistoricalMarketError("MARKET_DATA_RESPONSE_INVALID")
                 if payload.get("code") != 0:
-                    raise HistoricalMarketError("MARKET_DATA_API_FAILED")
+                    raise HistoricalMarketError(_api_error(api_name, payload))
                 data = payload.get("data") or {}
                 columns, items = data.get("fields"), data.get("items")
                 if not isinstance(columns, list) or not isinstance(items, list):

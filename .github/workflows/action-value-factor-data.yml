@@ -108,7 +108,7 @@ jobs:
             build-source \
             --root "$DATA_ROOT/factor-source" \
             --episode-root "$DATA_ROOT/episode" \
-            --workers 4
+            --workers 1
           uv run python - <<'PY'
           import json
           import os

@@ -167,6 +167,29 @@ def test_large_source_partition_is_fetched_with_offsets(tmp_path):
     assert client.offsets == [0, PAGE_SIZE]
 
 
+def test_source_fetch_failure_identifies_partition_without_credentials(tmp_path):
+    class FailedClient:
+        def rows(self, api_name, params, fields):
+            raise ValueError("MARKET_DATA_API_FAILED:daily_basic:-2001:DENIED")
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "MULTIFACTOR_SOURCE_FETCH_FAILED:daily_basic:20250102:"
+            "MARKET_DATA_API_FAILED"
+        ),
+    ):
+        _fetch_partition(
+            client=FailedClient(),
+            root=tmp_path,
+            source="daily_basic",
+            key="20250102",
+            params={"trade_date": "20250102"},
+            fields="ts_code",
+            maximum_attempts=1,
+        )
+
+
 def test_source_audit_rejects_missing_declared_partition(tmp_path):
     options = {
         "client": FakeClient(),
