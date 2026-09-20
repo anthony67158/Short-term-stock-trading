@@ -1,144 +1,90 @@
 name: daily-learning-challengers
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ".github/workflows/daily-retrain.yml"
-      - "api/_learning_*.js"
-      - "api/cron_learning.js"
-      - "qlib-service/learning_pipeline.py"
-  schedule:
-    # UTC Sunday-Friday 17:15 = Beijing Monday-Saturday 01:15.
-    - cron: "15 17 * * 0-5"
   workflow_dispatch: {}
-
-concurrency:
-  group: daily-learning-challengers
-  cancel-in-progress: false
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
-  train:
+  inventory:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 15
     env:
-      PIP_DISABLE_PIP_VERSION_CHECK: "1"
-      PIP_DEFAULT_TIMEOUT: "90"
-      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+      OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
       OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Use Node.js 22
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
 
-      - name: Install Node dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Verify immutable learning contracts
+      - name: Build redacted dataset inventory
         run: |
-          node --test \
-            test/learning-store.test.js \
-            test/learning-capture.test.js \
-            test/learning-settlement.test.js \
-            test/learning-training-view.test.js
+          mkdir -p audit-output
+          node <<'NODE'
+          const fs = require('node:fs')
+          const OSS = require('ali-oss')
 
-      - name: Use Python 3.11
-        uses: actions/setup-python@v6
+          const client = new OSS({
+            endpoint: process.env.OSS_ENDPOINT,
+            bucket: process.env.OSS_BUCKET,
+            accessKeyId: process.env.OSS_ACCESS_KEY_ID,
+            accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET,
+            secure: true,
+          })
+          const include = /(^|[/_.-])(dataset|market|minute|episode|label|ranking|quant|model|training|artifact)s?([/_.-]|$)/i
+          const exclude = /(^|[/_.-])(account|session|credential|message|chat|portfolio|holding)s?([/_.-]|$)/i
+          ;(async () => {
+            const matches = []
+            let marker
+            let scanned = 0
+            do {
+              const result = await client.list({
+                "max-keys": 1000,
+                ...(marker ? { marker } : {}),
+              })
+              for (const object of result.objects || []) {
+                scanned += 1
+                if (include.test(object.name) && !exclude.test(object.name)) {
+                  matches.push({
+                    name: object.name,
+                    size: Number(object.size),
+                    lastModified: object.lastModified,
+                    etag: object.etag,
+                  })
+                }
+              }
+              marker = result.isTruncated ? result.nextMarker : undefined
+              if (scanned > 100000) throw new Error('OSS_INVENTORY_OBJECT_LIMIT_EXCEEDED')
+            } while (marker)
+            matches.sort((left, right) => left.name.localeCompare(right.name))
+            fs.writeFileSync(
+              'audit-output/inventory.json',
+              JSON.stringify({
+                schemaVersion: 'oss-dataset-inventory.v1',
+                generatedAt: new Date().toISOString(),
+                scannedObjectCount: scanned,
+                matchingObjectCount: matches.length,
+                matchingBytes: matches.reduce((sum, item) => sum + item.size, 0),
+                objects: matches,
+              }, null, 2) + '\n',
+            )
+          })().catch((error) => {
+            console.error(error?.message || 'OSS_DATASET_INVENTORY_FAILED')
+            process.exitCode = 1
+          })
+          NODE
+
+      - uses: actions/upload-artifact@v7
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: qlib-service/requirements-ci.txt
-
-      - name: Install locked training dependencies
-        working-directory: qlib-service
-        run: |
-          python -m pip install --retries 5 -r requirements-ci.txt
-          python -m pip check
-
-      - name: Verify challenger training gates
-        working-directory: qlib-service
-        run: python -m unittest test_learning_pipeline.py
-
-      - name: Download latest redacted training view
-        working-directory: qlib-service
-        run: |
-          retry() {
-            local attempt=1
-            until "$@"; do
-              if [ "$attempt" -ge 3 ]; then return 1; fi
-              sleep $((attempt * 15))
-              attempt=$((attempt + 1))
-            done
-          }
-          mkdir -p ../learning-artifacts
-          retry python learning_pipeline.py download \
-            --output ../learning-artifacts/training-view.json
-
-      - name: Train and gate challengers
-        working-directory: qlib-service
-        run: |
-          retry() {
-            local attempt=1
-            until "$@"; do
-              if [ "$attempt" -ge 3 ]; then return 1; fi
-              sleep $((attempt * 15))
-              attempt=$((attempt + 1))
-            done
-          }
-          retry python learning_pipeline.py train \
-            --view ../learning-artifacts/training-view.json \
-            --output ../learning-artifacts/run
-          cat ../learning-artifacts/run/report.json
-
-      - name: Upload immutable challenger run
-        working-directory: qlib-service
-        run: |
-          retry() {
-            local attempt=1
-            until "$@"; do
-              if [ "$attempt" -ge 3 ]; then return 1; fi
-              sleep $((attempt * 15))
-              attempt=$((attempt + 1))
-            done
-          }
-          retry python learning_pipeline.py upload \
-            --directory ../learning-artifacts/run
-
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: learning-challenger-${{ github.run_id }}
-          path: |
-            learning-artifacts/run/report.json
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Report daily learning failure
-        if: failure()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          day="$(TZ=Asia/Shanghai date +%F)"
-          title="[daily-learning] ${day} failed"
-          body="Daily learning failed after retries. Run: ${RUN_URL}. Event: ${{ github.event_name }}. Commit: ${{ github.sha }}."
-          existing="$(gh issue list --state open --limit 100 \
-            --json number,title \
-            --jq ".[] | select(.title == \"${title}\") | .number" \
-            | head -n 1)"
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --body "$body"
-          else
-            gh issue create --title "$title" --body "$body"
-          fi
+          name: oss-dataset-inventory-${{ github.run_id }}
+          path: audit-output/inventory.json
+          if-no-files-found: error
+          retention-days: 1
