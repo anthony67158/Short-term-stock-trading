@@ -91,6 +91,47 @@ def upload_experiment(root: Path) -> dict:
     return receipt
 
 
+def upload_account_report(experiment_root: Path, report_path: Path) -> dict:
+    manifest, manifest_hash, _files = _manifest(experiment_root)
+    report_path = report_path.resolve()
+    try:
+        report = json.loads(report_path.read_text())
+    except (OSError, TypeError, json.JSONDecodeError) as exc:
+        raise ActionValueArtifactStoreError(
+            "ACTION_VALUE_ACCOUNT_REPORT_INVALID"
+        ) from exc
+    if (
+        report.get("schemaVersion") != "action-value-account-backtest.v1"
+        or report.get("releaseStatus") != "UNAVAILABLE"
+        or report.get("productionEligible") is not False
+        or report.get("lineage", {}).get(
+            "actionValueExperimentManifestSha256"
+        )
+        != manifest_hash
+    ):
+        raise ActionValueArtifactStoreError("ACTION_VALUE_ACCOUNT_REPORT_INVALID")
+    status = (
+        "development-passed"
+        if manifest.get("gate", {}).get("passed")
+        else "rejected"
+    )
+    report_hash = _file_sha256(report_path)
+    key = (
+        f"{ROOT_PREFIX}/experiments/{status}/{manifest_hash}/"
+        f"evidence/account-backtest-{report_hash}.json"
+    )
+    upload_status = _upload_file(_bucket(), key, report_path, report_hash)
+    return {
+        "schemaVersion": "action-value-evidence-receipt.v1",
+        "status": upload_status,
+        "experimentStatus": status,
+        "manifestSha256": manifest_hash,
+        "accountReportSha256": report_hash,
+        "capacityGatePassed": bool(report.get("capacityGate", {}).get("passed")),
+        "productionPointerChanged": False,
+    }
+
+
 def restore_latest_passed(output: Path) -> dict:
     import oss2
 
@@ -148,15 +189,22 @@ def restore_latest_passed(output: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["upload", "restore-latest-passed"])
+    parser.add_argument(
+        "command",
+        choices=["upload", "upload-account-report", "restore-latest-passed"],
+    )
     parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--evidence", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
-    result = (
-        upload_experiment(args.root)
-        if args.command == "upload"
-        else restore_latest_passed(args.root)
-    )
+    if args.command == "upload":
+        result = upload_experiment(args.root)
+    elif args.command == "upload-account-report":
+        if not args.evidence:
+            parser.error("upload-account-report requires evidence")
+        result = upload_account_report(args.root, args.evidence)
+    else:
+        result = restore_latest_passed(args.root)
     rendered = json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

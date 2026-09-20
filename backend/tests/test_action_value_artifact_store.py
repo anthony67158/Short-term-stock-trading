@@ -103,3 +103,46 @@ def test_manifest_hash_or_release_state_mismatch_fails_closed(tmp_path):
         match="ACTION_VALUE_ARTIFACT_MANIFEST_INVALID",
     ):
         store.upload_experiment(tmp_path)
+
+
+def test_account_report_must_reference_exact_experiment_manifest(tmp_path, monkeypatch):
+    _experiment(tmp_path)
+    _manifest, manifest_hash, _files = store._manifest(tmp_path)
+    report_path = tmp_path / "account.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "schemaVersion": "action-value-account-backtest.v1",
+                "releaseStatus": "UNAVAILABLE",
+                "productionEligible": False,
+                "capacityGate": {"passed": True},
+                "lineage": {
+                    "actionValueExperimentManifestSha256": manifest_hash,
+                },
+            }
+        )
+    )
+    keys = []
+    monkeypatch.setattr(store, "_bucket", lambda: object())
+    monkeypatch.setattr(
+        store,
+        "_upload_file",
+        lambda _bucket, key, _path, _sha256: keys.append(key) or "UPLOADED",
+    )
+
+    receipt = store.upload_account_report(tmp_path, report_path)
+
+    assert receipt["capacityGatePassed"] is True
+    assert receipt["productionPointerChanged"] is False
+    assert keys[0].startswith(
+        f"{store.ROOT_PREFIX}/experiments/development-passed/{manifest_hash}/evidence/"
+    )
+
+    report = json.loads(report_path.read_text())
+    report["lineage"]["actionValueExperimentManifestSha256"] = "0" * 64
+    report_path.write_text(json.dumps(report))
+    with pytest.raises(
+        store.ActionValueArtifactStoreError,
+        match="ACTION_VALUE_ACCOUNT_REPORT_INVALID",
+    ):
+        store.upload_account_report(tmp_path, report_path)
