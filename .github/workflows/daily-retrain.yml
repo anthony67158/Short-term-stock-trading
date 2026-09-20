@@ -7,84 +7,103 @@ permissions:
   contents: read
 
 jobs:
-  inventory:
+  probe:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
-      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
-      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
-      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      PLATFORM_MARKET_DATA_ENABLED: "true"
+      PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.TUSHARE_TOKEN }}
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-python@v6
         with:
-          node-version: "22"
-          cache: npm
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
 
-      - run: npm ci
+      - name: Install probe dependencies
+        run: python -m pip install "httpx>=0.28,<1" "pydantic-settings>=2.8,<3"
 
-      - name: Build redacted dataset inventory
+      - name: Probe historical data capabilities
+        env:
+          PYTHONPATH: ${{ github.workspace }}/backend/src
         run: |
           mkdir -p audit-output
-          node <<'NODE'
-          const fs = require('node:fs')
-          const OSS = require('ali-oss')
+          python <<'PY'
+          import hashlib
+          import json
+          import os
+          import time
 
-          const client = new OSS({
-            endpoint: process.env.OSS_ENDPOINT,
-            bucket: process.env.OSS_BUCKET,
-            accessKeyId: process.env.OSS_ACCESS_KEY_ID,
-            accessKeySecret: process.env.OSS_ACCESS_KEY_SECRET,
-            secure: true,
-          })
-          const include = /(^|[/_.-])(dataset|market|minute|episode|label|ranking|quant|model|training|artifact)s?([/_.-]|$)/i
-          const exclude = /(^|[/_.-])(account|session|credential|message|chat|portfolio|holding)s?([/_.-]|$)/i
-          ;(async () => {
-            const matches = []
-            let marker
-            let scanned = 0
-            do {
-              const result = await client.list({
-                "max-keys": 1000,
-                ...(marker ? { marker } : {}),
-              })
-              for (const object of result.objects || []) {
-                scanned += 1
-                if (include.test(object.name) && !exclude.test(object.name)) {
-                  matches.push({
-                    name: object.name,
-                    size: Number(object.size),
-                    lastModified: object.lastModified,
-                    etag: object.etag,
-                  })
-                }
-              }
-              marker = result.isTruncated ? result.nextMarker : undefined
-              if (scanned > 100000) throw new Error('OSS_INVENTORY_OBJECT_LIMIT_EXCEEDED')
-            } while (marker)
-            matches.sort((left, right) => left.name.localeCompare(right.name))
-            fs.writeFileSync(
-              'audit-output/inventory.json',
-              JSON.stringify({
-                schemaVersion: 'oss-dataset-inventory.v1',
-                generatedAt: new Date().toISOString(),
-                scannedObjectCount: scanned,
-                matchingObjectCount: matches.length,
-                matchingBytes: matches.reduce((sum, item) => sum + item.size, 0),
-                objects: matches,
-              }, null, 2) + '\n',
-            )
-          })().catch((error) => {
-            console.error(error?.message || 'OSS_DATASET_INVENTORY_FAILED')
-            process.exitCode = 1
-          })
-          NODE
+          from platform_app.adapters.market_tushare import (
+              DAILY_FIELDS,
+              MINUTE_FIELDS,
+              STOCK_BASIC_FIELDS,
+              TushareClient,
+          )
+          from platform_app.config import settings
+
+          probes = (
+              ("stock_basic", {"ts_code": "600519.SH", "list_status": "L"}, STOCK_BASIC_FIELDS),
+              ("trade_cal", {"exchange": "SSE", "start_date": "20250901", "end_date": "20250905"},
+               "exchange,cal_date,is_open,pretrade_date"),
+              ("daily", {"ts_code": "600519.SH", "start_date": "20250901", "end_date": "20250905"},
+               DAILY_FIELDS),
+              ("adj_factor", {"ts_code": "600519.SH", "start_date": "20250901",
+                              "end_date": "20250905"}, "ts_code,trade_date,adj_factor"),
+              ("stk_mins", {"ts_code": "600519.SH", "freq": "5min",
+                            "start_date": "2025-09-01 09:30:00",
+                            "end_date": "2025-09-05 15:00:00"}, MINUTE_FIELDS),
+          )
+          endpoints = (
+              "https://api.tushare.pro",
+              "https://ts.gyzcloud.top/api",
+          )
+          report = {"schemaVersion": "market-data-capability-probe.v1", "endpoints": []}
+          for endpoint in endpoints:
+              os.environ["PLATFORM_MARKET_DATA_BASE_URL"] = endpoint
+              settings.cache_clear()
+              result = {"endpoint": endpoint, "probes": []}
+              try:
+                  client = TushareClient()
+              except Exception as error:
+                  result["clientError"] = str(error)
+                  report["endpoints"].append(result)
+                  continue
+              for api_name, params, fields in probes:
+                  started = time.monotonic()
+                  try:
+                      rows = client.rows(api_name, params, fields)
+                      canonical = json.dumps(
+                          rows,
+                          ensure_ascii=False,
+                          sort_keys=True,
+                          separators=(",", ":"),
+                      ).encode()
+                      result["probes"].append({
+                          "apiName": api_name,
+                          "status": "OK",
+                          "rows": len(rows),
+                          "elapsedSeconds": round(time.monotonic() - started, 3),
+                          "payloadSha256": hashlib.sha256(canonical).hexdigest(),
+                      })
+                  except Exception as error:
+                      result["probes"].append({
+                          "apiName": api_name,
+                          "status": "ERROR",
+                          "elapsedSeconds": round(time.monotonic() - started, 3),
+                          "errorCode": str(error),
+                      })
+              report["endpoints"].append(result)
+          with open("audit-output/probe.json", "w", encoding="utf-8") as stream:
+              json.dump(report, stream, ensure_ascii=False, sort_keys=True, indent=2)
+              stream.write("\n")
+          PY
 
       - uses: actions/upload-artifact@v7
         with:
-          name: oss-dataset-inventory-${{ github.run_id }}
-          path: audit-output/inventory.json
+          name: market-data-capability-probe-${{ github.run_id }}
+          path: audit-output/probe.json
           if-no-files-found: error
           retention-days: 1
