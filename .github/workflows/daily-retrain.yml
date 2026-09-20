@@ -1,17 +1,17 @@
-name: action-value-label-train
+name: action-value-sealed-train
 
 on:
   workflow_dispatch: {}
 
 concurrency:
-  group: action-value-label-train
+  group: action-value-sealed-train
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  label-train:
+  train:
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     env:
@@ -26,8 +26,6 @@ jobs:
       RANKING_ID: action-value-ranking-20240102-20260918-v1
       EPISODE_ID: action-value-episodes-20240401-20260911-v1
       LABEL_ID: action-value-labels-20240401-20260911-v1
-      START_DATE: "20240401"
-      END_DATE: "20260911"
     steps:
       - uses: actions/checkout@v6
 
@@ -61,7 +59,7 @@ jobs:
             src/platform_app/modules/experiments/action_value_*.py \
             src/platform_app/modules/experiments/account_backtest.py
 
-      - name: Restore sealed upstream datasets and label checkpoint
+      - name: Restore sealed training datasets
         working-directory: backend
         run: |
           sudo mkdir -p "$DATA_ROOT"
@@ -89,49 +87,7 @@ jobs:
             --dataset-id "$LABEL_ID" \
             --output "$RUNNER_TEMP/label-restore.json"
 
-      - name: Build and seal label dataset
-        working-directory: backend
-        run: |
-          set -Eeuo pipefail
-          checkpoint() {
-            uv run --group ops python -m \
-              platform_app.modules.experiments.retraining_dataset_store checkpoint \
-              --root "$DATA_ROOT/label" \
-              --scope full \
-              --kind label \
-              --dataset-id "$LABEL_ID" \
-              --output "$RUNNER_TEMP/label-checkpoint.json"
-          }
-          checkpoint_on_exit() {
-            status=$?
-            if [ -f "$DATA_ROOT/label/labels.sqlite3" ]; then
-              checkpoint || true
-            fi
-            exit "$status"
-          }
-          trap checkpoint_on_exit EXIT
-
-          if [ ! -f "$DATA_ROOT/label/manifest.json" ]; then
-            uv run platform-cli build-label-dataset \
-              --dataset-root "$DATA_ROOT/market" \
-              --episode-root "$DATA_ROOT/episode" \
-              --label-root "$DATA_ROOT/label" \
-              --label-dataset-id "$LABEL_ID" \
-              --stage labels \
-              --start-date "$START_DATE" \
-              --end-date "$END_DATE"
-            checkpoint
-            uv run platform-cli build-label-dataset \
-              --dataset-root "$DATA_ROOT/market" \
-              --episode-root "$DATA_ROOT/episode" \
-              --label-root "$DATA_ROOT/label" \
-              --label-dataset-id "$LABEL_ID" \
-              --stage seal
-          fi
-          checkpoint
-          trap - EXIT
-
-      - name: Audit label dataset
+      - name: Audit restored sealed label dataset
         working-directory: backend
         run: |
           uv run --group ops python -m \
@@ -243,10 +199,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: action-value-label-train-${{ github.run_id }}
+          name: action-value-sealed-train-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/label-restore.json
-            ${{ runner.temp }}/label-checkpoint.json
             ${{ runner.temp }}/label-final.json
             ${{ runner.temp }}/experiment-receipt.json
             ${{ runner.temp }}/experiment-manifest.json
