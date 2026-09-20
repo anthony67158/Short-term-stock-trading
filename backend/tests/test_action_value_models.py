@@ -6,6 +6,7 @@ from platform_app.modules.experiments.action_value_models import (
     MODEL_TARGETS,
     ActionValueModelError,
     fit_action_value_candidate,
+    fit_probability_ensemble,
 )
 from platform_app.modules.experiments.action_value_training import (
     build_action_value_training_data,
@@ -157,6 +158,20 @@ def test_candidate_supports_target_specific_families():
         "HistGradientBoostingClassifier"
     )
     assert candidate.models["selectionScore"].__class__.__name__ == "LGBMRanker"
+
+    ensemble = fit_probability_ensemble(
+        candidate,
+        data,
+        data.dates <= 20260145,
+        iterations=2,
+        min_samples_leaf=4,
+        threads=1,
+    )
+    assert ensemble.family == "mixed-ensemble"
+    assert ensemble.probability_ensemble_families == ACTION_VALUE_FAMILIES
+    assert ensemble.models["pAnyFill"].__class__.__name__ == (
+        "AveragedProbabilityModel"
+    )
 
 
 def test_candidate_rejects_feature_contract_mismatch():

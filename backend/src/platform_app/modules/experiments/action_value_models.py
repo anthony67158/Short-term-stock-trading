@@ -40,12 +40,25 @@ class ActionValueModelError(ValueError):
 
 
 @dataclass(frozen=True)
+class AveragedProbabilityModel:
+    models: tuple[Any, ...]
+
+    def predict_proba(self, features) -> np.ndarray:
+        probabilities = np.stack(
+            [model.predict_proba(features) for model in self.models],
+            axis=0,
+        )
+        return np.mean(probabilities, axis=0)
+
+
+@dataclass(frozen=True)
 class ActionValueCandidate:
     family: str
     feature_names: tuple[str, ...]
     base_feature_count: int
     model_families: dict[str, str]
     models: dict[str, Any]
+    probability_ensemble_families: tuple[str, ...] = ()
 
     def predict(self, features) -> dict[str, np.ndarray]:
         x = np.asarray(features, dtype=np.float32)
@@ -399,4 +412,67 @@ def fit_action_value_candidate(
         base_feature_count=base_feature_count,
         model_families=families,
         models=models,
+    )
+
+
+def fit_probability_ensemble(
+    candidate: ActionValueCandidate,
+    data: ActionValueTrainingData,
+    train_mask,
+    *,
+    families: tuple[str, ...] = ACTION_VALUE_FAMILIES,
+    iterations: int = 120,
+    min_samples_leaf: int = 100,
+    threads: int = 2,
+) -> ActionValueCandidate:
+    train = np.asarray(train_mask, dtype=bool)
+    conditional = train & data.conditional_available
+    if (
+        train.shape != (len(data.features),)
+        or not np.any(conditional)
+        or not families
+        or any(family not in ACTION_VALUE_FAMILIES for family in families)
+    ):
+        raise ActionValueModelError("ACTION_VALUE_TRAINING_CONFIG_INVALID")
+
+    def weights(mask):
+        selected = scenario_weights(data.dates[mask], data.episodes[mask])
+        return selected / selected.mean()
+
+    classifier_targets = {
+        "pAnyFill": (data.p_any_fill, train),
+        "pFullFillGivenFill": (data.p_full_fill, conditional),
+        "pWinGivenFill": (data.p_win_given_fill, conditional),
+        "stopHazardGivenFill": (data.stop_hazard_given_fill, conditional),
+    }
+    models = dict(candidate.models)
+    for name, (target, mask) in classifier_targets.items():
+        selected_family = candidate.model_families[name]
+        fitted = {selected_family: candidate.models[name]}
+        for family in families:
+            if family == selected_family:
+                continue
+            fitted[family] = _fit_classifier(
+                family,
+                (
+                    data.features[mask, : candidate.base_feature_count]
+                    if name in BASE_FEATURE_TARGETS
+                    else data.features[mask]
+                ),
+                target[mask],
+                weights(mask),
+                iterations=iterations,
+                min_samples_leaf=min_samples_leaf,
+                threads=threads,
+            )
+        models[name] = AveragedProbabilityModel(
+            tuple(fitted[family] for family in families)
+        )
+    return ActionValueCandidate(
+        family="mixed-ensemble",
+        feature_names=candidate.feature_names,
+        base_feature_count=candidate.base_feature_count,
+        model_families=candidate.model_families,
+        models=models,
+        probability_ensemble_families=families,
     )

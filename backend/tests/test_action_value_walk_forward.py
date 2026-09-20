@@ -118,7 +118,11 @@ def test_nested_walk_forward_selects_family_without_reading_outer_test_targets(
     assert result.report["minimumFoldTestSessions"] >= 20
     assert result.report["gate"]["passed"] is True
     for fold, artifact in zip(result.report["foldReports"], result.artifacts, strict=True):
-        assert fold["selectedFamily"] in (*config.candidate_families, "mixed")
+        assert fold["selectedFamily"] == "mixed-ensemble"
+        assert tuple(fold["probabilityEnsembleFamilies"]) == (
+            "hgb",
+            "lightgbm",
+        )
         assert set(fold["selectedFamilies"]) == set(
             artifact.candidate.model_families
         )

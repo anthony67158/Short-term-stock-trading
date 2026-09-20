@@ -19,6 +19,7 @@ from platform_app.modules.experiments.action_value_models import (
     ACTION_VALUE_FAMILIES,
     MODEL_TARGETS,
     fit_action_value_candidate,
+    fit_probability_ensemble,
 )
 
 SCHEMA_VERSION = "action-value-shadow-bundle.v1"
@@ -172,6 +173,15 @@ def fit_action_value_shadow(
         family=selected_families["expectedNetReturnOnRequestedNotional"],
         model_families=selected_families,
         fit_selection_ranker=True,
+        iterations=int(config["iterations"]),
+        min_samples_leaf=int(config["min_samples_leaf"]),
+        threads=int(config["threads"]),
+    )
+    candidate = fit_probability_ensemble(
+        candidate,
+        data,
+        train,
+        families=tuple(config["candidate_families"]),
         iterations=int(config["iterations"]),
         min_samples_leaf=int(config["min_samples_leaf"]),
         threads=int(config["threads"]),

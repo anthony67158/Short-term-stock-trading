@@ -19,6 +19,7 @@ from platform_app.modules.experiments.action_value_models import (
     MODEL_TARGETS,
     ActionValueCandidate,
     fit_action_value_candidate,
+    fit_probability_ensemble,
 )
 from platform_app.modules.experiments.action_value_training import (
     ActionValueTrainingData,
@@ -516,6 +517,15 @@ def run_action_value_walk_forward(
             min_samples_leaf=config.min_samples_leaf,
             threads=config.threads,
         )
+        candidate = fit_probability_ensemble(
+            candidate,
+            data,
+            outer_train,
+            families=config.candidate_families,
+            iterations=config.iterations,
+            min_samples_leaf=config.min_samples_leaf,
+            threads=config.threads,
+        )
         calibration = fit_action_value_calibration(
             candidate,
             data,
@@ -539,6 +549,9 @@ def run_action_value_walk_forward(
                 "split": fold.as_dict(),
                 "selectedFamily": candidate.family,
                 "selectedFamilies": selected_families,
+                "probabilityEnsembleFamilies": list(
+                    candidate.probability_ensemble_families
+                ),
                 "innerTrials": trials,
                 "calibration": {
                     "method": config.calibration_method,
