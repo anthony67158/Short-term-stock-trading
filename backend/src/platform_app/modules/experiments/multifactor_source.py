@@ -40,6 +40,8 @@ SOURCE_REQUESTS = {
     "balancesheet_vip": BALANCE_FIELDS,
     "cashflow_vip": CASHFLOW_FIELDS,
 }
+PAGE_SIZE = 5000
+MAXIMUM_PAGES = 100
 
 
 def _date(value) -> str | None:
@@ -412,14 +414,36 @@ def _fetch_partition(
                 "rows": len(payload["rows"]),
                 "sha256": _file_sha256(path),
             }
-    for attempt in range(1, maximum_attempts + 1):
-        try:
-            rows = client.rows(source, params, fields)
+    rows = []
+    previous_page_hash = None
+    for page in range(MAXIMUM_PAGES):
+        request_params = dict(params)
+        if source != "daily_basic":
+            request_params.update({
+                "limit": PAGE_SIZE,
+                "offset": page * PAGE_SIZE,
+            })
+        for attempt in range(1, maximum_attempts + 1):
+            try:
+                page_rows = client.rows(source, request_params, fields)
+                break
+            except Exception:
+                if attempt == maximum_attempts:
+                    raise
+                time.sleep(min(30, 2 ** (attempt - 1)))
+        page_hash = hashlib.sha256(_canonical_bytes(page_rows)).hexdigest()
+        if page and page_hash == previous_page_hash:
+            raise ValueError(
+                f"MULTIFACTOR_SOURCE_PAGINATION_STALLED:{source}:{key}"
+            )
+        rows.extend(page_rows)
+        if source == "daily_basic" or len(page_rows) < PAGE_SIZE:
             break
-        except Exception:
-            if attempt == maximum_attempts:
-                raise
-            time.sleep(min(30, 2 ** (attempt - 1)))
+        previous_page_hash = page_hash
+    else:
+        raise ValueError(
+            f"MULTIFACTOR_SOURCE_PAGINATION_LIMIT:{source}:{key}"
+        )
     payload = {
         "schemaVersion": SCHEMA_VERSION,
         "source": source,

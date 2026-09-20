@@ -3,6 +3,8 @@ import json
 import pytest
 
 from platform_app.modules.experiments.multifactor_source import (
+    PAGE_SIZE,
+    _fetch_partition,
     audit_multifactor_source_archive,
     build_multifactor_source_archive,
     dividend_continuity_as_of,
@@ -137,6 +139,32 @@ def test_source_archive_is_resumable_sealed_and_fully_audited(tmp_path):
         build_multifactor_source_archive(
             **{**options, "decision_dates": ["20250102"]}
         )
+
+
+def test_large_source_partition_is_fetched_with_offsets(tmp_path):
+    class PagedClient:
+        def __init__(self):
+            self.offsets = []
+
+        def rows(self, api_name, params, fields):
+            self.offsets.append(params["offset"])
+            if params["offset"] == 0:
+                return [{"row": index} for index in range(PAGE_SIZE)]
+            return [{"row": PAGE_SIZE}]
+
+    client = PagedClient()
+    result = _fetch_partition(
+        client=client,
+        root=tmp_path,
+        source="income_vip",
+        key="20241231",
+        params={"period": "20241231"},
+        fields="row",
+        maximum_attempts=1,
+    )
+
+    assert result["rows"] == PAGE_SIZE + 1
+    assert client.offsets == [0, PAGE_SIZE]
 
 
 def test_source_audit_rejects_missing_declared_partition(tmp_path):
