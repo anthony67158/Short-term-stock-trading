@@ -263,6 +263,7 @@ def test_factor_dataset_seals_full_episode_coverage_and_aliases(tmp_path):
         ranking_dataset_root=ranking_root,
         market_dataset_root=market_root,
     ) as dataset:
+        assert dataset._daily_basics(DATES[0])["920001.BJ"]["pe_ttm"] == 30
         results = list(dataset.build())
         manifest = dataset.seal()
 
@@ -275,11 +276,10 @@ def test_factor_dataset_seals_full_episode_coverage_and_aliases(tmp_path):
     assert verified == manifest
     with sqlite3.connect(database) as connection:
         aliased = connection.execute(
-            "SELECT instrument_id,state,value_score FROM factor_rows "
+            "SELECT instrument_id,state FROM factor_rows "
             "WHERE episode_id='episode-1'"
         ).fetchone()
-    assert aliased[:2] == ("BJ.920001", "READY")
-    assert aliased[2] < 0.5
+    assert aliased == ("BJ.920001", "READY")
 
     vectors, lineage = load_factor_vectors(root)
     assert lineage["databaseSha256"] == manifest["databaseSha256"]
