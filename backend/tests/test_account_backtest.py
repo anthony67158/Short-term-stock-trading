@@ -48,6 +48,7 @@ class _PositiveActionValuePredictor:
             "expectedFillFraction": 0.7,
             "expectedNetReturnOnRequestedNotional": 0.02,
             "selectionThreshold": 0.005,
+            "dailySelectionLimit": 1,
             "family": "hgb",
             "fold": 1,
         }
@@ -59,6 +60,20 @@ class _OutOfDomainPredictor:
         return {
             "status": "OOD",
             "reasonCodes": ["UNSUPPORTED_BOARD:0"],
+        }
+
+
+class _UtilityOrderedPredictor:
+    @staticmethod
+    def predict_action_value(*, scenario_values, **_kwargs):
+        return {
+            "pAnyFill": 0.8,
+            "expectedFillFraction": 0.7,
+            "expectedNetReturnOnRequestedNotional": scenario_values[0],
+            "selectionThreshold": 0.0,
+            "dailySelectionLimit": 1,
+            "family": "hgb",
+            "fold": 1,
         }
 
 
@@ -121,6 +136,39 @@ def test_account_replay_accepts_calibrated_action_value_predictor():
     assert result["counts"]["ordersPlanned"] == 1
     assert result["trades"][0]["predictionFamily"] == "hgb"
     assert result["stressNetReturn"] > 0
+
+
+def test_account_replay_prioritizes_model_utility_and_honors_daily_limit():
+    lower_utility = {
+        **_candidate(),
+        "baseFeatures": [0.01],
+    }
+    higher_utility = {
+        **_candidate(),
+        "instrumentId": "SH.600002",
+        "rankPosition": 2,
+        "baseFeatures": [0.03],
+        "path": {
+            **_candidate()["path"],
+            "instrumentId": "SH.600002",
+        },
+    }
+
+    result = replay_account(
+        candidates_by_date={
+            "20250101": [lower_utility, higher_utility],
+            "20250102": [],
+            "20250103": [],
+        },
+        close_prices={},
+        bundle=_UtilityOrderedPredictor(),
+        initial_cash=Decimal("100000"),
+        max_positions=2,
+    )
+
+    assert result["counts"]["ordersPlanned"] == 1
+    assert result["trades"][0]["instrumentId"] == "SH.600002"
+    assert result["trades"][0]["rankPosition"] == 2
 
 
 def test_capacity_gate_limits_scope_instead_of_rejecting_small_accounts():

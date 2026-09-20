@@ -121,6 +121,14 @@ def _predict_candidate(bundle, candidate: dict, scenario: dict) -> dict:
             result["utilityAt10BpsStress"]
             > float(result["selectionThreshold"])
         )
+        try:
+            result["dailySelectionLimit"] = int(result["dailySelectionLimit"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise QuantModelError(
+                "ACTION_VALUE_DAILY_SELECTION_LIMIT_INVALID"
+            ) from exc
+        if result["dailySelectionLimit"] <= 0:
+            raise QuantModelError("ACTION_VALUE_DAILY_SELECTION_LIMIT_INVALID")
         return result
     predictions = bundle.predict_matrix(
         base_values=[candidate["baseFeatures"]],
@@ -131,6 +139,7 @@ def _predict_candidate(bundle, candidate: dict, scenario: dict) -> dict:
         result["expectedNetReturnGivenFill"] - float(STRESS_COST)
     )
     result["selectionThreshold"] = 0.0
+    result["dailySelectionLimit"] = None
     result["modelActionable"] = result["utilityAt10BpsStress"] > 0
     result["family"] = "legacy-quant-bundle"
     return result
@@ -252,6 +261,7 @@ def replay_account(
             row["instrumentId"] for row in positions
         } | {row["candidate"]["instrumentId"] for row in pending}
         available_slots = max_positions - len(active)
+        opportunities = []
         for candidate in sorted(candidates, key=lambda row: row["rankPosition"]):
             if not candidate.get("path"):
                 counters["unavailablePath"] += 1
@@ -280,6 +290,63 @@ def replay_account(
                 )
                 counters[counter] += 1
                 continue
+            opportunities.append(
+                {
+                    "candidate": candidate,
+                    "scenario": scenario,
+                    "reservation": reservation,
+                    "prediction": prediction,
+                }
+            )
+
+        limits = {
+            opportunity["prediction"]["dailySelectionLimit"]
+            for opportunity in opportunities
+            if opportunity["prediction"]["dailySelectionLimit"] is not None
+        }
+        if len(limits) > 1:
+            raise QuantModelError("ACTION_VALUE_DAILY_SELECTION_LIMIT_MISMATCH")
+        daily_limit = next(iter(limits), max_positions)
+        opportunities.sort(
+            key=lambda row: (
+                -row["prediction"]["utilityAt10BpsStress"],
+                row["candidate"]["rankPosition"],
+                row["candidate"]["instrumentId"],
+            )
+        )
+        for index, opportunity in enumerate(opportunities):
+            if index >= daily_limit:
+                counters["dailySelectionLimit"] += 1
+                continue
+            if available_slots <= 0:
+                counters["positionLimit"] += 1
+                continue
+            candidate = opportunity["candidate"]
+            if candidate["instrumentId"] in active:
+                counters["duplicatePosition"] += 1
+                continue
+            scenario = opportunity["scenario"]
+            reservation = opportunity["reservation"]
+            prediction = opportunity["prediction"]
+            if reservation > planning_cash:
+                target = _target_scenario(
+                    candidate,
+                    slot_budget=slot_budget,
+                    available_cash=planning_cash,
+                )
+                if target is None:
+                    counters["cashConstraint"] += 1
+                    continue
+                scenario, reservation = target
+                prediction = _predict_candidate(bundle, candidate, scenario)
+                if not prediction["modelActionable"]:
+                    counter = (
+                        "modelOutOfDomain"
+                        if prediction.get("status") == "OOD"
+                        else "modelGateRejected"
+                    )
+                    counters[counter] += 1
+                    continue
             pending.append(
                 {
                     "entryDate": candidate["path"]["entryDate"],
@@ -767,8 +834,9 @@ def write_action_value_account_backtest(
             "sameDayCashReuse": "BUYS_BEFORE_EXITS",
             "modelGate": (
                 "expectedNetReturnOnRequestedNotional"
-                "-0.001*expectedFillFraction>selectionThreshold"
+                "-0.001*expectedFillFraction>0; then calibrated daily Top-K"
             ),
+            "candidatePriority": "PREDICTED_UTILITY_DESCENDING_STABLE",
             "stressCostBps": 10,
             "predictionMode": "STRICT_OUT_OF_FOLD",
         },
