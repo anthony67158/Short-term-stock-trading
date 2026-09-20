@@ -75,6 +75,7 @@ def main():
     parser.add_argument("--label-root", type=Path)
     parser.add_argument("--position-root", type=Path)
     parser.add_argument("--ranking-root", type=Path)
+    parser.add_argument("--factor-root", type=Path)
     parser.add_argument("--ranking-model-root", type=Path)
     parser.add_argument("--position-model-root", type=Path)
     parser.add_argument("--model-root", type=Path)
@@ -119,6 +120,11 @@ def main():
     parser.add_argument("--max-windows", type=positive_int)
     parser.add_argument("--max-sessions", type=positive_int, default=120)
     parser.add_argument("--max-iterations", type=positive_int, default=120)
+    parser.add_argument(
+        "--feature-set",
+        choices=["technical", "factor", "fusion"],
+        default="technical",
+    )
     parser.add_argument("--minimum-matured-samples", type=positive_int, default=2000)
     parser.add_argument("--top-n", type=positive_int, default=10)
     parser.add_argument("--sample", action="append", type=cross_source_sample)
@@ -850,15 +856,24 @@ def main():
             episode_root = external_dataset_root(args.episode_root)
             label_root = external_dataset_root(args.label_root)
             ranking_root = external_dataset_root(args.ranking_root)
+            factor_root = (
+                external_dataset_root(args.factor_root)
+                if args.factor_root
+                else None
+            )
             output_root = external_dataset_root(args.output)
         except ValueError as exc:
             parser.error(str(exc))
+        if args.feature_set != "technical" and factor_root is None:
+            parser.error("factor-root is required for factor and fusion")
         print(
             json.dumps(
                 write_action_value_experiment(
                     episode_dataset_root=episode_root,
                     label_dataset_root=label_root,
                     ranking_dataset_root=ranking_root,
+                    factor_dataset_root=factor_root,
+                    feature_set=args.feature_set,
                     output_root=output_root,
                     config=ActionValueWalkForwardConfig(
                         iterations=args.max_iterations,

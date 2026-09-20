@@ -28,6 +28,8 @@ def write_action_value_experiment(
     label_dataset_root: Path,
     ranking_dataset_root: Path,
     output_root: Path,
+    factor_dataset_root: Path | None = None,
+    feature_set: str = "technical",
     config: ActionValueWalkForwardConfig | None = None,
 ) -> dict:
     output_root = output_root.expanduser().resolve()
@@ -38,6 +40,8 @@ def write_action_value_experiment(
         episode_dataset_root=episode_dataset_root,
         label_dataset_root=label_dataset_root,
         ranking_dataset_root=ranking_dataset_root,
+        factor_dataset_root=factor_dataset_root,
+        feature_set=feature_set,
     )
     result = run_action_value_walk_forward(training, config=config)
     output_root.mkdir(parents=True, exist_ok=False)
@@ -63,6 +67,7 @@ def write_action_value_experiment(
         "evaluation": report_path.name,
         "evaluationSha256": _file_sha256(report_path),
         "foldArtifacts": artifacts,
+        "featureSet": feature_set,
         "featureNames": list(training.feature_names),
         "lineage": lineage,
         "gate": result.report["gate"],
