@@ -83,6 +83,7 @@ def test_calibration_uses_held_out_rows_and_preserves_non_crossing_quantiles():
     predictions = calibration.predict(data.features[~calibration_mask])
 
     assert calibration.selection_threshold >= 0
+    assert calibration.requested_return_scale in {0, 0.25, 0.5, 0.75, 1}
     assert set(calibration.probability_calibrators) == {
         "pAnyFill",
         "pFullFillGivenFill",

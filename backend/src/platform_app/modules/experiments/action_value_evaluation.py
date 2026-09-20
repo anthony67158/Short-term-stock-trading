@@ -28,6 +28,7 @@ PROBABILITY_TARGETS = {
     "stopHazardGivenFill": ("stop_hazard_given_fill", True),
 }
 DAILY_SELECTION_LIMITS = (1, 3, 5, 10)
+RETURN_SHRINKAGE_FACTORS = (0.0, 0.25, 0.5, 0.75, 1.0)
 
 
 class ActionValueEvaluationError(ValueError):
@@ -42,6 +43,7 @@ class ActionValueCalibration:
     conditional_return_offset: float
     requested_return_offset: float
     requested_return_baseline: float
+    requested_return_scale: float
     quantile_location_offset: float
     conformal_correction: float
     selection_threshold: float
@@ -62,9 +64,14 @@ class ActionValueCalibration:
             predictions["expectedNetReturnGivenFill"]
             + self.conditional_return_offset
         )
-        predictions["expectedNetReturnOnRequestedNotional"] = (
+        requested_return = (
             predictions["expectedNetReturnOnRequestedNotional"]
             + self.requested_return_offset
+        )
+        predictions["expectedNetReturnOnRequestedNotional"] = (
+            self.requested_return_baseline
+            + self.requested_return_scale
+            * (requested_return - self.requested_return_baseline)
         )
         predictions["hurdleExpectedNetReturnOnRequestedNotional"] = (
             predictions["pAnyFill"]
@@ -172,6 +179,25 @@ def fit_action_value_calibration(
             weights=weights,
         )
     )
+    requested_baseline = _weighted_median(requested_actual, weights)
+    requested_centered = (
+        raw["expectedNetReturnOnRequestedNotional"] + requested_offset
+    )
+    requested_scale = min(
+        RETURN_SHRINKAGE_FACTORS,
+        key=lambda scale: float(
+            np.average(
+                np.abs(
+                    requested_actual
+                    - (
+                        requested_baseline
+                        + scale * (requested_centered - requested_baseline)
+                    )
+                ),
+                weights=weights,
+            )
+        ),
+    )
     quantile_location_offset = _weighted_median(
         conditional_actual - raw["q50GivenFill"][conditional],
         conditional_weights,
@@ -189,7 +215,8 @@ def fit_action_value_calibration(
         probability_baselines=baselines,
         conditional_return_offset=conditional_offset,
         requested_return_offset=requested_offset,
-        requested_return_baseline=_weighted_median(requested_actual, weights),
+        requested_return_baseline=requested_baseline,
+        requested_return_scale=requested_scale,
         quantile_location_offset=quantile_location_offset,
         conformal_correction=conformal_correction,
         selection_threshold=0.0,

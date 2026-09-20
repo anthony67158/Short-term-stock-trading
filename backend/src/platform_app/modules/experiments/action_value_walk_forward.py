@@ -543,6 +543,7 @@ def run_action_value_walk_forward(
                     "method": config.calibration_method,
                     "selectionThreshold": calibration.selection_threshold,
                     "dailySelectionLimit": calibration.daily_selection_limit,
+                    "requestedReturnScale": calibration.requested_return_scale,
                     "conformalCorrection": calibration.conformal_correction,
                 },
                 "evaluation": evaluation,
