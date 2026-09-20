@@ -16,45 +16,35 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: backend/pyproject.toml
-
-      - name: Install probe dependencies
-        run: python -m pip install "httpx>=0.28,<1" "pydantic-settings>=2.8,<3"
-
       - name: Probe historical data capabilities
-        env:
-          PYTHONPATH: ${{ github.workspace }}/backend/src
         run: |
           mkdir -p audit-output
-          python <<'PY'
+          python3 <<'PY'
           import hashlib
           import json
           import os
           import time
+          import urllib.error
+          import urllib.request
 
-          from platform_app.adapters.market_tushare import (
-              DAILY_FIELDS,
-              MINUTE_FIELDS,
-              STOCK_BASIC_FIELDS,
-              TushareClient,
+          token = os.environ["PLATFORM_MARKET_DATA_API_KEY"]
+          daily_fields = "ts_code,trade_date,open,high,low,close,pre_close,vol,amount"
+          minute_fields = "ts_code,trade_time,open,close,high,low,vol,amount"
+          stock_fields = (
+              "ts_code,symbol,name,market,exchange,list_status,list_date,delist_date"
           )
-          from platform_app.config import settings
 
           probes = (
-              ("stock_basic", {"ts_code": "600519.SH", "list_status": "L"}, STOCK_BASIC_FIELDS),
+              ("stock_basic", {"ts_code": "600519.SH", "list_status": "L"}, stock_fields),
               ("trade_cal", {"exchange": "SSE", "start_date": "20250901", "end_date": "20250905"},
                "exchange,cal_date,is_open,pretrade_date"),
               ("daily", {"ts_code": "600519.SH", "start_date": "20250901", "end_date": "20250905"},
-               DAILY_FIELDS),
+               daily_fields),
               ("adj_factor", {"ts_code": "600519.SH", "start_date": "20250901",
                               "end_date": "20250905"}, "ts_code,trade_date,adj_factor"),
               ("stk_mins", {"ts_code": "600519.SH", "freq": "5min",
                             "start_date": "2025-09-01 09:30:00",
-                            "end_date": "2025-09-05 15:00:00"}, MINUTE_FIELDS),
+                            "end_date": "2025-09-05 15:00:00"}, minute_fields),
           )
           endpoints = (
               "https://api.tushare.pro",
@@ -62,19 +52,32 @@ jobs:
           )
           report = {"schemaVersion": "market-data-capability-probe.v1", "endpoints": []}
           for endpoint in endpoints:
-              os.environ["PLATFORM_MARKET_DATA_BASE_URL"] = endpoint
-              settings.cache_clear()
               result = {"endpoint": endpoint, "probes": []}
-              try:
-                  client = TushareClient()
-              except Exception as error:
-                  result["clientError"] = str(error)
-                  report["endpoints"].append(result)
-                  continue
               for api_name, params, fields in probes:
                   started = time.monotonic()
                   try:
-                      rows = client.rows(api_name, params, fields)
+                      body = json.dumps({
+                          "api_name": api_name,
+                          "token": token,
+                          "params": params,
+                          "fields": fields,
+                      }).encode()
+                      request = urllib.request.Request(
+                          endpoint,
+                          data=body,
+                          headers={"Content-Type": "application/json"},
+                          method="POST",
+                      )
+                      with urllib.request.urlopen(request, timeout=40) as response:
+                          payload = json.loads(response.read())
+                      if payload.get("code") != 0:
+                          raise RuntimeError(f"API_CODE_{payload.get('code')}")
+                      data = payload.get("data") or {}
+                      columns = data.get("fields")
+                      items = data.get("items")
+                      if not isinstance(columns, list) or not isinstance(items, list):
+                          raise RuntimeError("RESPONSE_INVALID")
+                      rows = [dict(zip(columns, item, strict=True)) for item in items]
                       canonical = json.dumps(
                           rows,
                           ensure_ascii=False,
@@ -89,11 +92,16 @@ jobs:
                           "payloadSha256": hashlib.sha256(canonical).hexdigest(),
                       })
                   except Exception as error:
+                      code = (
+                          f"HTTP_{error.code}"
+                          if isinstance(error, urllib.error.HTTPError)
+                          else type(error).__name__
+                      )
                       result["probes"].append({
                           "apiName": api_name,
                           "status": "ERROR",
                           "elapsedSeconds": round(time.monotonic() - started, 3),
-                          "errorCode": str(error),
+                          "errorCode": code,
                       })
               report["endpoints"].append(result)
           with open("audit-output/probe.json", "w", encoding="utf-8") as stream:
