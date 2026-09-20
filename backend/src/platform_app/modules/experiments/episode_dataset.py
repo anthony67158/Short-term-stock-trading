@@ -595,10 +595,16 @@ class EpisodeDataset:
                         (row["instrument_id"], row["trade_date"]),
                     )
                 ]
-                if row["attempt_count"] <= 0 or not attempts:
-                    raise EpisodeDatasetError("MINUTE_SOURCE_EXHAUSTION_WITHOUT_ATTEMPT")
+                independent_sources = {
+                    attempt["source_kind"] for attempt in attempts
+                }
+                if row["attempt_count"] < 2 or len(independent_sources) < 2:
+                    raise EpisodeDatasetError(
+                        "MINUTE_SOURCE_EXHAUSTION_INSUFFICIENT_INDEPENDENT_SOURCES"
+                    )
                 evidence = {
                     "attempts": attempts,
+                    "independentSources": sorted(independent_sources),
                     "operatorNote": note.strip(),
                     "terminalReason": row["reason"],
                 }

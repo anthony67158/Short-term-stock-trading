@@ -471,8 +471,16 @@ def test_source_exhaustion_is_audited_excluded_from_retry_and_sealable(tmp_path)
                 dataset,
                 instrument_id="SZ.000001",
                 trade_date=dates[1],
-                source_kind="TEST_SOURCE",
-                source_asset_sha256="source-response",
+                source_kind="TEST_SOURCE_PRIMARY",
+                source_asset_sha256="primary-response",
+                reason="MINUTE_SESSION_INCOMPLETE",
+            )
+            reject_minute_requirement(
+                dataset,
+                instrument_id="SZ.000001",
+                trade_date=dates[1],
+                source_kind="TEST_SOURCE_SECONDARY",
+                source_asset_sha256="secondary-response",
                 reason="MINUTE_SESSION_INCOMPLETE",
             )
 
@@ -510,7 +518,7 @@ def test_source_exhaustion_is_audited_excluded_from_retry_and_sealable(tmp_path)
     }
 
 
-def test_source_exhaustion_requires_recorded_attempt(tmp_path):
+def test_source_exhaustion_requires_two_independent_sources(tmp_path):
     market_root, dates = _sealed_market(tmp_path)
     with EpisodeDataset(
         tmp_path / "episodes",
@@ -521,16 +529,19 @@ def test_source_exhaustion_requires_recorded_attempt(tmp_path):
         _write_candidate(dataset, dates[0], dates[1])
         with MinuteRequirementBuilder(dataset) as builder:
             builder.build_partition(dates[0])
-        dataset.db.execute(
-            "UPDATE minute_requirements SET reason = 'MINUTE_SESSION_INCOMPLETE' "
-            "WHERE trade_date = ?",
-            (dates[1],),
-        )
-        dataset.db.commit()
+        with dataset.db:
+            reject_minute_requirement(
+                dataset,
+                instrument_id="SZ.000001",
+                trade_date=dates[1],
+                source_kind="TEST_SOURCE_PRIMARY",
+                source_asset_sha256="primary-response",
+                reason="MINUTE_SESSION_INCOMPLETE",
+            )
 
         with pytest.raises(
             EpisodeDatasetError,
-            match="MINUTE_SOURCE_EXHAUSTION_WITHOUT_ATTEMPT",
+            match="MINUTE_SOURCE_EXHAUSTION_INSUFFICIENT_INDEPENDENT_SOURCES",
         ):
             dataset.resolve_exhausted_minutes(
                 start_date=dates[1],
