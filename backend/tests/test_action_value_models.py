@@ -3,6 +3,7 @@ import pytest
 
 from platform_app.modules.experiments.action_value_models import (
     ACTION_VALUE_FAMILIES,
+    MODEL_TARGETS,
     ActionValueModelError,
     fit_action_value_candidate,
 )
@@ -83,6 +84,9 @@ def test_all_tree_families_fit_the_same_hurdle_contract(family):
     assert candidate.family == family
     assert candidate.feature_names == data.feature_names
     assert candidate.base_feature_count == 5
+    assert candidate.model_families == {
+        name: family for name in MODEL_TARGETS
+    }
     assert candidate.models["pAnyFill"].n_features_in_ == 5
     assert candidate.models["stopHazardGivenFill"].n_features_in_ == 5
     assert set(candidate.models) == {
@@ -127,6 +131,29 @@ def test_all_tree_families_fit_the_same_hurdle_contract(family):
     assert np.all(predictions["pFullFill"] <= predictions["pAnyFill"])
     assert np.all(predictions["q10GivenFill"] <= predictions["q50GivenFill"])
     assert np.all(predictions["q50GivenFill"] <= predictions["q90GivenFill"])
+
+
+def test_candidate_supports_target_specific_families():
+    data = _training_data()
+    model_families = {name: "hgb" for name in MODEL_TARGETS}
+    model_families["pAnyFill"] = "lightgbm"
+
+    candidate = fit_action_value_candidate(
+        data,
+        data.dates <= 20260145,
+        family="hgb",
+        model_families=model_families,
+        iterations=2,
+        min_samples_leaf=4,
+        threads=1,
+    )
+
+    assert candidate.family == "mixed"
+    assert candidate.model_families == model_families
+    assert candidate.models["pAnyFill"].__class__.__name__ == "LGBMClassifier"
+    assert candidate.models["pWinGivenFill"].__class__.__name__ == (
+        "HistGradientBoostingClassifier"
+    )
 
 
 def test_candidate_rejects_feature_contract_mismatch():

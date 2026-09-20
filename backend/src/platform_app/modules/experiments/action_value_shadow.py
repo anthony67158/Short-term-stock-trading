@@ -17,6 +17,7 @@ from platform_app.modules.experiments.action_value_evaluation import (
 )
 from platform_app.modules.experiments.action_value_models import (
     ACTION_VALUE_FAMILIES,
+    MODEL_TARGETS,
     fit_action_value_candidate,
 )
 
@@ -143,13 +144,19 @@ def fit_action_value_shadow(
     if not account_gate.get("passed"):
         raise ActionValueShadowError("ACTION_VALUE_ACCOUNT_GATE_FAILED")
     config = report["protocol"]
-    selected = Counter(
-        fold["selectedFamily"] for fold in report["foldReports"]
-    )
-    family = min(
-        selected,
-        key=lambda name: (-selected[name], ACTION_VALUE_FAMILIES.index(name)),
-    )
+    selected_families = {}
+    for target in MODEL_TARGETS:
+        counts = Counter(
+            fold.get("selectedFamilies", {}).get(
+                target,
+                fold["selectedFamily"],
+            )
+            for fold in report["foldReports"]
+        )
+        selected_families[target] = min(
+            counts,
+            key=lambda name: (-counts[name], ACTION_VALUE_FAMILIES.index(name)),
+        )
     unique_dates = np.unique(data.dates)
     calibration_sessions = int(config["calibration_sessions"])
     purge_sessions = int(config["purge_sessions"])
@@ -162,7 +169,8 @@ def fit_action_value_shadow(
     candidate = fit_action_value_candidate(
         data,
         train,
-        family=family,
+        family=selected_families["expectedNetReturnOnRequestedNotional"],
+        model_families=selected_families,
         iterations=int(config["iterations"]),
         min_samples_leaf=int(config["min_samples_leaf"]),
         threads=int(config["threads"]),

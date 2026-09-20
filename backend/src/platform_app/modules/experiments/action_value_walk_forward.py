@@ -4,7 +4,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 
 import numpy as np
-from sklearn.metrics import mean_absolute_error
+from sklearn.metrics import mean_absolute_error, mean_pinball_loss, roc_auc_score
 
 from platform_app.modules.experiments.action_value_evaluation import (
     PROBABILITY_TARGETS,
@@ -16,11 +16,13 @@ from platform_app.modules.experiments.action_value_evaluation import (
 )
 from platform_app.modules.experiments.action_value_models import (
     ACTION_VALUE_FAMILIES,
+    MODEL_TARGETS,
     ActionValueCandidate,
     fit_action_value_candidate,
 )
 from platform_app.modules.experiments.action_value_training import (
     ActionValueTrainingData,
+    scenario_weights,
 )
 from platform_app.modules.experiments.action_value_validation import (
     ActionValueFold,
@@ -136,6 +138,85 @@ def _candidate_selection_loss(data, mask, predictions):
     )
     losses.append(mae / max(scale, 1e-8))
     return float(np.mean(losses))
+
+
+def _candidate_target_losses(data, mask, predictions):
+    selected = np.asarray(mask, dtype=bool)
+
+    def weights(local):
+        values = scenario_weights(
+            data.dates[local],
+            data.episodes[local],
+        )
+        return values / values.mean()
+
+    def auc_loss(actual, predicted, local):
+        if len(np.unique(actual[local])) != 2:
+            return float("inf")
+        return 1 - float(
+            roc_auc_score(
+                actual[local],
+                predicted[local[selected]],
+                sample_weight=weights(local),
+            )
+        )
+
+    conditional = selected & data.conditional_available
+    conditional_local = data.conditional_available[selected]
+    conditional_weights = weights(conditional)
+    conditional_actual = data.conditional_return[conditional]
+    requested_actual = data.net_return_on_requested_notional[selected]
+    requested_weights = weights(selected)
+    return {
+        "pAnyFill": auc_loss(data.p_any_fill, predictions["pAnyFill"], selected),
+        "fillFractionGivenFill": float(
+            mean_absolute_error(
+                data.fill_fraction[conditional],
+                predictions["fillFractionGivenFill"][conditional_local],
+                sample_weight=conditional_weights,
+            )
+        ),
+        "pFullFillGivenFill": auc_loss(
+            data.p_full_fill,
+            predictions["pFullFillGivenFill"],
+            conditional,
+        ),
+        "pWinGivenFill": auc_loss(
+            data.p_win_given_fill,
+            predictions["pWinGivenFill"],
+            conditional,
+        ),
+        "stopHazardGivenFill": auc_loss(
+            data.stop_hazard_given_fill,
+            predictions["stopHazardGivenFill"],
+            conditional,
+        ),
+        "expectedNetReturnGivenFill": float(
+            mean_absolute_error(
+                conditional_actual,
+                predictions["expectedNetReturnGivenFill"][conditional_local],
+                sample_weight=conditional_weights,
+            )
+        ),
+        "expectedNetReturnOnRequestedNotional": float(
+            mean_absolute_error(
+                requested_actual,
+                predictions["expectedNetReturnOnRequestedNotional"],
+                sample_weight=requested_weights,
+            )
+        ),
+        **{
+            name: float(
+                mean_pinball_loss(
+                    conditional_actual,
+                    predictions[f"{name}GivenFill"][conditional_local],
+                    alpha=quantile,
+                    sample_weight=conditional_weights,
+                )
+            )
+            for name, quantile in (("q10", 0.1), ("q50", 0.5), ("q90", 0.9))
+        },
+    }
 
 
 def _weighted_fold_metric(folds, section, metric, weight):
@@ -335,6 +416,17 @@ def _aggregate_fold_reports(folds, config):
             "selectedFamilyCounts": dict(
                 sorted(Counter(fold["selectedFamily"] for fold in folds).items())
             ),
+            "selectedModelFamilyCounts": {
+                target: dict(
+                    sorted(
+                        Counter(
+                            fold["selectedFamilies"][target]
+                            for fold in folds
+                        ).items()
+                    )
+                )
+                for target in MODEL_TARGETS
+            },
         },
     }
 
@@ -373,7 +465,6 @@ def run_action_value_walk_forward(
             purge_sessions=config.purge_sessions,
         )
         trials = []
-        candidates = {}
         for family in config.candidate_families:
             candidate = fit_action_value_candidate(
                 data,
@@ -383,28 +474,43 @@ def run_action_value_walk_forward(
                 min_samples_leaf=config.min_samples_leaf,
                 threads=config.threads,
             )
+            predictions = candidate.predict(data.features[inner_validation])
             loss = _candidate_selection_loss(
                 data,
                 inner_validation,
-                candidate.predict(data.features[inner_validation]),
+                predictions,
             )
-            candidates[family] = candidate
-            trials.append({"family": family, "selectionLoss": loss})
-        selected_family = min(
-            config.candidate_families,
-            key=lambda family: (
-                next(
-                    trial["selectionLoss"]
-                    for trial in trials
-                    if trial["family"] == family
+            target_losses = _candidate_target_losses(
+                data,
+                inner_validation,
+                predictions,
+            )
+            trials.append(
+                {
+                    "family": family,
+                    "selectionLoss": loss,
+                    "targetSelectionLosses": target_losses,
+                }
+            )
+        selected_families = {
+            target: min(
+                config.candidate_families,
+                key=lambda family: (
+                    next(
+                        trial["targetSelectionLosses"][target]
+                        for trial in trials
+                        if trial["family"] == family
+                    ),
+                    config.candidate_families.index(family),
                 ),
-                config.candidate_families.index(family),
-            ),
-        )
+            )
+            for target in MODEL_TARGETS
+        }
         candidate = fit_action_value_candidate(
             data,
             outer_train,
-            family=selected_family,
+            family=selected_families["expectedNetReturnOnRequestedNotional"],
+            model_families=selected_families,
             iterations=config.iterations,
             min_samples_leaf=config.min_samples_leaf,
             threads=config.threads,
@@ -430,7 +536,8 @@ def run_action_value_walk_forward(
             {
                 "fold": fold.fold,
                 "split": fold.as_dict(),
-                "selectedFamily": selected_family,
+                "selectedFamily": candidate.family,
+                "selectedFamilies": selected_families,
                 "innerTrials": trials,
                 "calibration": {
                     "method": config.calibration_method,

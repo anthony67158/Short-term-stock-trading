@@ -20,6 +20,18 @@ SCENARIO_FEATURE_SUFFIX = (
     "logTargetToMedianAmount",
 )
 BASE_FEATURE_TARGETS = {"pAnyFill", "stopHazardGivenFill"}
+MODEL_TARGETS = (
+    "pAnyFill",
+    "fillFractionGivenFill",
+    "pFullFillGivenFill",
+    "pWinGivenFill",
+    "stopHazardGivenFill",
+    "expectedNetReturnGivenFill",
+    "expectedNetReturnOnRequestedNotional",
+    "q10",
+    "q50",
+    "q90",
+)
 
 
 class ActionValueModelError(ValueError):
@@ -31,6 +43,7 @@ class ActionValueCandidate:
     family: str
     feature_names: tuple[str, ...]
     base_feature_count: int
+    model_families: dict[str, str]
     models: dict[str, Any]
 
     def predict(self, features) -> dict[str, np.ndarray]:
@@ -226,11 +239,19 @@ def fit_action_value_candidate(
     train_mask,
     *,
     family: str,
+    model_families: dict[str, str] | None = None,
     iterations: int = 120,
     min_samples_leaf: int = 100,
     threads: int = 2,
 ) -> ActionValueCandidate:
-    if family not in ACTION_VALUE_FAMILIES:
+    families = {name: family for name in MODEL_TARGETS}
+    if model_families is not None:
+        families.update(model_families)
+    if (
+        family not in ACTION_VALUE_FAMILIES
+        or set(families) != set(MODEL_TARGETS)
+        or any(name not in ACTION_VALUE_FAMILIES for name in families.values())
+    ):
         raise ActionValueModelError("ACTION_VALUE_MODEL_FAMILY_UNSUPPORTED")
     train = np.asarray(train_mask, dtype=bool)
     if (
@@ -260,7 +281,7 @@ def fit_action_value_candidate(
     }
     models = {
         name: _fit_classifier(
-            family,
+            families[name],
             (
                 data.features[mask, :base_feature_count]
                 if name in BASE_FEATURE_TARGETS
@@ -285,7 +306,7 @@ def fit_action_value_candidate(
     }
     for name, (target, mask, robust) in regression_targets.items():
         models[name] = _fit_regressor(
-            family,
+            families[name],
             data.features[mask],
             target[mask],
             weights(mask),
@@ -298,7 +319,7 @@ def fit_action_value_candidate(
     conditional_y = data.conditional_return[conditional]
     for name, quantile in (("q10", 0.1), ("q50", 0.5), ("q90", 0.9)):
         models[name] = _fit_regressor(
-            family,
+            families[name],
             conditional_x,
             conditional_y,
             weights(conditional),
@@ -307,9 +328,11 @@ def fit_action_value_candidate(
             threads=threads,
             quantile=quantile,
         )
+    selected_families = set(families.values())
     return ActionValueCandidate(
-        family=family,
+        family=family if len(selected_families) == 1 else "mixed",
         feature_names=data.feature_names,
         base_feature_count=base_feature_count,
+        model_families=families,
         models=models,
     )
