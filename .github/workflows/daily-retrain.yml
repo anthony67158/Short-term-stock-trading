@@ -1,93 +1,165 @@
-name: daily-learning-challengers
+name: action-value-data-smoke
 
 on:
-  schedule:
-    # UTC Sunday-Friday 17:15 = Beijing Monday-Saturday 01:15.
-    - cron: "15 17 * * 0-5"
   workflow_dispatch: {}
 
 concurrency:
-  group: daily-learning-challengers
+  group: action-value-data-smoke
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  train:
+  market-smoke:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 120
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PIP_DEFAULT_TIMEOUT: "90"
+      PLATFORM_MARKET_DATA_ENABLED: "true"
+      PLATFORM_MARKET_DATA_BASE_URL: https://ts.gyzcloud.top/api
+      PLATFORM_MARKET_DATA_API_KEY: ${{ secrets.TUSHARE_TOKEN }}
       OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
       OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      DATA_ROOT: /mnt/action-value-data
+      DATASET_ID: action-value-smoke-market-202506-v1
+      START_DATE: "20250603"
+      END_DATE: "20250630"
     steps:
       - uses: actions/checkout@v6
 
-      - name: Use Node.js 22
-        uses: actions/setup-node@v6
-        with:
-          node-version: "22"
-          cache: npm
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Verify immutable learning contracts
-        run: |
-          node --test \
-            test/learning-store.test.js \
-            test/learning-capture.test.js \
-            test/learning-settlement.test.js \
-            test/learning-training-view.test.js
-
-      - name: Use Python 3.11
+      - name: Use Python 3.12
         uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: qlib-service/requirements-ci.txt
+          python-version: "3.12"
 
-      - name: Install locked training dependencies
-        working-directory: qlib-service
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install locked backend and operations dependencies
+        working-directory: backend
+        run: uv sync --frozen --group ops --dev
+
+      - name: Verify market transport and checkpoint contracts
+        working-directory: backend
         run: |
-          python -m pip install --retries 5 -r requirements-ci.txt
-          python -m pip check
+          uv run --group ops pytest \
+            tests/test_market_tushare.py \
+            tests/test_retraining_dataset_store.py \
+            -q
+          uv run --group ops ruff check \
+            src/platform_app/adapters/market_tushare.py \
+            src/platform_app/modules/experiments/retraining_dataset_store.py
 
-      - name: Verify challenger training gates
-        working-directory: qlib-service
-        run: python -m unittest test_learning_pipeline.py
-
-      - name: Download latest redacted training view
-        working-directory: qlib-service
+      - name: Restore latest immutable smoke checkpoint
+        working-directory: backend
         run: |
-          mkdir -p ../learning-artifacts
-          python learning_pipeline.py download \
-            --output ../learning-artifacts/training-view.json
+          sudo mkdir -p "$DATA_ROOT"
+          sudo chown "$USER:$USER" "$DATA_ROOT"
+          uv run --group ops python -m \
+            platform_app.modules.experiments.retraining_dataset_store restore \
+            --root "$DATA_ROOT/market" \
+            --scope smoke \
+            --kind market \
+            --dataset-id "$DATASET_ID" \
+            --output "$RUNNER_TEMP/restore-report.json"
 
-      - name: Train and gate challengers
-        working-directory: qlib-service
+      - name: Build and seal twenty-day market smoke dataset
+        working-directory: backend
         run: |
-          python learning_pipeline.py train \
-            --view ../learning-artifacts/training-view.json \
-            --output ../learning-artifacts/run
-          cat ../learning-artifacts/run/report.json
+          set -Eeuo pipefail
+          checkpoint() {
+            uv run --group ops python -m \
+              platform_app.modules.experiments.retraining_dataset_store checkpoint \
+              --root "$DATA_ROOT/market" \
+              --scope smoke \
+              --kind market \
+              --dataset-id "$DATASET_ID" \
+              --output "$RUNNER_TEMP/checkpoint-report.json"
+          }
+          checkpoint_on_exit() {
+            status=$?
+            if [ -f "$DATA_ROOT/market/market.sqlite3" ]; then
+              checkpoint || true
+            fi
+            exit "$status"
+          }
+          trap checkpoint_on_exit EXIT
 
-      - name: Upload immutable challenger run
-        working-directory: qlib-service
+          if [ -f "$DATA_ROOT/market/manifest.json" ]; then
+            checkpoint
+            trap - EXIT
+            exit 0
+          fi
+
+          uv run platform-cli build-market-dataset \
+            --dataset-root "$DATA_ROOT/market" \
+            --dataset-id "$DATASET_ID" \
+            --stage reference \
+            --start-date "$START_DATE" \
+            --end-date "$END_DATE"
+          checkpoint
+
+          uv run platform-cli build-market-dataset \
+            --dataset-root "$DATA_ROOT/market" \
+            --dataset-id "$DATASET_ID" \
+            --stage names \
+            --start-date "$START_DATE" \
+            --end-date "$END_DATE"
+          checkpoint
+
+          uv run platform-cli build-market-dataset \
+            --dataset-root "$DATA_ROOT/market" \
+            --dataset-id "$DATASET_ID" \
+            --stage daily \
+            --start-date "$START_DATE" \
+            --end-date "$END_DATE"
+          checkpoint
+
+          uv run platform-cli build-market-dataset \
+            --dataset-root "$DATA_ROOT/market" \
+            --dataset-id "$DATASET_ID" \
+            --stage block-trades \
+            --start-date "$START_DATE" \
+            --end-date "$END_DATE"
+          checkpoint
+
+          uv run platform-cli build-market-dataset \
+            --dataset-root "$DATA_ROOT/market" \
+            --dataset-id "$DATASET_ID" \
+            --stage seal
+          checkpoint
+          trap - EXIT
+
+      - name: Audit sealed market smoke dataset
+        working-directory: backend
         run: |
-          python learning_pipeline.py upload \
-            --directory ../learning-artifacts/run
+          uv run platform-cli audit-market-dataset \
+            --dataset-root "$DATA_ROOT/market" \
+            --output "$RUNNER_TEMP/market-audit.json"
+          uv run --group ops python -m \
+            platform_app.modules.experiments.retraining_dataset_store audit \
+            --root "$DATA_ROOT/market" \
+            --scope smoke \
+            --kind market \
+            --dataset-id "$DATASET_ID" \
+            --output "$RUNNER_TEMP/final-report.json"
 
-      - name: Upload diagnostics
+      - name: Upload smoke diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: learning-challenger-${{ github.run_id }}
+          name: action-value-market-smoke-${{ github.run_id }}
           path: |
-            learning-artifacts/run/report.json
+            ${{ runner.temp }}/restore-report.json
+            ${{ runner.temp }}/checkpoint-report.json
+            ${{ runner.temp }}/market-audit.json
+            ${{ runner.temp }}/final-report.json
           if-no-files-found: warn
           retention-days: 30
