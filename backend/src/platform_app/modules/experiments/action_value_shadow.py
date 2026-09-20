@@ -87,6 +87,7 @@ class ActionValueShadowModel:
             "decisionDate": str(decision_date),
             "family": self.candidate.family,
             "selectionThreshold": self.calibration.selection_threshold,
+            "dailySelectionLimit": self.calibration.daily_selection_limit,
             "maximumSupportedCashCny": self.maximum_supported_cash_cny,
             **{name: float(values[0]) for name, values in predictions.items()},
         }

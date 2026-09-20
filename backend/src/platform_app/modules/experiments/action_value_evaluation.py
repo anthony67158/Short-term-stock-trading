@@ -27,6 +27,7 @@ PROBABILITY_TARGETS = {
     "pWinGivenFill": ("p_win_given_fill", True),
     "stopHazardGivenFill": ("stop_hazard_given_fill", True),
 }
+DAILY_SELECTION_LIMITS = (1, 3, 5, 10)
 
 
 class ActionValueEvaluationError(ValueError):
@@ -44,6 +45,7 @@ class ActionValueCalibration:
     quantile_location_offset: float
     conformal_correction: float
     selection_threshold: float
+    daily_selection_limit: int
     stress_cost: float
 
     def predict(self, features) -> dict[str, np.ndarray]:
@@ -87,6 +89,37 @@ class ActionValueCalibration:
 
 def _weighted_median(values, weights):
     return weighted_quantile(values, weights, 0.5)
+
+
+def _daily_top_k_mask(dates, utility, *, limit: int, threshold: float) -> np.ndarray:
+    dates = np.asarray(dates)
+    utility = np.asarray(utility, dtype=np.float64)
+    if (
+        dates.shape != utility.shape
+        or dates.ndim != 1
+        or limit <= 0
+        or not np.isfinite(threshold)
+        or not np.all(np.isfinite(utility))
+    ):
+        raise ActionValueEvaluationError("ACTION_VALUE_SELECTION_POLICY_INVALID")
+    selected = np.zeros(len(utility), dtype=bool)
+    for date in np.unique(dates):
+        eligible = np.flatnonzero((dates == date) & (utility > threshold))
+        order = np.argsort(-utility[eligible], kind="stable")[:limit]
+        selected[eligible[order]] = True
+    return selected
+
+
+def _mean_daily_utility(actual, weights, dates, selected) -> float:
+    daily = []
+    for date in np.unique(dates):
+        local = (dates == date) & selected
+        daily.append(
+            float(np.average(actual[local], weights=weights[local]))
+            if np.any(local)
+            else 0.0
+        )
+    return float(np.mean(daily))
 
 
 def fit_action_value_calibration(
@@ -156,6 +189,7 @@ def fit_action_value_calibration(
         quantile_location_offset=quantile_location_offset,
         conformal_correction=conformal_correction,
         selection_threshold=0.0,
+        daily_selection_limit=DAILY_SELECTION_LIMITS[0],
         stress_cost=stress_cost,
     )
     calibrated = fitted.predict(data.features[calibration])
@@ -164,23 +198,30 @@ def fit_action_value_calibration(
         - stress_cost * calibrated["expectedFillFraction"]
     )
     actual_utility = requested_actual - stress_cost * data.fill_fraction[calibration]
-    positive = predicted_utility[predicted_utility > 0]
-    thresholds = {0.0}
-    if len(positive):
-        thresholds.update(float(value) for value in np.quantile(positive, np.arange(0.1, 1, 0.1)))
-    best_threshold = 0.0
+    calibration_dates = data.dates[calibration]
+    best_limit = DAILY_SELECTION_LIMITS[0]
     best_score = float("-inf")
-    for threshold in sorted(thresholds):
-        selected = predicted_utility > threshold
+    for limit in DAILY_SELECTION_LIMITS:
+        selected = _daily_top_k_mask(
+            calibration_dates,
+            predicted_utility,
+            limit=limit,
+            threshold=0.0,
+        )
         if selected.sum() < minimum_selected:
             continue
-        score = float(np.average(actual_utility * selected, weights=weights))
+        score = _mean_daily_utility(
+            actual_utility,
+            weights,
+            calibration_dates,
+            selected,
+        )
         if score > best_score:
             best_score = score
-            best_threshold = threshold
+            best_limit = limit
     if not np.isfinite(best_score):
         raise ActionValueEvaluationError("ACTION_VALUE_SELECTION_SUPPORT_INSUFFICIENT")
-    return replace(fitted, selection_threshold=best_threshold)
+    return replace(fitted, daily_selection_limit=best_limit)
 
 
 def _expected_calibration_error(labels, probabilities, weights, bins=10):
@@ -308,11 +349,18 @@ def evaluate_action_value_predictions(
         requested_actual
         - calibration.stress_cost * data.fill_fraction[test]
     )
-    selected = predicted_utility > calibration.selection_threshold
     test_dates = data.dates[test]
+    selected = _daily_top_k_mask(
+        test_dates,
+        predicted_utility,
+        limit=calibration.daily_selection_limit,
+        threshold=calibration.selection_threshold,
+    )
     daily = []
+    selected_per_session = []
     for date in np.unique(test_dates):
         local = (test_dates == date) & selected
+        selected_per_session.append(int(local.sum()))
         daily.append(
             float(np.average(actual_utility[local], weights=weights[local]))
             if np.any(local)
@@ -360,6 +408,8 @@ def evaluate_action_value_predictions(
         },
         "selection": {
             "threshold": calibration.selection_threshold,
+            "dailyLimit": calibration.daily_selection_limit,
+            "maximumSelectedPerSession": max(selected_per_session, default=0),
             "samples": int(selected.sum()),
             "sessions": int(len(np.unique(test_dates[selected]))),
             "sampleCoverage": float(np.average(selected, weights=weights)),

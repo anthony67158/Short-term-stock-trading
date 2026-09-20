@@ -122,6 +122,37 @@ def test_evaluation_reports_probability_distribution_and_selection_confidence():
     ] > 0
 
 
+def test_evaluation_applies_frozen_daily_selection_limit():
+    data, candidate = _fixture()
+    calibration_mask = data.dates <= 20260120
+    test_mask = ~calibration_mask
+    calibration = fit_action_value_calibration(
+        candidate,
+        data,
+        calibration_mask,
+        minimum_selected=5,
+    )
+
+    report = evaluate_action_value_predictions(
+        data,
+        test_mask,
+        calibration.predict(data.features[test_mask]),
+        calibration=calibration,
+        bootstrap_block_sessions=5,
+        bootstrap_iterations=100,
+    )
+
+    assert calibration.daily_selection_limit in {1, 3, 5, 10}
+    assert (
+        report["selection"]["dailyLimit"]
+        == calibration.daily_selection_limit
+    )
+    assert (
+        report["selection"]["maximumSelectedPerSession"]
+        <= calibration.daily_selection_limit
+    )
+
+
 def test_release_gate_never_marks_a_development_candidate_ready():
     data, candidate = _fixture()
     calibration_mask = data.dates <= 20260120

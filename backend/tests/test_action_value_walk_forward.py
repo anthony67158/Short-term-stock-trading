@@ -156,6 +156,7 @@ def test_nested_walk_forward_selects_family_without_reading_outer_test_targets(
         scenario_values=data.features[row],
     )
     assert prediction["fold"] == 1
+    assert prediction["dailySelectionLimit"] in {1, 3, 5, 10}
     assert prediction["releaseStatus"] == "UNAVAILABLE"
     with pytest.raises(
         ActionValueWalkForwardError,
@@ -186,6 +187,7 @@ def test_nested_walk_forward_selects_family_without_reading_outer_test_targets(
     )
     assert prediction["status"] == "SHADOW"
     assert prediction["allowsNewRisk"] is False
+    assert prediction["dailySelectionLimit"] in {1, 3, 5, 10}
 
     outlier = data.features[supported_row].copy()
     outlier[0] = shadow.domain.upper_bounds[0] + 1

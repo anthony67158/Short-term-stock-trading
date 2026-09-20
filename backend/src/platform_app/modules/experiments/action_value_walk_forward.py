@@ -101,6 +101,7 @@ class WalkForwardActionValuePredictor:
         return {
             **{name: float(values[0]) for name, values in predictions.items()},
             "selectionThreshold": artifact.calibration.selection_threshold,
+            "dailySelectionLimit": artifact.calibration.daily_selection_limit,
             "family": artifact.candidate.family,
             "fold": artifact.fold.fold,
             "releaseStatus": "UNAVAILABLE",
@@ -434,6 +435,7 @@ def run_action_value_walk_forward(
                 "calibration": {
                     "method": config.calibration_method,
                     "selectionThreshold": calibration.selection_threshold,
+                    "dailySelectionLimit": calibration.daily_selection_limit,
                     "conformalCorrection": calibration.conformal_correction,
                 },
                 "evaluation": evaluation,
