@@ -21,6 +21,7 @@ jobs:
           mkdir -p audit-output
           python3 <<'PY'
           import hashlib
+          import gzip
           import json
           import os
           import time
@@ -78,7 +79,10 @@ jobs:
                           method="POST",
                       )
                       with urllib.request.urlopen(request, timeout=40) as response:
-                          payload = json.loads(response.read())
+                          raw = response.read()
+                          if response.headers.get("Content-Encoding") == "gzip":
+                              raw = gzip.decompress(raw)
+                          payload = json.loads(raw.decode("utf-8"))
                       if payload.get("code") != 0:
                           raise RuntimeError(f"API_CODE_{payload.get('code')}")
                       data = payload.get("data") or {}
