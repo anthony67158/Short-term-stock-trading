@@ -95,6 +95,8 @@ jobs:
                       code = (
                           f"HTTP_{error.code}"
                           if isinstance(error, urllib.error.HTTPError)
+                          else str(error)
+                          if str(error).startswith("API_CODE_")
                           else type(error).__name__
                       )
                       result["probes"].append({
