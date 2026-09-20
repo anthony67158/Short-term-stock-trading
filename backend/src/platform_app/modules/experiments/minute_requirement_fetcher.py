@@ -3,6 +3,7 @@
 import sqlite3
 from collections import defaultdict
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from platform_app.adapters.market_tushare import (
     MINUTE_FIELDS,
@@ -19,6 +20,12 @@ from platform_app.modules.experiments.minute_archive_importer import (
 )
 
 SOURCE_KIND = "TUSHARE_API_STK_MINS_V1"
+SOURCE_KIND_BY_HOST = {
+    "api.tushare.pro": f"{SOURCE_KIND}:OFFICIAL",
+    "ts.gyzcloud.top": f"{SOURCE_KIND}:GYZ_PRIMARY",
+    "ts2.gyzcloud.top": f"{SOURCE_KIND}:GYZ_SECONDARY",
+    "tx.xiaodefa.top": f"{SOURCE_KIND}:XIAODEFA",
+}
 UPSTREAM_ROW_LIMIT = 8000
 
 
@@ -29,6 +36,11 @@ class MinuteRequirementFetcher:
         self.client = client
         self.dataset = dataset
         self.max_sessions = max_sessions
+        endpoint = getattr(client, "endpoint", "")
+        self.source_kind = SOURCE_KIND_BY_HOST.get(
+            urlsplit(endpoint).hostname,
+            SOURCE_KIND,
+        )
         uri = f"{dataset.market_database_path.resolve().as_uri()}?mode=ro&immutable=1"
         self.market = sqlite3.connect(uri, uri=True)
         self.market.row_factory = sqlite3.Row
@@ -205,7 +217,7 @@ class MinuteRequirementFetcher:
                         self.dataset,
                         instrument_id=instrument_id,
                         trade_date=trade_date,
-                        source_kind=SOURCE_KIND,
+                        source_kind=self.source_kind,
                         source_asset_sha256=request_hash,
                         reason=str(exc),
                         attempted_at=attempted_at,
@@ -239,7 +251,7 @@ class MinuteRequirementFetcher:
                         instrument_id=instrument_id,
                         trade_date=trade_date,
                         rows=rows,
-                        source_kind=SOURCE_KIND,
+                        source_kind=self.source_kind,
                         source_asset_sha256=response_hash,
                         attempted_at=attempted_at,
                     )
@@ -248,7 +260,7 @@ class MinuteRequirementFetcher:
                         self.dataset,
                         instrument_id=instrument_id,
                         trade_date=trade_date,
-                        source_kind=SOURCE_KIND,
+                        source_kind=self.source_kind,
                         source_asset_sha256=response_hash,
                         reason=str(exc),
                         attempted_at=attempted_at,

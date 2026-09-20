@@ -778,6 +778,36 @@ def test_fetcher_records_upstream_failure_and_can_resume(tmp_path):
         )
 
 
+def test_fetcher_records_compatible_endpoints_as_independent_sources(tmp_path):
+    market_root, dates = _sealed_market(tmp_path)
+    primary = _MinuteClient([])
+    primary.endpoint = "https://ts.gyzcloud.top/api"
+    secondary = _MinuteClient([])
+    secondary.endpoint = "https://ts2.gyzcloud.top/api"
+    with EpisodeDataset(
+        tmp_path / "episodes",
+        dataset_id="minute-requirement-episodes",
+        market_dataset_root=market_root,
+        policy=SHORT_HORIZON_POLICY,
+    ) as dataset:
+        _write_candidate(dataset, dates[0], dates[1])
+        with MinuteRequirementBuilder(dataset) as builder:
+            builder.build_partition(dates[0])
+        with MinuteRequirementFetcher(primary, dataset) as fetcher:
+            list(fetcher.fetch_pending(dates[1], dates[2]))
+        with MinuteRequirementFetcher(secondary, dataset) as fetcher:
+            list(fetcher.fetch_pending(dates[1], dates[2]))
+
+        attempts = dataset.db.execute(
+            "SELECT source_kind, COUNT(*) FROM minute_ingestion_attempts "
+            "GROUP BY source_kind ORDER BY source_kind"
+        ).fetchall()
+        assert [tuple(row) for row in attempts] == [
+            ("TUSHARE_API_STK_MINS_V1:GYZ_PRIMARY", 2),
+            ("TUSHARE_API_STK_MINS_V1:GYZ_SECONDARY", 2),
+        ]
+
+
 def test_fetcher_isolates_invalid_ohlc_to_its_requirement_date(tmp_path):
     market_root, dates = _sealed_market(tmp_path)
     rows = _tushare_minute_rows([dates[1], dates[2]])
