@@ -20,6 +20,7 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8.3,<10", "hypothesis>=6.130", "ruff>=0.11"]
+ops = ["oss2>=2.19,<3"]
 research = [
     "catboost>=1.2,<2",
     "tabm==0.0.3",
