@@ -30,6 +30,7 @@ DATASET_SPECS = {
     "episode": DatasetSpec("episodes.sqlite3", "episode_dataset_metadata"),
     "label": DatasetSpec("labels.sqlite3", "label_dataset_metadata"),
     "ranking": DatasetSpec("ranking.sqlite3", "ranking_dataset_metadata"),
+    "factor": DatasetSpec("factors.sqlite3", "factor_dataset_metadata"),
 }
 
 

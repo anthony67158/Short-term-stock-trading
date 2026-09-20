@@ -36,6 +36,30 @@ def _market_dataset(root, dataset_id="action-value-smoke-market-v1"):
     return database
 
 
+def _factor_dataset(root, dataset_id="action-value-factors-v1"):
+    root.mkdir()
+    database = root / "factors.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.executescript(
+        """
+        CREATE TABLE factor_dataset_metadata (
+            singleton INTEGER PRIMARY KEY,
+            dataset_id TEXT NOT NULL,
+            schema_version TEXT NOT NULL
+        );
+        CREATE TABLE factor_rows (episode_id TEXT NOT NULL);
+        """
+    )
+    connection.execute(
+        "INSERT INTO factor_dataset_metadata VALUES (1, ?, ?)",
+        (dataset_id, "action-value-factor-dataset.v1"),
+    )
+    connection.execute("INSERT INTO factor_rows VALUES ('episode-1')")
+    connection.commit()
+    connection.close()
+    return database
+
+
 class FakeBucket:
     def __init__(self):
         self.objects = {}
@@ -234,3 +258,19 @@ def test_scope_kind_and_dataset_id_are_closed_inputs():
     ):
         with pytest.raises(store.RetrainingDatasetStoreError):
             store._validated_identity(**options)
+
+
+def test_factor_dataset_uses_the_same_immutable_checkpoint_contract(tmp_path):
+    root = tmp_path / "factor"
+    _factor_dataset(root)
+
+    report = store.audit_dataset(
+        root,
+        scope="full",
+        kind="factor",
+        dataset_id="action-value-factors-v1",
+    )
+
+    assert report["database"] == "factors.sqlite3"
+    assert report["datasetSchemaVersion"] == "action-value-factor-dataset.v1"
+    assert report["tables"]["factor_rows"] == 1
