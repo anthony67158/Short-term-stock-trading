@@ -157,6 +157,21 @@ def test_checkpoint_is_immutable_and_restore_revalidates_hash(tmp_path, monkeypa
         kind="market",
         dataset_id="action-value-smoke-market-v1",
     )
+
+    bucket = FakeBucket()
+    fake_oss2 = FakeOss2(bucket)
+    monkeypatch.setattr(store, "_bucket", lambda: bucket)
+    monkeypatch.setitem(sys.modules, "oss2", fake_oss2)
+
+    unsealed = store.checkpoint_dataset(
+        source,
+        scope="smoke",
+        kind="market",
+        dataset_id="action-value-smoke-market-v1",
+    )
+    assert unsealed["checkpointStatus"] == "UPLOADED"
+    assert unsealed["manifestStatus"] == "ABSENT"
+
     (source / "manifest.json").write_text(
         json.dumps(
             {
@@ -166,28 +181,26 @@ def test_checkpoint_is_immutable_and_restore_revalidates_hash(tmp_path, monkeypa
             }
         )
     )
-
-    bucket = FakeBucket()
-    fake_oss2 = FakeOss2(bucket)
-    monkeypatch.setattr(store, "_bucket", lambda: bucket)
-    monkeypatch.setitem(sys.modules, "oss2", fake_oss2)
-
-    first = store.checkpoint_dataset(
+    sealed = store.checkpoint_dataset(
         source,
         scope="smoke",
         kind="market",
         dataset_id="action-value-smoke-market-v1",
     )
-    second = store.checkpoint_dataset(
+    repeated = store.checkpoint_dataset(
         source,
         scope="smoke",
         kind="market",
         dataset_id="action-value-smoke-market-v1",
     )
-    assert first["checkpointStatus"] == "UPLOADED"
-    assert second["checkpointStatus"] == "EXISTS"
-    assert second["manifestStatus"] == "EXISTS"
-    assert second["auditStatus"] == "EXISTS"
+    assert sealed["checkpointStatus"] == "EXISTS"
+    assert sealed["manifestStatus"] == "UPLOADED"
+    assert sealed["auditStatus"] == "UPLOADED"
+    assert sealed["reportSha256"] != unsealed["reportSha256"]
+    assert repeated["checkpointStatus"] == "EXISTS"
+    assert repeated["manifestStatus"] == "EXISTS"
+    assert repeated["auditStatus"] == "EXISTS"
+    assert sum("/audits/" in key for key in bucket.objects) == 2
 
     restored_root = tmp_path / "restored"
     restored = store.restore_dataset(
@@ -197,7 +210,7 @@ def test_checkpoint_is_immutable_and_restore_revalidates_hash(tmp_path, monkeypa
         dataset_id="action-value-smoke-market-v1",
     )
     assert restored["status"] == "RESTORED"
-    assert restored["databaseSha256"] == first["databaseSha256"]
+    assert restored["databaseSha256"] == sealed["databaseSha256"]
     assert (restored_root / "manifest.json").is_file()
 
     checkpoint_key = next(

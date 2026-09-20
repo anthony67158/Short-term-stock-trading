@@ -224,7 +224,7 @@ def checkpoint_dataset(root: Path, *, scope: str, kind: str, dataset_id: str) ->
     ).encode() + b"\n"
     audit_status = _upload_bytes(
         bucket,
-        f"{prefix}/audits/{database_hash}.json",
+        f"{prefix}/audits/{database_hash}/{report['reportSha256']}.json",
         report_payload,
     )
     return {
