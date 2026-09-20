@@ -1,19 +1,19 @@
-name: action-value-data-smoke
+name: action-value-market-full
 
 on:
   workflow_dispatch: {}
 
 concurrency:
-  group: action-value-data-smoke
+  group: action-value-market-full
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  market-smoke:
+  market-full:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 300
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       PIP_DEFAULT_TIMEOUT: "90"
@@ -25,9 +25,9 @@ jobs:
       OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
       OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
       DATA_ROOT: /mnt/action-value-data
-      DATASET_ID: action-value-smoke-market-202506-v1
-      START_DATE: "20250603"
-      END_DATE: "20250630"
+      DATASET_ID: action-value-market-20240102-20260918-v1
+      START_DATE: "20240102"
+      END_DATE: "20260918"
     steps:
       - uses: actions/checkout@v6
 
@@ -57,7 +57,7 @@ jobs:
             src/platform_app/adapters/market_tushare.py \
             src/platform_app/modules/experiments/retraining_dataset_store.py
 
-      - name: Restore latest immutable smoke checkpoint
+      - name: Restore latest immutable full checkpoint
         working-directory: backend
         run: |
           sudo mkdir -p "$DATA_ROOT"
@@ -65,12 +65,12 @@ jobs:
           uv run --group ops python -m \
             platform_app.modules.experiments.retraining_dataset_store restore \
             --root "$DATA_ROOT/market" \
-            --scope smoke \
+            --scope full \
             --kind market \
             --dataset-id "$DATASET_ID" \
             --output "$RUNNER_TEMP/restore-report.json"
 
-      - name: Build and seal twenty-day market smoke dataset
+      - name: Build and seal full market dataset
         working-directory: backend
         run: |
           set -Eeuo pipefail
@@ -78,7 +78,7 @@ jobs:
             uv run --group ops python -m \
               platform_app.modules.experiments.retraining_dataset_store checkpoint \
               --root "$DATA_ROOT/market" \
-              --scope smoke \
+              --scope full \
               --kind market \
               --dataset-id "$DATASET_ID" \
               --output "$RUNNER_TEMP/checkpoint-report.json"
@@ -114,13 +114,27 @@ jobs:
             --end-date "$END_DATE"
           checkpoint
 
-          uv run platform-cli build-market-dataset \
-            --dataset-root "$DATA_ROOT/market" \
-            --dataset-id "$DATASET_ID" \
-            --stage daily \
-            --start-date "$START_DATE" \
-            --end-date "$END_DATE"
-          checkpoint
+          while read -r quarter_start quarter_end; do
+            uv run platform-cli build-market-dataset \
+              --dataset-root "$DATA_ROOT/market" \
+              --dataset-id "$DATASET_ID" \
+              --stage daily \
+              --start-date "$quarter_start" \
+              --end-date "$quarter_end"
+            checkpoint
+          done <<'QUARTERS'
+          20240102 20240331
+          20240401 20240630
+          20240701 20240930
+          20241001 20241231
+          20250101 20250331
+          20250401 20250630
+          20250701 20250930
+          20251001 20251231
+          20260101 20260331
+          20260401 20260630
+          20260701 20260918
+          QUARTERS
 
           uv run platform-cli build-market-dataset \
             --dataset-root "$DATA_ROOT/market" \
@@ -137,7 +151,7 @@ jobs:
           checkpoint
           trap - EXIT
 
-      - name: Audit sealed market smoke dataset
+      - name: Audit sealed full market dataset
         working-directory: backend
         run: |
           uv run platform-cli audit-market-dataset \
@@ -146,16 +160,33 @@ jobs:
           uv run --group ops python -m \
             platform_app.modules.experiments.retraining_dataset_store audit \
             --root "$DATA_ROOT/market" \
-            --scope smoke \
+            --scope full \
             --kind market \
             --dataset-id "$DATASET_ID" \
             --output "$RUNNER_TEMP/final-report.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Upload smoke diagnostics
+          report = json.loads(
+              (Path(os.environ["RUNNER_TEMP"]) / "market-audit.json").read_text()
+          )
+          if not report["passed"]:
+              raise SystemExit("MARKET_AUDIT_FAILED")
+          if report["range"]["openDates"] < 600:
+              raise SystemExit("MARKET_OPEN_DATE_COVERAGE_INSUFFICIENT")
+          if report["totals"]["dailyBars"] < 3_000_000:
+              raise SystemExit("MARKET_DAILY_BAR_COVERAGE_INSUFFICIENT")
+          if set(report["boards"]) != {"MAIN", "CHINEXT", "STAR", "BEIJING"}:
+              raise SystemExit("MARKET_BOARD_COVERAGE_INCOMPLETE")
+          PY
+
+      - name: Upload full market diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: action-value-market-smoke-${{ github.run_id }}
+          name: action-value-market-full-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/restore-report.json
             ${{ runner.temp }}/checkpoint-report.json
