@@ -1,8 +1,9 @@
 """Shared training-data contract for fee-after execution action value models."""
 
-from collections import Counter, defaultdict
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+import math
 from pathlib import Path
 from typing import Iterable, Mapping
 
@@ -13,11 +14,27 @@ class ActionValueTrainingError(ValueError):
     pass
 
 
-FEATURE_SETS = ("technical", "factor", "fusion")
+FEATURE_SETS = (
+    "technical",
+    "factor",
+    "fusion",
+    "technical_history",
+    "fusion_history",
+)
 SCENARIO_FEATURE_SUFFIX = (
     "logTargetNotionalCny",
     "logTargetShares",
     "logTargetToMedianAmount",
+)
+HISTORICAL_EXECUTION_FEATURE_NAMES = (
+    "executionHistoryCount",
+    "historicalAnyFillRate",
+    "historicalFillFraction",
+    "historicalFullFillRate",
+    "historicalWinRate",
+    "historicalStopRate",
+    "historicalRequestedReturnMean",
+    "executionHistoryMissing",
 )
 
 
@@ -215,7 +232,7 @@ def with_multifactor_features(
     factor_feature_names: Iterable[str],
     feature_set: str,
 ) -> ActionValueTrainingData:
-    if feature_set not in FEATURE_SETS:
+    if feature_set not in {"technical", "factor", "fusion"}:
         raise ActionValueTrainingError("ACTION_VALUE_FEATURE_SET_INVALID")
     if feature_set == "technical":
         return data
@@ -264,6 +281,160 @@ def with_multifactor_features(
     )
 
 
+def historical_execution_feature_matrix(
+    rows: Iterable[Mapping],
+    *,
+    maturity_dates: Mapping[str, str],
+    window: int = 20,
+) -> np.ndarray:
+    rows = list(rows)
+    if window <= 0:
+        raise ActionValueTrainingError(
+            "ACTION_VALUE_HISTORY_WINDOW_INVALID"
+        )
+    by_episode: dict[str, list[Mapping]] = defaultdict(list)
+    indexes_by_date: dict[int, list[int]] = defaultdict(list)
+    for index, row in enumerate(rows):
+        episode = str(row["episode_id"])
+        by_episode[episode].append(row)
+        indexes_by_date[int(row["decision_date"])].append(index)
+    if set(by_episode) != set(maturity_dates):
+        raise ActionValueTrainingError(
+            "ACTION_VALUE_HISTORY_MATURITY_COVERAGE_INVALID"
+        )
+
+    events = []
+    for episode, episode_rows in by_episode.items():
+        first = episode_rows[0]
+        conditional = [
+            row for row in episode_rows
+            if row["net_return_given_fill"] is not None
+        ]
+        events.append(
+            (
+                int(maturity_dates[episode]),
+                int(first["decision_date"]),
+                episode,
+                str(first["instrument_id"]),
+                (
+                    float(np.mean([
+                        int(row["p_fill_label"]) for row in episode_rows
+                    ])),
+                    float(np.mean([
+                        float(row["fill_ratio"]) for row in episode_rows
+                    ])),
+                    float(np.mean([
+                        int(row["p_full_fill_label"]) for row in episode_rows
+                    ])),
+                    (
+                        float(np.mean([
+                            int(row["p_win_given_fill_label"])
+                            for row in conditional
+                        ]))
+                        if conditional
+                        else None
+                    ),
+                    (
+                        float(np.mean([
+                            int(row["stop_hazard_label"])
+                            for row in conditional
+                        ]))
+                        if conditional
+                        else None
+                    ),
+                    float(np.mean([
+                        requested_notional_return(row)
+                        for row in episode_rows
+                    ])),
+                ),
+            )
+        )
+    events.sort(key=lambda item: (item[0], item[1], item[2]))
+    history: dict[str, deque] = defaultdict(lambda: deque(maxlen=window))
+    features = np.empty(
+        (len(rows), len(HISTORICAL_EXECUTION_FEATURE_NAMES)),
+        dtype=np.float32,
+    )
+    event_index = 0
+    for decision_date in sorted(indexes_by_date):
+        while (
+            event_index < len(events)
+            and events[event_index][0] < decision_date
+        ):
+            _maturity, _decision, _episode, instrument, summary = events[
+                event_index
+            ]
+            history[instrument].append(summary)
+            event_index += 1
+        for row_index in indexes_by_date[decision_date]:
+            instrument_history = list(
+                history[str(rows[row_index]["instrument_id"])]
+            )
+            if not instrument_history:
+                features[row_index] = (0, 0.5, 0.5, 0.5, 0.5, 0.5, 0, 1)
+                continue
+
+            def average(position, default):
+                values = [
+                    item[position]
+                    for item in instrument_history
+                    if item[position] is not None
+                ]
+                return float(np.mean(values)) if values else default
+
+            features[row_index] = (
+                min(
+                    math.log1p(len(instrument_history)) / math.log1p(window),
+                    1,
+                ),
+                average(0, 0.5),
+                average(1, 0.5),
+                average(2, 0.5),
+                average(3, 0.5),
+                average(4, 0.5),
+                average(5, 0),
+                0,
+            )
+    if not np.all(np.isfinite(features)):
+        raise ActionValueTrainingError(
+            "ACTION_VALUE_HISTORY_FEATURE_NON_FINITE"
+        )
+    return features
+
+
+def with_historical_execution_features(
+    data: ActionValueTrainingData,
+    history_features,
+) -> ActionValueTrainingData:
+    values = np.asarray(history_features, dtype=np.float32)
+    if (
+        values.shape
+        != (len(data.features), len(HISTORICAL_EXECUTION_FEATURE_NAMES))
+        or not np.all(np.isfinite(values))
+        or data.feature_names[-len(SCENARIO_FEATURE_SUFFIX) :]
+        != SCENARIO_FEATURE_SUFFIX
+    ):
+        raise ActionValueTrainingError(
+            "ACTION_VALUE_HISTORY_FEATURE_CONTRACT_INVALID"
+        )
+    features = np.column_stack(
+        (
+            data.features[:, : -len(SCENARIO_FEATURE_SUFFIX)],
+            values,
+            data.features[:, -len(SCENARIO_FEATURE_SUFFIX) :],
+        )
+    )
+    return replace(
+        data,
+        features=np.asarray(features, dtype=np.float32),
+        feature_names=(
+            *data.feature_names[: -len(SCENARIO_FEATURE_SUFFIX)],
+            *HISTORICAL_EXECUTION_FEATURE_NAMES,
+            *SCENARIO_FEATURE_SUFFIX,
+        ),
+    )
+
+
 def load_enriched_action_value_training_data(
     *,
     episode_dataset_root: Path,
@@ -291,7 +462,7 @@ def load_enriched_action_value_training_data(
     ) as database:
         database.row_factory = sqlite3.Row
         rows = database.execute(
-            "SELECT decision_date,episode_id,fill_ratio,p_fill_label,"
+            "SELECT decision_date,episode_id,instrument_id,fill_ratio,p_fill_label,"
             "p_full_fill_label,p_win_given_fill_label,net_return_given_fill,"
             "stop_hazard_label,entry_price,exit_price,filled_shares,"
             "buy_fees_cny,sell_fees_cny,target_notional_cny "
@@ -305,7 +476,7 @@ def load_enriched_action_value_training_data(
         boards=quant_data.scenario_boards,
         rows=rows,
     )
-    if feature_set != "technical":
+    if feature_set in {"factor", "fusion", "fusion_history"}:
         if factor_dataset_root is None:
             raise ActionValueTrainingError(
                 "ACTION_VALUE_FACTOR_DATASET_REQUIRED"
@@ -331,7 +502,9 @@ def load_enriched_action_value_training_data(
             training,
             factor_vectors=factor_vectors,
             factor_feature_names=FEATURE_NAMES,
-            feature_set=feature_set,
+            feature_set=(
+                "factor" if feature_set == "factor" else "fusion"
+            ),
         )
         lineage = {
             **lineage,
@@ -339,5 +512,36 @@ def load_enriched_action_value_training_data(
         }
     elif feature_set not in FEATURE_SETS:
         raise ActionValueTrainingError("ACTION_VALUE_FEATURE_SET_INVALID")
+    if feature_set in {"technical_history", "fusion_history"}:
+        _, episode_path = _verified_database(
+            episode_dataset_root,
+            "episode-dataset.v4",
+        )
+        with sqlite3.connect(
+            f"{episode_path.resolve().as_uri()}?mode=ro&immutable=1",
+            uri=True,
+        ) as episode_database:
+            labeled_episodes = {
+                str(row["episode_id"])
+                for row in rows
+            }
+            maturity_dates = {
+                row[0]: row[1]
+                for row in episode_database.execute(
+                    "SELECT l.episode_id,MAX(l.trade_date) "
+                    "FROM episode_minute_requirements l "
+                    "JOIN candidate_episodes e "
+                    "ON e.episode_id=l.episode_id "
+                    "GROUP BY l.episode_id"
+                )
+                if row[0] in labeled_episodes
+            }
+        training = with_historical_execution_features(
+            training,
+            historical_execution_feature_matrix(
+                rows,
+                maturity_dates=maturity_dates,
+            ),
+        )
     lineage = {**lineage, "featureSet": feature_set}
     return training, lineage

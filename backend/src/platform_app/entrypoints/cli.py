@@ -122,7 +122,13 @@ def main():
     parser.add_argument("--max-iterations", type=positive_int, default=120)
     parser.add_argument(
         "--feature-set",
-        choices=["technical", "factor", "fusion"],
+        choices=[
+            "technical",
+            "factor",
+            "fusion",
+            "technical_history",
+            "fusion_history",
+        ],
         default="technical",
     )
     parser.add_argument("--minimum-matured-samples", type=positive_int, default=2000)
@@ -864,7 +870,9 @@ def main():
             output_root = external_dataset_root(args.output)
         except ValueError as exc:
             parser.error(str(exc))
-        if args.feature_set != "technical" and factor_root is None:
+        if args.feature_set in {"factor", "fusion", "fusion_history"} and (
+            factor_root is None
+        ):
             parser.error("factor-root is required for factor and fusion")
         print(
             json.dumps(

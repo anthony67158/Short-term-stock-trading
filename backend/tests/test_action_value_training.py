@@ -4,10 +4,13 @@ import numpy as np
 import pytest
 
 from platform_app.modules.experiments.action_value_training import (
+    HISTORICAL_EXECUTION_FEATURE_NAMES,
     ActionValueTrainingError,
     build_action_value_training_data,
+    historical_execution_feature_matrix,
     requested_notional_return,
     scenario_weights,
+    with_historical_execution_features,
     with_multifactor_features,
 )
 from platform_app.modules.experiments.multifactor_features import FACTOR_FAMILIES
@@ -18,6 +21,7 @@ def _rows():
         {
             "decision_date": 20260105,
             "episode_id": "a",
+            "instrument_id": "SH.600001",
             "fill_ratio": "0.5",
             "p_fill_label": 1,
             "p_full_fill_label": 0,
@@ -34,6 +38,7 @@ def _rows():
         {
             "decision_date": 20260105,
             "episode_id": "a",
+            "instrument_id": "SH.600001",
             "fill_ratio": "0",
             "p_fill_label": 0,
             "p_full_fill_label": 0,
@@ -50,6 +55,7 @@ def _rows():
         {
             "decision_date": 20260105,
             "episode_id": "b",
+            "instrument_id": "SH.600001",
             "fill_ratio": "1",
             "p_fill_label": 1,
             "p_full_fill_label": 1,
@@ -66,6 +72,7 @@ def _rows():
         {
             "decision_date": 20260106,
             "episode_id": "c",
+            "instrument_id": "SH.600001",
             "fill_ratio": "0",
             "p_fill_label": 0,
             "p_full_fill_label": 0,
@@ -268,4 +275,54 @@ def test_multifactor_feature_sets_reject_invalid_contracts(
             factor_vectors=vectors,
             factor_feature_names=tuple(f"factor-{index}" for index in range(12)),
             feature_set=feature_set,
+        )
+
+
+def test_historical_execution_features_only_use_matured_prior_episodes():
+    rows = deepcopy(_rows())
+    rows[0]["decision_date"] = 20260101
+    rows[1]["decision_date"] = 20260101
+    rows[2]["decision_date"] = 20260105
+    rows[3]["decision_date"] = 20260106
+
+    features = historical_execution_feature_matrix(
+        rows,
+        maturity_dates={
+            "a": "20260105",
+            "b": "20260110",
+            "c": "20260111",
+        },
+    )
+
+    assert features.shape == (4, len(HISTORICAL_EXECUTION_FEATURE_NAMES))
+    assert features[0, -1] == 1
+    assert features[1, -1] == 1
+    assert features[2, -1] == 1
+    assert features[3, -1] == 0
+    assert features[3, 1] == pytest.approx(0.5)
+    assert features[3, 2] == pytest.approx(0.25)
+    assert features[3, 4] == pytest.approx(1)
+    assert features[3, 5] == pytest.approx(0)
+    assert features[3, 6] == pytest.approx(0.02225)
+
+    enriched = with_historical_execution_features(
+        _technical_scenario_data(),
+        features,
+    )
+    assert enriched.features.shape == (4, 13)
+    assert enriched.feature_names[-3:] == (
+        "logTargetNotionalCny",
+        "logTargetShares",
+        "logTargetToMedianAmount",
+    )
+
+
+def test_historical_execution_features_require_complete_maturity_map():
+    with pytest.raises(
+        ActionValueTrainingError,
+        match="ACTION_VALUE_HISTORY_MATURITY_COVERAGE_INVALID",
+    ):
+        historical_execution_feature_matrix(
+            _rows(),
+            maturity_dates={"a": "20260110"},
         )
