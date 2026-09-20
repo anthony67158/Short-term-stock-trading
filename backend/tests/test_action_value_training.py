@@ -8,7 +8,9 @@ from platform_app.modules.experiments.action_value_training import (
     build_action_value_training_data,
     requested_notional_return,
     scenario_weights,
+    with_multifactor_features,
 )
+from platform_app.modules.experiments.multifactor_features import FACTOR_FAMILIES
 
 
 def _rows():
@@ -162,3 +164,108 @@ def test_action_value_contract_rejects_inconsistent_no_fill_label():
         match="ACTION_VALUE_HURDLE_LABEL_INVALID",
     ):
         _build(rows=rows)
+
+
+def _technical_scenario_data():
+    rows = _rows()
+    return build_action_value_training_data(
+        features=np.arange(
+            len(rows) * 5,
+            dtype=np.float32,
+        ).reshape(len(rows), 5),
+        feature_names=(
+            "technicalA",
+            "technicalB",
+            "logTargetNotionalCny",
+            "logTargetShares",
+            "logTargetToMedianAmount",
+        ),
+        dates=np.asarray(
+            [row["decision_date"] for row in rows],
+            dtype=np.int32,
+        ),
+        boards=np.asarray([0, 0, 1, 2], dtype=np.int8),
+        rows=rows,
+    )
+
+
+def _factor_vectors():
+    return {
+        episode: tuple(
+            float(index + offset)
+            for index in range(12)
+        )
+        for offset, episode in enumerate(("a", "b", "c"))
+    }
+
+
+def test_multifactor_feature_sets_preserve_episode_and_scenario_alignment():
+    data = _technical_scenario_data()
+    names = tuple(
+        [f"factorScore_{family}" for family in FACTOR_FAMILIES]
+        + [f"factorMissing_{family}" for family in FACTOR_FAMILIES]
+    )
+
+    factor = with_multifactor_features(
+        data,
+        factor_vectors=_factor_vectors(),
+        factor_feature_names=names,
+        feature_set="factor",
+    )
+    fusion = with_multifactor_features(
+        data,
+        factor_vectors=_factor_vectors(),
+        factor_feature_names=names,
+        feature_set="fusion",
+    )
+
+    assert factor.features.shape == (4, 15)
+    assert fusion.features.shape == (4, 17)
+    assert factor.feature_names == (
+        *names,
+        "logTargetNotionalCny",
+        "logTargetShares",
+        "logTargetToMedianAmount",
+    )
+    assert fusion.feature_names[:2] == ("technicalA", "technicalB")
+    assert np.array_equal(factor.features[0, :12], factor.features[1, :12])
+    assert not np.array_equal(factor.features[0, -3:], factor.features[1, -3:])
+    assert np.array_equal(fusion.features[:, :2], data.features[:, :2])
+
+
+@pytest.mark.parametrize(
+    ("vectors", "feature_set", "error"),
+    [
+        (
+            {"a": (1,) * 12, "b": (1,) * 12},
+            "factor",
+            "ACTION_VALUE_FACTOR_COVERAGE_INCOMPLETE",
+        ),
+        (
+            {
+                "a": (1,) * 11,
+                "b": (1,) * 11,
+                "c": (1,) * 11,
+            },
+            "fusion",
+            "ACTION_VALUE_FACTOR_FEATURE_CONTRACT_INVALID",
+        ),
+        (
+            _factor_vectors(),
+            "unknown",
+            "ACTION_VALUE_FEATURE_SET_INVALID",
+        ),
+    ],
+)
+def test_multifactor_feature_sets_reject_invalid_contracts(
+    vectors,
+    feature_set,
+    error,
+):
+    with pytest.raises(ActionValueTrainingError, match=error):
+        with_multifactor_features(
+            _technical_scenario_data(),
+            factor_vectors=vectors,
+            factor_feature_names=tuple(f"factor-{index}" for index in range(12)),
+            feature_set=feature_set,
+        )

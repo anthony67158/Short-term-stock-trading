@@ -1,7 +1,7 @@
 """Shared training-data contract for fee-after execution action value models."""
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Iterable, Mapping
@@ -11,6 +11,14 @@ import numpy as np
 
 class ActionValueTrainingError(ValueError):
     pass
+
+
+FEATURE_SETS = ("technical", "factor", "fusion")
+SCENARIO_FEATURE_SUFFIX = (
+    "logTargetNotionalCny",
+    "logTargetShares",
+    "logTargetToMedianAmount",
+)
 
 
 @dataclass(frozen=True)
@@ -200,11 +208,69 @@ def build_action_value_training_data(
     )
 
 
+def with_multifactor_features(
+    data: ActionValueTrainingData,
+    *,
+    factor_vectors: Mapping[str, Iterable[float]],
+    factor_feature_names: Iterable[str],
+    feature_set: str,
+) -> ActionValueTrainingData:
+    if feature_set not in FEATURE_SETS:
+        raise ActionValueTrainingError("ACTION_VALUE_FEATURE_SET_INVALID")
+    if feature_set == "technical":
+        return data
+    factor_feature_names = tuple(factor_feature_names)
+    if (
+        not factor_feature_names
+        or len(set(factor_feature_names)) != len(factor_feature_names)
+        or data.feature_names[-len(SCENARIO_FEATURE_SUFFIX) :]
+        != SCENARIO_FEATURE_SUFFIX
+    ):
+        raise ActionValueTrainingError(
+            "ACTION_VALUE_FACTOR_FEATURE_CONTRACT_INVALID"
+        )
+    try:
+        factors = np.asarray(
+            [factor_vectors[episode] for episode in data.episodes],
+            dtype=np.float32,
+        )
+    except KeyError as exc:
+        raise ActionValueTrainingError(
+            "ACTION_VALUE_FACTOR_COVERAGE_INCOMPLETE"
+        ) from exc
+    if (
+        factors.shape != (len(data.features), len(factor_feature_names))
+        or not np.all(np.isfinite(factors))
+    ):
+        raise ActionValueTrainingError(
+            "ACTION_VALUE_FACTOR_FEATURE_CONTRACT_INVALID"
+        )
+    scenario = data.features[:, -len(SCENARIO_FEATURE_SUFFIX) :]
+    if feature_set == "factor":
+        features = np.column_stack((factors, scenario))
+        feature_names = (*factor_feature_names, *SCENARIO_FEATURE_SUFFIX)
+    else:
+        technical = data.features[:, : -len(SCENARIO_FEATURE_SUFFIX)]
+        features = np.column_stack((technical, factors, scenario))
+        feature_names = (
+            *data.feature_names[: -len(SCENARIO_FEATURE_SUFFIX)],
+            *factor_feature_names,
+            *SCENARIO_FEATURE_SUFFIX,
+        )
+    return replace(
+        data,
+        features=np.asarray(features, dtype=np.float32),
+        feature_names=feature_names,
+    )
+
+
 def load_enriched_action_value_training_data(
     *,
     episode_dataset_root: Path,
     label_dataset_root: Path,
     ranking_dataset_root: Path,
+    factor_dataset_root: Path | None = None,
+    feature_set: str = "technical",
 ) -> tuple[ActionValueTrainingData, dict]:
     import sqlite3
 
@@ -239,4 +305,39 @@ def load_enriched_action_value_training_data(
         boards=quant_data.scenario_boards,
         rows=rows,
     )
+    if feature_set != "technical":
+        if factor_dataset_root is None:
+            raise ActionValueTrainingError(
+                "ACTION_VALUE_FACTOR_DATASET_REQUIRED"
+            )
+        from platform_app.modules.experiments.action_value_factor_dataset import (
+            FEATURE_NAMES,
+            load_factor_vectors,
+        )
+
+        factor_vectors, factor_manifest = load_factor_vectors(
+            factor_dataset_root
+        )
+        if (
+            factor_manifest["episodeDatabaseSha256"]
+            != lineage["episodeManifest"]["databaseSha256"]
+            or factor_manifest["rankingDatabaseSha256"]
+            != lineage["rankingManifest"]["databaseSha256"]
+        ):
+            raise ActionValueTrainingError(
+                "ACTION_VALUE_FACTOR_LINEAGE_MISMATCH"
+            )
+        training = with_multifactor_features(
+            training,
+            factor_vectors=factor_vectors,
+            factor_feature_names=FEATURE_NAMES,
+            feature_set=feature_set,
+        )
+        lineage = {
+            **lineage,
+            "factorManifest": factor_manifest,
+        }
+    elif feature_set not in FEATURE_SETS:
+        raise ActionValueTrainingError("ACTION_VALUE_FEATURE_SET_INVALID")
+    lineage = {**lineage, "featureSet": feature_set}
     return training, lineage
