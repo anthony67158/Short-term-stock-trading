@@ -25,6 +25,7 @@ jobs:
       MARKET_ID: action-value-market-20240102-20260918-v1
       RANKING_ID: action-value-ranking-20240102-20260918-v1
       EPISODE_ID: action-value-episodes-20240401-20260911-v1
+      LABEL_ID: action-value-labels-20240401-20260911-v1
       FACTOR_ID: action-value-factors-20240401-20260911-v1
       FACTOR_SOURCE_RELEASE: action-value-factor-source-transfer-20260920
       FACTOR_SOURCE_ASSET: action-value-factor-source-v2.tar.gz.enc
@@ -66,7 +67,8 @@ jobs:
           for spec in \
             "market:$MARKET_ID" \
             "ranking:$RANKING_ID" \
-            "episode:$EPISODE_ID"
+            "episode:$EPISODE_ID" \
+            "label:$LABEL_ID"
           do
             kind="${spec%%:*}"
             dataset_id="${spec#*:}"
@@ -146,6 +148,7 @@ jobs:
             --dataset-id "$FACTOR_ID" \
             --source-root "$DATA_ROOT/factor-source" \
             --episode-root "$DATA_ROOT/episode" \
+            --label-root "$DATA_ROOT/label" \
             --ranking-root "$DATA_ROOT/ranking" \
             --market-root "$DATA_ROOT/market"
           uv run --group ops python -m \

@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS factor_dataset_metadata (
     source_archive_sha256 TEXT NOT NULL,
     episode_dataset_id TEXT NOT NULL,
     episode_database_sha256 TEXT NOT NULL,
+    label_dataset_id TEXT NOT NULL,
+    label_database_sha256 TEXT NOT NULL,
     ranking_dataset_id TEXT NOT NULL,
     ranking_database_sha256 TEXT NOT NULL,
     market_dataset_id TEXT NOT NULL,
@@ -289,6 +291,8 @@ def _verified_factor_manifest(root: Path) -> tuple[dict, Path]:
         "sourceArchiveSha256": metadata["source_archive_sha256"],
         "episodeDatasetId": metadata["episode_dataset_id"],
         "episodeDatabaseSha256": metadata["episode_database_sha256"],
+        "labelDatasetId": metadata["label_dataset_id"],
+        "labelDatabaseSha256": metadata["label_database_sha256"],
         "rankingDatasetId": metadata["ranking_dataset_id"],
         "rankingDatabaseSha256": metadata["ranking_database_sha256"],
         "marketDatasetId": metadata["market_dataset_id"],
@@ -354,6 +358,7 @@ class ActionValueFactorDataset:
         dataset_id: str,
         source_root: Path,
         episode_dataset_root: Path,
+        label_dataset_root: Path,
         ranking_dataset_root: Path,
         market_dataset_root: Path,
     ):
@@ -369,6 +374,11 @@ class ActionValueFactorDataset:
             schema_version="episode-dataset.v4",
             database_name="episodes.sqlite3",
         )
+        label, label_database = _verified_dataset(
+            label_dataset_root,
+            schema_version="label-dataset.v2",
+            database_name="labels.sqlite3",
+        )
         ranking, ranking_database = _verified_dataset(
             ranking_dataset_root,
             schema_version="ranking-dataset.v1",
@@ -380,6 +390,8 @@ class ActionValueFactorDataset:
             database_name="market.sqlite3",
         )
         if (
+            label.get("episodeDatabaseSha256") != episode["databaseSha256"]
+            or
             episode.get("marketDatabaseSha256") != market["databaseSha256"]
             or ranking.get("marketDatabaseSha256") != market["databaseSha256"]
         ):
@@ -387,13 +399,14 @@ class ActionValueFactorDataset:
                 "ACTION_VALUE_FACTOR_UPSTREAM_LINEAGE_MISMATCH"
             )
         self.episode = self._open_readonly(episode_database)
+        self.label = self._open_readonly(label_database)
         self.ranking = self._open_readonly(ranking_database)
         self.market = self._open_readonly(market_database)
         self.aliases = _canonical_aliases(self.market)
         self.decision_dates = [
             row["decision_date"]
-            for row in self.episode.execute(
-                "SELECT DISTINCT decision_date FROM candidate_episodes "
+            for row in self.label.execute(
+                "SELECT DISTINCT decision_date FROM episode_labels "
                 "ORDER BY decision_date"
             )
         ]
@@ -444,6 +457,8 @@ class ActionValueFactorDataset:
             source_audit["contentSha256"],
             episode["datasetId"],
             episode["databaseSha256"],
+            label["datasetId"],
+            label["databaseSha256"],
             ranking["datasetId"],
             ranking["databaseSha256"],
             market["datasetId"],
@@ -462,7 +477,8 @@ class ActionValueFactorDataset:
         self.db.executescript(SCHEMA)
         existing = self.db.execute(
             "SELECT dataset_id,schema_version,source_archive_sha256,"
-            "episode_dataset_id,episode_database_sha256,ranking_dataset_id,"
+            "episode_dataset_id,episode_database_sha256,"
+            "label_dataset_id,label_database_sha256,ranking_dataset_id,"
             "ranking_database_sha256,market_dataset_id,market_database_sha256,"
             "feature_schema_version,policy_sha256,policy_json "
             "FROM factor_dataset_metadata"
@@ -475,7 +491,7 @@ class ActionValueFactorDataset:
         if not existing:
             self.db.execute(
                 "INSERT INTO factor_dataset_metadata VALUES "
-                "(1,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "(1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (dataset_id, SCHEMA_VERSION, _now(), *identity[2:]),
             )
             self.db.commit()
@@ -496,7 +512,7 @@ class ActionValueFactorDataset:
         self.close()
 
     def close(self):
-        for connection in ("market", "ranking", "episode", "db"):
+        for connection in ("market", "ranking", "label", "episode", "db"):
             value = getattr(self, connection, None)
             if value is not None:
                 value.close()
@@ -553,8 +569,8 @@ class ActionValueFactorDataset:
             }
         episodes = {
             row["instrument_id"]: row["episode_id"]
-            for row in self.episode.execute(
-                "SELECT episode_id,instrument_id FROM candidate_episodes "
+            for row in self.label.execute(
+                "SELECT DISTINCT episode_id,instrument_id FROM episode_labels "
                 "WHERE decision_date=?",
                 (decision_date,),
             )
@@ -715,8 +731,8 @@ class ActionValueFactorDataset:
 
     def seal(self) -> dict:
         expected_partitions = len(self.decision_dates)
-        expected_rows = self.episode.execute(
-            "SELECT COUNT(*) FROM candidate_episodes"
+        expected_rows = self.label.execute(
+            "SELECT COUNT(DISTINCT episode_id) FROM episode_labels"
         ).fetchone()[0]
         totals = dict(
             self.db.execute(
@@ -775,6 +791,8 @@ class ActionValueFactorDataset:
             "sourceArchiveSha256": metadata["source_archive_sha256"],
             "episodeDatasetId": metadata["episode_dataset_id"],
             "episodeDatabaseSha256": metadata["episode_database_sha256"],
+            "labelDatasetId": metadata["label_dataset_id"],
+            "labelDatabaseSha256": metadata["label_database_sha256"],
             "rankingDatasetId": metadata["ranking_dataset_id"],
             "rankingDatabaseSha256": metadata["ranking_database_sha256"],
             "marketDatasetId": metadata["market_dataset_id"],
@@ -833,6 +851,7 @@ def main() -> None:
     dataset.add_argument("--dataset-id", required=True)
     dataset.add_argument("--source-root", type=Path, required=True)
     dataset.add_argument("--episode-root", type=Path, required=True)
+    dataset.add_argument("--label-root", type=Path, required=True)
     dataset.add_argument("--ranking-root", type=Path, required=True)
     dataset.add_argument("--market-root", type=Path, required=True)
     args = parser.parse_args()
@@ -859,6 +878,7 @@ def main() -> None:
             dataset_id=args.dataset_id,
             source_root=args.source_root,
             episode_dataset_root=args.episode_root,
+            label_dataset_root=args.label_root,
             ranking_dataset_root=args.ranking_root,
             market_dataset_root=args.market_root,
         ) as factor_dataset:

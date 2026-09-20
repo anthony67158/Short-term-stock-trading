@@ -191,6 +191,7 @@ jobs:
             --dataset-id "$FACTOR_ID" \
             --source-root "$DATA_ROOT/factor-source" \
             --episode-root "$DATA_ROOT/episode" \
+            --label-root "$DATA_ROOT/label" \
             --ranking-root "$DATA_ROOT/ranking" \
             --market-root "$DATA_ROOT/market"
           uv run --group ops python -m \

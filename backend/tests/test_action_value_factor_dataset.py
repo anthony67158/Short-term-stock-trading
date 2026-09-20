@@ -161,7 +161,52 @@ def _sealed_upstreams(tmp_path):
         database="episodes.sqlite3",
         marketDatabaseSha256=market["databaseSha256"],
     )
-    return market_root, ranking_root, episode_root, market, ranking, episode
+    label_root = tmp_path / "label"
+    label_root.mkdir()
+    with sqlite3.connect(label_root / "labels.sqlite3") as database:
+        database.executescript(
+            """
+            CREATE TABLE label_dataset_metadata (
+                singleton INTEGER PRIMARY KEY,
+                dataset_id TEXT NOT NULL,
+                schema_version TEXT NOT NULL
+            );
+            CREATE TABLE episode_labels (
+                episode_id TEXT NOT NULL,
+                decision_date TEXT NOT NULL,
+                instrument_id TEXT NOT NULL
+            );
+            """
+        )
+        database.execute(
+            "INSERT INTO label_dataset_metadata VALUES (1, ?, ?)",
+            ("labels-v1", "label-dataset.v2"),
+        )
+        database.executemany(
+            "INSERT INTO episode_labels VALUES (?,?,?)",
+            [
+                ("episode-1", DATES[0], "BJ.920001"),
+                ("episode-1", DATES[0], "BJ.920001"),
+                ("episode-2", DATES[1], "SH.600001"),
+            ],
+        )
+    label = _seal_manifest(
+        label_root,
+        dataset_id="labels-v1",
+        schema="label-dataset.v2",
+        database="labels.sqlite3",
+        episodeDatabaseSha256=episode["databaseSha256"],
+    )
+    return (
+        market_root,
+        ranking_root,
+        episode_root,
+        label_root,
+        market,
+        ranking,
+        episode,
+        label,
+    )
 
 
 class FakeClient:
@@ -252,7 +297,9 @@ def _source_archive(tmp_path):
 
 
 def test_factor_dataset_seals_full_episode_coverage_and_aliases(tmp_path):
-    market_root, ranking_root, episode_root, *_ = _sealed_upstreams(tmp_path)
+    market_root, ranking_root, episode_root, label_root, *_ = (
+        _sealed_upstreams(tmp_path)
+    )
     source_root = _source_archive(tmp_path)
     root = tmp_path / "factors"
     with ActionValueFactorDataset(
@@ -260,6 +307,7 @@ def test_factor_dataset_seals_full_episode_coverage_and_aliases(tmp_path):
         dataset_id="factors-v1",
         source_root=source_root,
         episode_dataset_root=episode_root,
+        label_dataset_root=label_root,
         ranking_dataset_root=ranking_root,
         market_dataset_root=market_root,
     ) as dataset:
@@ -289,7 +337,9 @@ def test_factor_dataset_seals_full_episode_coverage_and_aliases(tmp_path):
 
 
 def test_factor_dataset_rejects_source_date_coverage_drift(tmp_path):
-    market_root, ranking_root, episode_root, *_ = _sealed_upstreams(tmp_path)
+    market_root, ranking_root, episode_root, label_root, *_ = (
+        _sealed_upstreams(tmp_path)
+    )
     source_root = tmp_path / "source"
     build_multifactor_source_archive(
         client=FakeClient(),
@@ -307,19 +357,23 @@ def test_factor_dataset_rejects_source_date_coverage_drift(tmp_path):
             dataset_id="factors-v1",
             source_root=source_root,
             episode_dataset_root=episode_root,
+            label_dataset_root=label_root,
             ranking_dataset_root=ranking_root,
             market_dataset_root=market_root,
         )
 
 
 def test_factor_dataset_verification_rejects_manifest_drift(tmp_path):
-    market_root, ranking_root, episode_root, *_ = _sealed_upstreams(tmp_path)
+    market_root, ranking_root, episode_root, label_root, *_ = (
+        _sealed_upstreams(tmp_path)
+    )
     root = tmp_path / "factors"
     with ActionValueFactorDataset(
         root,
         dataset_id="factors-v1",
         source_root=_source_archive(tmp_path),
         episode_dataset_root=episode_root,
+        label_dataset_root=label_root,
         ranking_dataset_root=ranking_root,
         market_dataset_root=market_root,
     ) as dataset:
